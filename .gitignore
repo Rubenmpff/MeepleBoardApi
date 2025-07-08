@@ -1,0 +1,11 @@
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Builds
+bin/
+obj/
+
+# Configurações com chaves
+MeepleBoardApi/appsettings*.json
