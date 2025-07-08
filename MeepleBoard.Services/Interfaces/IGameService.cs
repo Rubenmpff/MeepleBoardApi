@@ -1,12 +1,20 @@
 using MeepleBoard.Services.DTOs;
+using MeepleBoard.Services.Mapping.Dtos;
 
 public interface IGameService
 {
     // ?? Leitura / Pesquisa
-    Task<IReadOnlyList<GameDto>> GetAllAsync(CancellationToken cancellationToken = default);
+    Task<PagedResponse<GameDto>> GetAllAsync(int pageIndex, int pageSize, CancellationToken ct = default);
     Task<GameDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<GameDto?> GetByNameAsync(string name, CancellationToken cancellationToken = default);
     Task<List<GameDto>> SearchBaseGamesWithFallbackAsync(string query, int offset = 0, int limit = 10, CancellationToken cancellationToken = default);
+
+    Task<List<GameSuggestionDto>> SearchBaseGameSuggestionsAsync(string query, int offset = 0, int limit = 10, CancellationToken cancellationToken = default);
+    Task<List<GameSuggestionDto>> SearchSuggestionsAsync(string query, int offset = 0, int limit = 10, CancellationToken ct = default);
+    Task<List<GameSuggestionDto>> SearchExpansionSuggestionsAsync(string query, int offset = 0, int limit = 10, CancellationToken cancellationToken = default);
+    Task<List<GameSuggestionDto>> GetExpansionSuggestionsForBaseAsync(Guid baseGameId, CancellationToken cancellationToken = default);
+
+
 
     // ?? Importações
     Task<GameDto?> GetOrImportByNameAsync(string name, CancellationToken cancellationToken = default);

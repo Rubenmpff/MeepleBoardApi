@@ -13,16 +13,12 @@ namespace MeepleBoardApi.Controllers
     public class GameController : ControllerBase
     {
         private readonly IGameService _gameService;
-        private readonly IGameRepository _gameRepository;
-        private readonly IBGGService _bggService;
         private readonly IMapper _mapper;
         private readonly ILogger<GameController> _logger;
 
-        public GameController(IGameService gameService, IGameRepository gameRepository, IBGGService bggService, IMapper mapper, ILogger<GameController> logger)
+        public GameController(IGameService gameService, IMapper mapper, ILogger<GameController> logger)
         {
             _gameService = gameService;
-            _gameRepository = gameRepository;
-            _bggService = bggService;
             _mapper = mapper;
             _logger = logger;
         }
@@ -35,21 +31,16 @@ namespace MeepleBoardApi.Controllers
         [ProducesResponseType(204)]
         public async Task<IActionResult> GetAll(int pageIndex = 0, int pageSize = 10, CancellationToken cancellationToken = default)
         {
-            var total = await _gameRepository.GetAllAsync(0, int.MaxValue, cancellationToken);
-            var games = await _gameRepository.GetAllAsync(pageIndex, pageSize, cancellationToken);
+            var result = await _gameService.GetAllAsync(pageIndex, pageSize, cancellationToken);
 
-            if (games == null || games.Count == 0)
+            if (result.Data == null || result.Data.Count == 0)
                 return NoContent();
 
-            var response = new PagedResponse<GameDto>(
-                _mapper.Map<IReadOnlyList<GameDto>>(games),
-                total.Count,
-                pageSize,
-                pageIndex
-            );
-
-            return Ok(response);
+            return Ok(result);
         }
+
+
+
 
         /// <summary>
         /// Busca um jogo localmente ou importa automaticamente do BGG se não existir.
@@ -68,6 +59,9 @@ namespace MeepleBoardApi.Controllers
                 : Ok(game);
         }
 
+
+
+
         [HttpPost("import/{bggId:int}")]
         public async Task<ActionResult<GameDto>> ImportByBggId(int bggId, CancellationToken cancellationToken)
         {
@@ -79,55 +73,23 @@ namespace MeepleBoardApi.Controllers
         }
 
 
+
+
+
+
         /// <summary>
         /// Sugestões de jogos base (mistura local + BGG, sem guardar na base).
         /// </summary>
         [HttpGet("base-search")]
         [ProducesResponseType(typeof(List<GameSuggestionDto>), 200)]
-        public async Task<IActionResult> SearchBaseGamesWithFallback(
-    [FromQuery] string query,
-    [FromQuery] int offset = 0,
-    [FromQuery] int limit = 10,
-    CancellationToken cancellationToken = default)
+        public async Task<IActionResult> SearchBaseGamesWithFallback([FromQuery] string query, [FromQuery] int offset = 0, [FromQuery] int limit = 10, CancellationToken cancellationToken = default)
         {
-            if (string.IsNullOrWhiteSpace(query))
-                return Ok(new List<GameSuggestionDto>());
-
-            // 1. Jogos locais
-            var localGames = await _gameRepository.SearchBaseGamesByNameAsync(query, offset, limit, cancellationToken);
-
-            var suggestions = localGames
-                .Where(g => g.BGGId.HasValue)
-                .Select(g => new GameSuggestionDto
-                {
-                    BggId = g.BGGId!.Value,
-                    Name = g.Name,
-                    YearPublished = g.YearPublished,
-                    ImageUrl = g.ImageUrl
-                })
-                .ToList();
-
-            // 2. Se não houver suficientes, busca ao BGG com offset ajustado
-            if (suggestions.Count < limit)
-            {
-                var bggOffset = offset + suggestions.Count;
-
-                var bggSuggestions = await _bggService.SearchGameSuggestionsAsync(
-                    query,
-                    offset: bggOffset,
-                    limit: limit - suggestions.Count,
-                    cancellationToken
-                );
-
-                var missing = bggSuggestions
-                    .Where(b => !b.IsExpansion && !suggestions.Any(s => s.BggId == b.BggId))
-                    .Take(limit - suggestions.Count);
-
-                suggestions.AddRange(missing);
-            }
-
+            var suggestions = await _gameService.SearchBaseGameSuggestionsAsync(query, offset, limit, cancellationToken);
             return Ok(suggestions);
         }
+
+
+
 
 
 
@@ -140,57 +102,19 @@ namespace MeepleBoardApi.Controllers
         [ProducesResponseType(204)]
         [ProducesResponseType(503)]
         public async Task<IActionResult> SearchSuggestions(
-        [FromQuery] string query,
-        [FromQuery] int offset = 0,
-        [FromQuery] int limit = 10,
-        CancellationToken ct = default)
+    [FromQuery] string query,
+    [FromQuery] int offset = 0,
+    [FromQuery] int limit = 10,
+    CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(query))
                 return Ok(Array.Empty<GameSuggestionDto>());
 
-            // 1. Jogos locais paginados
-            var local = await _gameRepository.SearchByNameAsync(query, offset, limit, ct);
-
-            var suggestions = local
-                .Where(g => g.BGGId.HasValue)
-                .Select(g => new GameSuggestionDto
-                {
-                    BggId = g.BGGId!.Value,
-                    Name = g.Name,
-                    YearPublished = g.YearPublished,
-                    ImageUrl = g.ImageUrl
-                })
-                .ToList();
-
-            // 2. Complementa com BGG se faltar
-            if (suggestions.Count < limit)
-            {
-                try
-                {
-                    var bgg = await _bggService.SearchGameSuggestionsAsync(
-                        query,
-                        offset: offset + suggestions.Count,
-                        limit: limit - suggestions.Count,
-                        ct);
-
-                    var extras = bgg
-                        .Where(b => !suggestions.Any(s => s.BggId == b.BggId))
-                        .Take(limit - suggestions.Count);
-
-                    suggestions.AddRange(extras);
-                }
-                catch (HttpRequestException ex)
-                {
-                    _logger.LogWarning(ex, "BGG indisponível");
-                    // devolve o que tiveres; a app usará hasMore = false
-                    return suggestions.Count == 0
-                        ? StatusCode(503)          // ou NoContent()
-                        : Ok(suggestions);
-                }
-            }
+            var suggestions = await _gameService.SearchSuggestionsAsync(query, offset, limit, ct);
 
             return suggestions.Count == 0 ? NoContent() : Ok(suggestions);
         }
+
 
 
         /// <summary>
@@ -199,47 +123,15 @@ namespace MeepleBoardApi.Controllers
         [HttpGet("expansion-suggestions")]
         [ProducesResponseType(typeof(List<GameSuggestionDto>), 200)]
         public async Task<IActionResult> SearchExpansions(
-            [FromQuery] string query,
-            [FromQuery] int offset = 0,
-            [FromQuery] int limit = 10,
-            CancellationToken cancellationToken = default)
+    [FromQuery] string query,
+    [FromQuery] int offset = 0,
+    [FromQuery] int limit = 10,
+    CancellationToken cancellationToken = default)
         {
-            if (string.IsNullOrWhiteSpace(query))
-                return Ok(new List<GameSuggestionDto>());
-
-            // 🔍 Passo 1: Busca expansões locais
-            var localExpansions = await _gameRepository.SearchExpansionsByNameAsync(query, offset, limit, cancellationToken);
-
-            var suggestions = localExpansions
-                .Where(g => g.BGGId.HasValue)
-                .Select(g => new GameSuggestionDto
-                {
-                    BggId = g.BGGId!.Value,
-                    Name = g.Name,
-                    YearPublished = g.YearPublished,
-                    ImageUrl = g.ImageUrl
-                })
-                .ToList();
-
-            // 🔁 Passo 2: Busca do BGG se necessário
-            if (suggestions.Count < limit)
-            {
-                var bggSuggestions = await _bggService.SearchGameSuggestionsAsync(
-                    query,
-                    offset: 0,
-                    limit: limit - suggestions.Count,
-                    cancellationToken
-                );
-
-                var missingExpansions = bggSuggestions
-                    .Where(b => b.IsExpansion && !suggestions.Any(s => s.BggId == b.BggId))
-                    .Take(limit - suggestions.Count);
-
-                suggestions.AddRange(missingExpansions);
-            }
-
+            var suggestions = await _gameService.SearchExpansionSuggestionsAsync(query, offset, limit, cancellationToken);
             return Ok(suggestions);
         }
+
 
 
         /// <summary>
@@ -249,44 +141,17 @@ namespace MeepleBoardApi.Controllers
         [ProducesResponseType(typeof(List<GameSuggestionDto>), 200)]
         public async Task<IActionResult> GetExpansionsOfBase(Guid baseGameId, CancellationToken cancellationToken)
         {
-            // Passo 1: Busca o jogo base
-            var baseGame = await _gameRepository.GetByIdAsync(baseGameId, cancellationToken);
-            if (baseGame == null)
-                return NotFound("Jogo base não encontrado.");
-
-            // Passo 2: Expansões locais
-            var localExpansions = await _gameRepository.GetExpansionsForBaseGameAsync(baseGameId, cancellationToken);
-
-            var suggestions = localExpansions
-                .Where(g => g.BGGId.HasValue)
-                .Select(g => new GameSuggestionDto
-                {
-                    BggId = g.BGGId!.Value,
-                    Name = g.Name,
-                    YearPublished = g.YearPublished,
-                    ImageUrl = g.ImageUrl
-                })
-                .ToList();
-
-            // Passo 3: Expansões do BGG (se o jogo base tiver BGGId)
-            if (baseGame.BGGId.HasValue)
+            try
             {
-                var bggSuggestions = await _bggService.SearchGameSuggestionsAsync(
-                    baseGame.Name, // usa o nome do jogo base como query
-                    offset: 0,
-                    limit: 10,
-                    cancellationToken
-                );
-
-                var bggExpansions = bggSuggestions
-                    .Where(b => b.IsExpansion && !suggestions.Any(s => s.BggId == b.BggId))
-                    .Take(10 - suggestions.Count);
-
-                suggestions.AddRange(bggExpansions);
+                var suggestions = await _gameService.GetExpansionSuggestionsForBaseAsync(baseGameId, cancellationToken);
+                return Ok(suggestions);
             }
-
-            return Ok(suggestions);
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(ex.Message);
+            }
         }
+
 
 
         /// <summary>
@@ -306,6 +171,10 @@ namespace MeepleBoardApi.Controllers
                 ? NotFound("Jogo não encontrado.")
                 : Ok(game);
         }
+
+
+
+
 
         /// <summary>
         /// Cadastra manualmente um novo jogo (sem importar do BGG).

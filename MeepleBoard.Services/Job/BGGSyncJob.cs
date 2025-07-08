@@ -38,7 +38,8 @@ namespace MeepleBoard.Services.Job
             // 🔹 1. Jogos cadastrados no sistema
             try
             {
-                var jogosDaApp = await _gameService.GetAllAsync(cancellationToken);
+                var paged = await _gameService.GetAllAsync(0, int.MaxValue, cancellationToken);
+                var jogosDaApp = paged.Data;
                 foreach (var jogo in jogosDaApp.Where(j => j.BggId.HasValue))
                     jogosParaAtualizar.Add(jogo.BggId!.Value);
 

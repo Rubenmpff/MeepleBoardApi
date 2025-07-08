@@ -3,6 +3,7 @@ using MeepleBoard.Domain.Entities;
 using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Services.DTOs;
 using MeepleBoard.Services.Interfaces;
+using MeepleBoard.Services.Mapping.Dtos;
 using Microsoft.Extensions.Logging;
 
 namespace MeepleBoard.Services.Implementations
@@ -33,11 +34,20 @@ namespace MeepleBoard.Services.Implementations
         /// <summary>
         /// Devolve todos os jogos, sem paginação.
         /// </summary>
-        public async Task<IReadOnlyList<GameDto>> GetAllAsync(CancellationToken cancellationToken = default)
+        public async Task<PagedResponse<GameDto>> GetAllAsync(int pageIndex, int pageSize, CancellationToken ct = default)
         {
-            var games = await _gameRepository.GetAllAsync(-1, -1, cancellationToken);
-            return _mapper.Map<IReadOnlyList<GameDto>>(games);
+            var totalGames = await _gameRepository.GetAllAsync(0, int.MaxValue, ct);
+            var pagedGames = await _gameRepository.GetAllAsync(pageIndex, pageSize, ct);
+
+            return new PagedResponse<GameDto>(
+                _mapper.Map<IReadOnlyList<GameDto>>(pagedGames),
+                totalGames.Count,
+                pageSize,
+                pageIndex
+            );
         }
+
+
 
         /// <summary>
         /// Devolve um jogo por ID, incluindo as expansões se aplicável.
@@ -237,6 +247,7 @@ namespace MeepleBoard.Services.Implementations
                     game.SetBaseGameBggId(bgg.BaseGameBggId);
             }
 
+
             // Adiciona o novo jogo à base de dados
             await _gameRepository.AddAsync(game, cancellationToken);
 
@@ -250,6 +261,135 @@ namespace MeepleBoard.Services.Implementations
             return _mapper.Map<GameDto>(game);
         }
 
+
+
+
+
+        public async Task<List<GameSuggestionDto>> SearchSuggestionsAsync(string query, int offset = 0, int limit = 10, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(query))
+                return new List<GameSuggestionDto>();
+
+            // 1. Jogos locais
+            var local = await _gameRepository.SearchByNameAsync(query, offset, limit, ct);
+
+            var suggestions = local
+                .Where(g => g.BGGId.HasValue)
+                .Select(g => new GameSuggestionDto
+                {
+                    BggId = g.BGGId!.Value,
+                    Name = g.Name,
+                    YearPublished = g.YearPublished,
+                    ImageUrl = g.ImageUrl
+                })
+                .ToList();
+
+            // 2. Complementa com BGG se faltar
+            if (suggestions.Count < limit)
+            {
+                try
+                {
+                    var bgg = await _bggService.SearchGameSuggestionsAsync(
+                        query,
+                        offset: offset + suggestions.Count,
+                        limit: limit - suggestions.Count,
+                        ct);
+
+                    var extras = bgg
+                        .Where(b => !suggestions.Any(s => s.BggId == b.BggId))
+                        .Take(limit - suggestions.Count);
+
+                    suggestions.AddRange(extras);
+                }
+                catch (HttpRequestException ex)
+                {
+                    _logger.LogWarning(ex, "BGG indisponível");
+                }
+            }
+
+            return suggestions;
+        }
+
+
+
+        public async Task<List<GameSuggestionDto>> SearchExpansionSuggestionsAsync(string query, int offset = 0, int limit = 10, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(query))
+                return new List<GameSuggestionDto>();
+
+            // 🔍 Passo 1: Busca expansões locais
+            var localExpansions = await _gameRepository.SearchExpansionsByNameAsync(query, offset, limit, cancellationToken);
+
+            var suggestions = localExpansions
+                .Where(g => g.BGGId.HasValue)
+                .Select(g => new GameSuggestionDto
+                {
+                    BggId = g.BGGId!.Value,
+                    Name = g.Name,
+                    YearPublished = g.YearPublished,
+                    ImageUrl = g.ImageUrl
+                })
+                .ToList();
+
+            // 🔁 Passo 2: Busca do BGG se necessário
+            if (suggestions.Count < limit)
+            {
+                var bggSuggestions = await _bggService.SearchGameSuggestionsAsync(
+                    query,
+                    offset: 0,
+                    limit: limit - suggestions.Count,
+                    cancellationToken
+                );
+
+                var missingExpansions = bggSuggestions
+                    .Where(b => b.IsExpansion && !suggestions.Any(s => s.BggId == b.BggId))
+                    .Take(limit - suggestions.Count);
+
+                suggestions.AddRange(missingExpansions);
+            }
+
+            return suggestions;
+        }
+
+
+
+        public async Task<List<GameSuggestionDto>> GetExpansionSuggestionsForBaseAsync(Guid baseGameId, CancellationToken cancellationToken = default)
+        {
+            var baseGame = await _gameRepository.GetByIdAsync(baseGameId, cancellationToken);
+            if (baseGame == null)
+                throw new KeyNotFoundException("Jogo base não encontrado.");
+
+            var localExpansions = await _gameRepository.GetExpansionsForBaseGameAsync(baseGameId, cancellationToken);
+
+            var suggestions = localExpansions
+                .Where(g => g.BGGId.HasValue)
+                .Select(g => new GameSuggestionDto
+                {
+                    BggId = g.BGGId!.Value,
+                    Name = g.Name,
+                    YearPublished = g.YearPublished,
+                    ImageUrl = g.ImageUrl
+                })
+                .ToList();
+
+            if (baseGame.BGGId.HasValue)
+            {
+                var bggSuggestions = await _bggService.SearchGameSuggestionsAsync(
+                    baseGame.Name,
+                    offset: 0,
+                    limit: 10,
+                    cancellationToken
+                );
+
+                var bggExpansions = bggSuggestions
+                    .Where(b => b.IsExpansion && !suggestions.Any(s => s.BggId == b.BggId))
+                    .Take(10 - suggestions.Count);
+
+                suggestions.AddRange(bggExpansions);
+            }
+
+            return suggestions;
+        }
 
 
 
@@ -294,11 +434,65 @@ namespace MeepleBoard.Services.Implementations
 
 
 
+
+
+
+
+        public async Task<List<GameSuggestionDto>> SearchBaseGameSuggestionsAsync(string query, int offset = 0, int limit = 10, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(query))
+                return new List<GameSuggestionDto>();
+
+            // 1. Jogos locais
+            var localGames = await _gameRepository.SearchBaseGamesByNameAsync(query, offset, limit, cancellationToken);
+
+            var suggestions = localGames
+                .Where(g => g.BGGId.HasValue)
+                .Select(g => new GameSuggestionDto
+                {
+                    BggId = g.BGGId!.Value,
+                    Name = g.Name,
+                    YearPublished = g.YearPublished,
+                    ImageUrl = g.ImageUrl
+                })
+                .ToList();
+
+            // 2. Se não houver suficientes, busca ao BGG com offset ajustado
+            if (suggestions.Count < limit)
+            {
+                var bggOffset = offset + suggestions.Count;
+
+                var bggSuggestions = await _bggService.SearchGameSuggestionsAsync(
+                    query,
+                    offset: bggOffset,
+                    limit: limit - suggestions.Count,
+                    cancellationToken
+                );
+
+                var missing = bggSuggestions
+                    .Where(b => !b.IsExpansion && !suggestions.Any(s => s.BggId == b.BggId))
+                    .Take(limit - suggestions.Count);
+
+                suggestions.AddRange(missing);
+            }
+
+            return suggestions;
+        }
+
+
+
+
+
+
+
         public async Task<IReadOnlyList<GameDto>> GetPendingApprovalAsync(CancellationToken cancellationToken = default)
         {
             var games = await _gameRepository.GetPendingApprovalAsync(cancellationToken);
             return _mapper.Map<IReadOnlyList<GameDto>>(games);
         }
+
+
+
 
 
 
@@ -310,8 +504,16 @@ namespace MeepleBoard.Services.Implementations
 
 
 
+
+
+
+
         public async Task<bool> ExistsByNameAsync(string name, CancellationToken cancellationToken = default) =>
             await _gameRepository.ExistsByNameAsync(name.Trim(), cancellationToken);
+
+
+
+
 
 
 
@@ -370,17 +572,30 @@ namespace MeepleBoard.Services.Implementations
             return await _gameRepository.CommitAsync(cancellationToken);
         }
 
+
+
+
+
         public async Task<IReadOnlyList<GameDto>> GetRecentlyPlayedAsync(int limit, CancellationToken cancellationToken = default)
         {
             var games = await _gameRepository.GetRecentlyPlayedAsync(limit, cancellationToken);
             return _mapper.Map<IReadOnlyList<GameDto>>(games);
         }
 
+
+
+
+
         public async Task<IReadOnlyList<GameDto>> GetMostSearchedAsync(int limit, CancellationToken cancellationToken = default)
         {
             var games = await _gameRepository.GetMostSearchedAsync(limit, cancellationToken);
             return _mapper.Map<IReadOnlyList<GameDto>>(games);
         }
+
+
+
+
+
 
         /// <summary>
         /// Atualiza os dados de um jogo com base nos dados mais recentes do BGG.
