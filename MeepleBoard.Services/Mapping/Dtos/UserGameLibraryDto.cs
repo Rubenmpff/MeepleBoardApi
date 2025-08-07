@@ -16,6 +16,8 @@ namespace MeepleBoard.Services.DTOs
         [Required(ErrorMessage = "O ID do jogo é obrigatório.")]
         public Guid GameId { get; init; }
 
+        public int? BggId { get; set; }
+
         /// <summary>
         /// Nome do jogo (Obrigatório, máximo 150 caracteres).
         /// </summary>

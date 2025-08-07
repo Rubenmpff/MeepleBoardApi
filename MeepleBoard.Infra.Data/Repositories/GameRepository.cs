@@ -44,15 +44,16 @@ namespace MeepleBoard.Infra.Data.Repositories
         }
 
         public async Task<List<Game>> SearchByNameAsync(string query, int offset, int limit, CancellationToken cancellationToken)
-{
-    return await _context.Games
-        .AsNoTracking()
-        .Where(g => g.Name.ToLower().Contains(query.ToLower()))
-        .OrderBy(g => g.Name)
-        .Skip(offset)
-        .Take(limit)
-        .ToListAsync(cancellationToken);
-}
+        {
+            return await _context.Games
+                .AsNoTracking()
+                .Where(g => EF.Functions.Like(g.Name, $"%{query}%"))
+                .OrderBy(g => g.Name)
+                .Skip(offset)
+                .Take(limit)
+                .ToListAsync(cancellationToken);
+        }
+
 
 
         public async Task<IReadOnlyList<Game>> GetAllAsync(int pageIndex = 0, int pageSize = 10, CancellationToken cancellationToken = default)
@@ -122,26 +123,27 @@ namespace MeepleBoard.Infra.Data.Repositories
                 .Where(g =>
                     g.BaseGameId == null &&
                     g.BaseGameBggId == null &&
-                    g.Name.ToLower().Contains(query.ToLower()))
+                    EF.Functions.Like(g.Name, $"%{query}%"))
                 .OrderBy(g => g.Name)
                 .Skip(offset)
                 .Take(limit)
                 .ToListAsync(cancellationToken);
         }
 
+
         public async Task<List<Game>> SearchExpansionsByNameAsync(string query, int offset = 0, int limit = 10, CancellationToken cancellationToken = default)
         {
             return await _context.Games
-    .AsNoTracking()
-    .Where(g =>
-        (g.BaseGameId != null || g.BaseGameBggId != null) &&
-        g.Name.ToLower().Contains(query.ToLower()))
-    .OrderBy(g => g.Name)
-    .Skip(offset)
-    .Take(limit)
-    .ToListAsync(cancellationToken);
-
+                .AsNoTracking()
+                .Where(g =>
+                    (g.BaseGameId != null || g.BaseGameBggId != null) &&
+                    EF.Functions.Like(g.Name, $"%{query}%"))
+                .OrderBy(g => g.Name)
+                .Skip(offset)
+                .Take(limit)
+                .ToListAsync(cancellationToken);
         }
+
 
 
 

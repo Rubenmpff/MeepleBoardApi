@@ -10,7 +10,7 @@ namespace MeepleBoard.Domain.Entities
             MatchPlayers = new HashSet<MatchPlayer>();
         }
 
-        public Match(Guid gameId, DateTime matchDate)
+        public Match(Guid gameId, DateTime matchDate, Guid? gameSessionId = null)
         {
             if (gameId == Guid.Empty)
                 throw new ArgumentException("ID do jogo inválido.");
@@ -20,6 +20,7 @@ namespace MeepleBoard.Domain.Entities
 
             Id = Guid.NewGuid();
             GameId = gameId;
+            GameSessionId = gameSessionId;
             MatchDate = matchDate;
             CreatedAt = DateTime.UtcNow;
             MatchPlayers = new HashSet<MatchPlayer>();
@@ -31,15 +32,19 @@ namespace MeepleBoard.Domain.Entities
         [Required]
         public DateTime MatchDate { get; private set; }
 
-        // Alias para consistência (por ex. no GameRepository)
-        [NotMapped]
-        public DateTime DatePlayed => MatchDate;
-
         [Required]
         public Guid GameId { get; private set; }
 
         [ForeignKey("GameId")]
         public virtual Game? Game { get; private set; }
+
+        /// <summary>
+        /// Se esta partida pertence a uma sessão de jogo
+        /// </summary>
+        public Guid? GameSessionId { get; private set; }
+
+        [ForeignKey("GameSessionId")]
+        public virtual GameSession? GameSession { get; private set; }
 
         public bool IsSoloGame { get; private set; }
 
@@ -51,7 +56,6 @@ namespace MeepleBoard.Domain.Entities
         public virtual ICollection<MatchPlayer> MatchPlayers { get; private set; }
 
         private int? _durationInMinutes;
-
         public int? DurationInMinutes
         {
             get => _durationInMinutes;
@@ -73,6 +77,7 @@ namespace MeepleBoard.Domain.Entities
         public DateTime CreatedAt { get; private set; }
         public DateTime? UpdatedAt { get; private set; }
 
+        // --- Métodos de atualização ---
         public void UpdateMatchDetails(string? location, string? scoreSummary, int? duration)
         {
             if (Location != location || ScoreSummary != scoreSummary || DurationInMinutes != duration)
@@ -117,10 +122,7 @@ namespace MeepleBoard.Domain.Entities
             }
         }
 
-        public void SetDuration(int? duration)
-        {
-            DurationInMinutes = duration;
-        }
+        public void SetDuration(int? duration) => DurationInMinutes = duration;
 
         public void SetLocation(string? location)
         {
@@ -143,9 +145,18 @@ namespace MeepleBoard.Domain.Entities
             }
         }
 
-        private void UpdateTimestamp()
+        public void SetGameSession(Guid? sessionId)
         {
-            UpdatedAt = DateTime.UtcNow;
+            if (sessionId.HasValue && sessionId == Guid.Empty)
+                throw new ArgumentException("ID da sessão inválido.");
+
+            if (GameSessionId != sessionId)
+            {
+                GameSessionId = sessionId;
+                UpdateTimestamp();
+            }
         }
+
+        private void UpdateTimestamp() => UpdatedAt = DateTime.UtcNow;
     }
 }

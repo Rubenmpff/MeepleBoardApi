@@ -4,6 +4,7 @@ using MeepleBoard.Infra.Data.Context;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace MeepleBoard.Infra.Data.Migrations
 {
     [DbContext(typeof(MeepleBoardDbContext))]
-    partial class MeepleBoardDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250805113700_AddGameSessionEntities")]
+    partial class AddGameSessionEntities
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -592,7 +595,7 @@ namespace MeepleBoard.Infra.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("MeepleBoard.Domain.Entities.GameSession", "GameSession")
+                    b.HasOne("MeepleBoard.Domain.Entities.GameSession", null)
                         .WithMany("Matches")
                         .HasForeignKey("GameSessionId");
 
@@ -601,8 +604,6 @@ namespace MeepleBoard.Infra.Data.Migrations
                         .HasForeignKey("WinnerId");
 
                     b.Navigation("Game");
-
-                    b.Navigation("GameSession");
 
                     b.Navigation("Winner");
                 });

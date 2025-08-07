@@ -15,6 +15,8 @@ namespace MeepleBoard.Infra.Data.Context
         }
 
         public DbSet<Game> Games { get; set; }
+        public DbSet<GameSession> GameSessions { get; set; }
+        public DbSet<GameSessionPlayer> GameSessionPlayers { get; set; }
         public DbSet<Match> Matches { get; set; }
         public DbSet<MatchPlayer> MatchPlayers { get; set; }
         public DbSet<UserGameLibrary> UserGameLibraries { get; set; }

@@ -248,66 +248,60 @@ namespace MeepleBoard.Services.Implementations
 
 
 
-        /// <summary>
-        /// Busca sugestões de jogos com base no nome informado, combinando dados locais e do BGG.
-        /// </summary>
-        /// <param name="query">Termo de pesquisa (nome do jogo).</param>
-        /// <param name="offset">Deslocamento para paginação.</param>
-        /// <param name="limit">Número máximo de resultados a retornar.</param>
-        /// <param name="ct">Token de cancelamento.</param>
-        /// <returns>Lista de sugestões de jogos.</returns>
-        public async Task<List<GameSuggestionDto>> SearchSuggestionsAsync(string query, int offset = 0, int limit = 10, CancellationToken ct = default)
+        public async Task<List<GameSuggestionDto>> SearchSuggestionsAsync(
+    string query, int offset = 0, int limit = 10, CancellationToken ct = default)
         {
-            // Valida o termo de pesquisa
             if (string.IsNullOrWhiteSpace(query))
                 return new List<GameSuggestionDto>();
 
-            // ────────────────────────────────
-            // 1. Busca na base de dados local
-            // ────────────────────────────────
-            var local = await _gameRepository.SearchByNameAsync(query, offset, limit, ct);
+            // 1) Buscar localmente (sem cortar o BGG)
+            var localResults = await _gameRepository.SearchByNameAsync(query, offset, limit, ct);
 
-            // Converte resultados locais em sugestões
-            var suggestions = local
-                .Where(g => g.BGGId.HasValue) // ignora jogos sem referência ao BGG
-                .Select(g => new GameSuggestionDto
-                {
-                    BggId = g.BGGId!.Value,
-                    Name = g.Name,
-                    YearPublished = g.YearPublished,
-                    ImageUrl = g.ImageUrl
-                })
-                .ToList();
+            var suggestions = localResults.Select(g => new GameSuggestionDto
+            {
+                Id = g.Id.ToString(),
+                BggId = g.BGGId ?? 0,
+                Name = g.Name,
+                YearPublished = g.YearPublished,
+                ImageUrl = g.ImageUrl
+            }).ToList();
 
-            // ───────────────────────────────────────
-            // 2. Se faltarem sugestões, consulta o BGG
-            // ───────────────────────────────────────
+            // 2) Buscar no BGG apenas se faltar resultados locais
             if (suggestions.Count < limit)
             {
                 try
                 {
-                    var bgg = await _bggService.SearchGameSuggestionsAsync(
+                    var bggResults = await _bggService.SearchGameSuggestionsAsync(
                         query,
-                        offset: offset + suggestions.Count, // ajusta offset para evitar duplicações
-                        limit: limit - suggestions.Count,   // só busca o que ainda falta
+                        offset: offset,
+                        limit: limit * 2, // pode ser maior, para garantir que preenche
                         ct);
 
-                    // Evita repetir sugestões já encontradas localmente
-                    var extras = bgg
-                        .Where(b => !suggestions.Any(s => s.BggId == b.BggId))
-                        .Take(limit - suggestions.Count);
+                    foreach (var bgg in bggResults)
+                    {
+                        bool exists = suggestions.Any(s =>
+                            (s.BggId != 0 && s.BggId == bgg.BggId) ||
+                            (s.Name.Equals(bgg.Name, StringComparison.OrdinalIgnoreCase)
+                             && s.YearPublished == bgg.YearPublished));
 
-                    suggestions.AddRange(extras);
+                        if (!exists)
+                            suggestions.Add(bgg); // **não limitar aqui**
+                    }
                 }
                 catch (HttpRequestException ex)
                 {
-                    // Em caso de erro de rede com o BGG, apenas registra aviso e segue com os dados locais
                     _logger.LogWarning(ex, "BGG indisponível");
                 }
             }
 
-            return suggestions;
+            // **NÃO fazer Take(limit) aqui → devolve todos os resultados que achou**
+            return suggestions
+                .OrderBy(s => s.Name)
+                .ToList();
         }
+
+
+
 
 
 
@@ -554,10 +548,12 @@ namespace MeepleBoard.Services.Implementations
                 .Where(g => g.BGGId.HasValue) // Apenas os que têm referência ao BGG
                 .Select(g => new GameSuggestionDto
                 {
+                    Id = g.Id.ToString(),
                     BggId = g.BGGId!.Value,
                     Name = g.Name,
                     YearPublished = g.YearPublished,
-                    ImageUrl = g.ImageUrl
+                    ImageUrl = g.ImageUrl,
+                    IsExpansion = g.IsExpansion
                 })
                 .ToList();
 

@@ -47,6 +47,8 @@ namespace MeepleBoard.CrossCutting.IoC
         {
             services.AddScoped<IUserRepository, UserRepository>();
             services.AddScoped<IGameRepository, GameRepository>();
+            services.AddScoped<IGameSessionRepository, GameSessionRepository>();
+            services.AddScoped<IGameSessionPlayerRepository, GameSessionPlayerRepository>();
             services.AddScoped<IMatchRepository, MatchRepository>();
             services.AddScoped<IMatchPlayerRepository, MatchPlayerRepository>();
             services.AddScoped<IUserGameLibraryRepository, UserGameLibraryRepository>();
@@ -63,6 +65,7 @@ namespace MeepleBoard.CrossCutting.IoC
         {
             services.AddScoped<IUserService, UserService>();
             services.AddScoped<IGameService, GameService>();
+            services.AddScoped<IGameSessionService, GameSessionService>();
             services.AddScoped<IMatchService, MatchService>();
             services.AddScoped<IMatchPlayerService, MatchPlayerService>();
             services.AddScoped<IUserGameLibraryService, UserGameLibraryService>();
