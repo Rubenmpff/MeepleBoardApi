@@ -24,7 +24,8 @@ namespace MeepleBoard.CrossCutting.Security
             .AddEntityFrameworkStores<MeepleBoardDbContext>()
             .AddDefaultTokenProviders();
 
-            var jwtKey = Environment.GetEnvironmentVariable("JWT_KEY") ?? configuration["Jwt:Key"];
+            var jwtKey = configuration["JWT_KEY"] ?? configuration["Jwt:Key"];
+
 
             if (string.IsNullOrWhiteSpace(jwtKey) || jwtKey.Length < 32)
             {

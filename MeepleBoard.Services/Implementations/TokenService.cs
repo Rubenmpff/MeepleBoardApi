@@ -40,13 +40,8 @@ namespace MeepleBoard.Services.Implementations
             _mapper = mapper ?? throw new ArgumentNullException(nameof(mapper));
 
             if (string.IsNullOrWhiteSpace(_jwtSettings.Key) || _jwtSettings.Key.Length < 32)
-                throw new InvalidOperationException("❌ A chave JWT_KEY é inválida ou muito curta.");
+    throw new InvalidOperationException("❌ A chave JWT não foi encontrada ou é muito curta. Configure JWT_KEY (User Secrets em DEV / Env Var em PROD).");
 
-            var jwtKey = Environment.GetEnvironmentVariable("JWT_KEY");
-            if (string.IsNullOrWhiteSpace(jwtKey))
-                throw new InvalidOperationException("A chave JWT não foi encontrada. Configure a variável de ambiente JWT_KEY.");
-
-            _jwtSettings.Key = jwtKey;
         }
 
         /// <summary>
