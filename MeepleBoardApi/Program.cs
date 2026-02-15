@@ -13,11 +13,17 @@ using System.Net;
 var builder = WebApplication.CreateBuilder(args);
 var configuration = builder.Configuration;
 
-// 🔐 Carrega e valida a chave JWT
-var jwtKey = Environment.GetEnvironmentVariable("JWT_KEY");
+// 🔐 Carrega e valida a chave JWT (User Secrets em DEV / Env Vars em PROD)
+var jwtKey = configuration["JWT_KEY"];
 if (string.IsNullOrWhiteSpace(jwtKey) || jwtKey.Length < 32)
     throw new InvalidOperationException("❌ A chave JWT_KEY não foi encontrada ou é muito curta.");
-Console.WriteLine($"🔑 Chave JWT carregada no Program.cs: {jwtKey.Substring(0, 10)}******");
+
+// ⚠️ Evita logar segredos em produção
+if (builder.Environment.IsDevelopment())
+{
+    Console.WriteLine($"🔑 JWT_KEY carregada: {jwtKey.Substring(0, 10)}******");
+}
+
 
 // ✅ Configuração do JWT
 builder.Services.Configure<JwtSettings>(options =>
@@ -28,10 +34,13 @@ builder.Services.Configure<JwtSettings>(options =>
     options.ExpiryHours = int.TryParse(configuration["Jwt:ExpiryHours"], out var expiry) ? expiry : 24;
 });
 
-// ✅ CORS (libera geral temporariamente)
+// ✅ CORS (libera geral apenas em DEV)
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAll", builder => builder.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader());
+    options.AddPolicy("AllowAll", policy =>
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader());
 });
 
 // ✅ Serviços da aplicação
@@ -144,7 +153,12 @@ if (app.Environment.IsDevelopment())
 }
 
 // ✅ Segurança e Middleware final
-app.UseCors("AllowAll");
+// ✅ CORS apenas em Development
+if (app.Environment.IsDevelopment())
+{
+    app.UseCors("AllowAll");
+}
+
 // app.UseHttpsRedirection(); // Habilita em produção
 app.UseIpRateLimiting();
 app.UseAuthentication();

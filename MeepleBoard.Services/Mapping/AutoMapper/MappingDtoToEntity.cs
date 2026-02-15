@@ -37,10 +37,10 @@ namespace MeepleBoardApi.Services.Mapping.AutoMapper
 
             // --- GameSession (para criar) ---
             CreateMap<CreateGameSessionDto, GameSession>()
-                .ForMember(dest => dest.Id, opt => opt.Ignore())
-                .ForMember(dest => dest.StartDate, opt => opt.Ignore())
-                .ForMember(dest => dest.EndDate, opt => opt.Ignore())
-                .ForMember(dest => dest.IsActive, opt => opt.Ignore());
+                .ForMember(d => d.Id, o => o.Ignore())
+                .ForMember(d => d.IsActive, o => o.Ignore())
+                .ForMember(d => d.StartDate, o => o.Ignore())
+                .ForMember(d => d.EndDate, o => o.Ignore());
 
             // --- GameSessionPlayer ---
             CreateMap<GameSessionPlayerDto, GameSessionPlayer>()

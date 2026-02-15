@@ -1,52 +1,79 @@
-﻿using MeepleBoard.Domain.Entities;
+﻿// MeepleBoard.Services/Implementations/GameSessionService.cs
+using AutoMapper;
+using MeepleBoard.Application.DTOs;
+using MeepleBoard.Domain.Entities;
 using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Services.Interfaces;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace MeepleBoard.Services.Implementations
 {
+    /// <summary>
+    /// Gestão de sessões de jogo: criação, fecho e gestão de jogadores.
+    /// Devolve sempre DTOs para evitar ciclos de serialização.
+    /// </summary>
     public class GameSessionService : IGameSessionService
     {
         private readonly IGameSessionRepository _sessionRepository;
         private readonly IGameSessionPlayerRepository _sessionPlayerRepository;
+        private readonly IMapper _mapper;
 
         public GameSessionService(
             IGameSessionRepository sessionRepository,
-            IGameSessionPlayerRepository sessionPlayerRepository)
+            IGameSessionPlayerRepository sessionPlayerRepository,
+            IMapper mapper)
         {
             _sessionRepository = sessionRepository;
             _sessionPlayerRepository = sessionPlayerRepository;
+            _mapper = mapper;
         }
 
-        public async Task<IEnumerable<GameSession>> GetAllAsync()
+        public async Task<IEnumerable<GameSessionDto>> GetAllAsync(bool includeRelations = false)
         {
-            return await _sessionRepository.GetAllAsync();
+            var sessions = await _sessionRepository.GetAllAsync(includeRelations: includeRelations);
+            return _mapper.Map<IEnumerable<GameSessionDto>>(sessions);
         }
 
-        public async Task<GameSession?> GetByIdAsync(Guid id)
+        public async Task<GameSessionDto?> GetByIdAsync(Guid id, bool includeRelations = true)
         {
-            return await _sessionRepository.GetByIdAsync(id);
+            var session = await _sessionRepository.GetByIdAsync(id, includeRelations: includeRelations);
+            return session is null ? null : _mapper.Map<GameSessionDto>(session);
         }
 
-        public async Task<GameSession> CreateAsync(string name, Guid organizerId, string? location = null)
+        public async Task<GameSessionDto> CreateAsync(string name, Guid organizerId, string? location = null)
         {
+            if (string.IsNullOrWhiteSpace(name))
+                throw new ArgumentException("O nome da sessão é obrigatório.", nameof(name));
+
+            if (organizerId == Guid.Empty)
+                throw new ArgumentException("OrganizerId inválido.", nameof(organizerId));
+
+            // 1) Criar sessão e organizador
             var session = new GameSession(name, organizerId, location);
-            await _sessionRepository.AddAsync(session);
+            var organizerPlayer = new GameSessionPlayer(session.Id, organizerId, isOrganizer: true);
 
-            var organizerPlayer = new GameSessionPlayer(session.Id, organizerId, true);
+            await _sessionRepository.AddAsync(session);
             await _sessionPlayerRepository.AddAsync(organizerPlayer);
 
-            // 🔹 Commit explícito
+            // 2) Commit único (ambos os repositórios devem partilhar o mesmo DbContext)
             await _sessionRepository.SaveChangesAsync();
-            await _sessionPlayerRepository.SaveChangesAsync();
 
-            return session;
+            // 3) Recarregar com relações para devolver DTO completo
+            var created = await _sessionRepository.GetByIdAsync(session.Id, includeRelations: true);
+            return _mapper.Map<GameSessionDto>(created!);
         }
 
         public async Task AddPlayerAsync(Guid sessionId, Guid userId, bool isOrganizer = false)
         {
-            var existingPlayers = await _sessionPlayerRepository.GetBySessionIdAsync(sessionId);
-            if (existingPlayers.Any(p => p.UserId == userId))
-                throw new Exception("Jogador já está na sessão.");
+            if (sessionId == Guid.Empty || userId == Guid.Empty)
+                throw new ArgumentException("IDs inválidos.");
+
+            var existing = await _sessionPlayerRepository.GetBySessionAndUserAsync(sessionId, userId);
+            if (existing != null)
+                throw new InvalidOperationException("Jogador já está na sessão.");
 
             var player = new GameSessionPlayer(sessionId, userId, isOrganizer);
             await _sessionPlayerRepository.AddAsync(player);
@@ -55,12 +82,14 @@ namespace MeepleBoard.Services.Implementations
 
         public async Task RemovePlayerAsync(Guid sessionId, Guid userId)
         {
-            var players = await _sessionPlayerRepository.GetBySessionIdAsync(sessionId);
-            var player = players.FirstOrDefault(p => p.UserId == userId);
-            if (player == null)
-                throw new Exception("Jogador não encontrado na sessão.");
+            if (sessionId == Guid.Empty || userId == Guid.Empty)
+                throw new ArgumentException("IDs inválidos.");
 
-            await _sessionPlayerRepository.RemoveAsync(player.Id);
+            var existing = await _sessionPlayerRepository.GetBySessionAndUserAsync(sessionId, userId);
+            if (existing == null)
+                throw new KeyNotFoundException("Jogador não encontrado na sessão.");
+
+            await _sessionPlayerRepository.RemoveAsync(existing.Id);
             await _sessionPlayerRepository.SaveChangesAsync();
         }
 
@@ -68,7 +97,7 @@ namespace MeepleBoard.Services.Implementations
         {
             var session = await _sessionRepository.GetByIdAsync(sessionId);
             if (session == null)
-                throw new Exception("Sessão não encontrada.");
+                throw new KeyNotFoundException("Sessão não encontrada.");
 
             session.CloseSession();
             await _sessionRepository.UpdateAsync(session);

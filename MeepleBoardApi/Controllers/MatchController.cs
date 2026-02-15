@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace MeepleBoardApi.Controllers
 {
-    [Route("MeepleBoard/[controller]")]
+    [Route("MeepleBoard/matches")]
     [ApiController]
     public class MatchController : ControllerBase
     {

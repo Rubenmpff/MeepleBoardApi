@@ -1,11 +1,40 @@
+# =========================
 # Visual Studio
+# =========================
 .vs/
 *.user
 *.suo
+*.userosscache
+*.sln.docstates
 
-# Builds
+# =========================
+# Build folders
+# =========================
 bin/
 obj/
 
-# Configurações com chaves
-MeepleBoardApi/appsettings*.json
+# =========================
+# Logs
+# =========================
+*.log
+
+# =========================
+# Environment files (IMPORTANT)
+# =========================
+.env
+**/.env
+.env.*.local
+
+# =========================
+# Node / Frontend (caso uses Expo/React)
+# =========================
+node_modules/
+.expo/
+dist/
+web-build/
+
+# =========================
+# OS Files
+# =========================
+.DS_Store
+Thumbs.db

@@ -21,4 +21,6 @@
     <ProjectReference Include="..\MeepleBoard.CrossCutting\MeepleBoard.CrossCutting.csproj" />
   </ItemGroup>
 
+  <ProjectExtensions><VisualStudio><UserProperties /></VisualStudio></ProjectExtensions>
+
 </Project>

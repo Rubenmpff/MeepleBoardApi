@@ -11,8 +11,8 @@ namespace MeepleBoardApi.Services.Mapping.AutoMapper
         {
             // --- Match ---
             CreateMap<Match, MatchDto>()
-                .ForMember(dest => dest.GameName, opt => opt.MapFrom(src => src.Game != null ? src.Game.Name : "Jogo Desconhecido"))
-                .ForMember(dest => dest.WinnerName, opt => opt.MapFrom(src => src.Winner != null ? src.Winner.UserName : "Sem Vencedor"));
+                .ForMember(d => d.GameName, o => o.MapFrom(s => s.Game != null ? s.Game.Name : "Jogo Desconhecido"))
+                .ForMember(d => d.WinnerName, o => o.MapFrom(s => s.Winner != null ? s.Winner.UserName : "Sem Vencedor"));
 
             // --- User ---
             CreateMap<User, UserDto>();
@@ -30,11 +30,13 @@ namespace MeepleBoardApi.Services.Mapping.AutoMapper
 
             // --- GameSessionPlayer ---
             CreateMap<GameSessionPlayer, GameSessionPlayerDto>()
-                .ForMember(dest => dest.UserName, opt => opt.MapFrom(src => src.User != null ? src.User.UserName : "Jogador Desconhecido"));
+                .ForMember(d => d.UserName, o => o.MapFrom(s => s.User != null ? s.User.UserName : "Jogador Desconhecido"));
 
             // --- GameSession ---
             CreateMap<GameSession, GameSessionDto>()
-                .ForMember(dest => dest.Players, opt => opt.MapFrom(src => src.Players));
+                .ForMember(d => d.Organizer, o => o.MapFrom(s => s.OrganizerId.ToString()))
+                .ForMember(d => d.Players, o => o.MapFrom(s => s.Players))
+                .ForMember(d => d.Matches, o => o.MapFrom(s => s.Matches));
         }
     }
 }

@@ -54,6 +54,7 @@ namespace MeepleBoard.CrossCutting.IoC
             services.AddScoped<IUserGameLibraryRepository, UserGameLibraryRepository>();
             services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>(); // 🔐 Suporte para Refresh Tokens
             services.AddScoped<IEmailResendLogRepository, EmailResendLogRepository>();
+            services.AddScoped<IFriendshipRepository, FriendshipRepository>();
 
             return services;
         }

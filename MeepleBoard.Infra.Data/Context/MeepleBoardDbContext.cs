@@ -11,7 +11,8 @@ namespace MeepleBoard.Infra.Data.Context
         public MeepleBoardDbContext(DbContextOptions<MeepleBoardDbContext> options)
             : base(options)
         {
-            ChangeTracker.QueryTrackingBehavior = QueryTrackingBehavior.TrackAll; // 🔹 Rastreia alterações por padrão
+            // Mantém tracking por defeito (precisas disto para Unit of Work/Updates)
+            ChangeTracker.QueryTrackingBehavior = QueryTrackingBehavior.TrackAll;
         }
 
         public DbSet<Game> Games { get; set; }
@@ -22,77 +23,109 @@ namespace MeepleBoard.Infra.Data.Context
         public DbSet<UserGameLibrary> UserGameLibraries { get; set; }
         public DbSet<RefreshToken> RefreshTokens { get; set; }
         public DbSet<EmailResendLog> EmailResendLogs { get; set; }
+        public DbSet<Friendship> Friendships { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
 
-            // 🔹 Aplica configurações via Fluent API (ex: GameConfiguration.cs, etc)
+            // Aplica configurações por assembly (se tiveres IEntityTypeConfiguration<>)
             modelBuilder.ApplyConfigurationsFromAssembly(typeof(MeepleBoardDbContext).Assembly);
 
-            // 🔗 MatchPlayer → User
+            /* --------------------------- MATCH / PLAYERS --------------------------- */
+
             modelBuilder.Entity<MatchPlayer>()
                 .HasOne(mp => mp.User)
                 .WithMany(u => u.Matches)
                 .HasForeignKey(mp => mp.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            // 🔗 Match → Game
             modelBuilder.Entity<Match>()
                 .HasOne(m => m.Game)
                 .WithMany(g => g.Matches)
                 .HasForeignKey(m => m.GameId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            // 🔗 MatchPlayer → Match
             modelBuilder.Entity<MatchPlayer>()
                 .HasOne(mp => mp.Match)
                 .WithMany(m => m.MatchPlayers)
                 .HasForeignKey(mp => mp.MatchId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // 🔐 Garante um jogador por partida (único)
             modelBuilder.Entity<MatchPlayer>()
                 .HasIndex(mp => new { mp.MatchId, mp.UserId })
                 .IsUnique();
 
-            // 🔗 UserGameLibrary → User
+            /* ------------------------- USER GAME LIBRARY -------------------------- */
+
             modelBuilder.Entity<UserGameLibrary>()
                 .HasOne(ug => ug.User)
                 .WithMany(u => u.UserGameLibraries)
                 .HasForeignKey(ug => ug.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // 🔗 UserGameLibrary → Game
             modelBuilder.Entity<UserGameLibrary>()
                 .HasOne(ug => ug.Game)
                 .WithMany(g => g.UserGameLibraries)
                 .HasForeignKey(ug => ug.GameId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // 🔗 RefreshToken → User
+            /* ------------------------------ TOKENS -------------------------------- */
+
             modelBuilder.Entity<RefreshToken>()
                 .HasOne(rt => rt.User)
                 .WithMany(u => u.RefreshTokens)
                 .HasForeignKey(rt => rt.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // 🧩 Game ↔ Expansions (self-referencing)
+            /* ------------------------------- GAMES -------------------------------- */
+
             modelBuilder.Entity<Game>()
                 .HasMany(g => g.Expansions)
                 .WithOne(g => g.BaseGame)
                 .HasForeignKey(g => g.BaseGameId)
-                .OnDelete(DeleteBehavior.Restrict); // Evita exclusão em cascata
+                .OnDelete(DeleteBehavior.Restrict);
 
-            // 📝 Limite de tamanho para descrições grandes
             modelBuilder.Entity<Game>()
                 .Property(g => g.Description)
-                .HasMaxLength(10000);
+                .HasMaxLength(10_000);
 
-            // ⚠️ (Opcional) Garante nome único de jogo
-            // modelBuilder.Entity<Game>()
-            //     .HasIndex(g => g.Name)
-            //     .IsUnique();
+            /* ---------------------------- FRIENDSHIPS ----------------------------- */
+
+            modelBuilder.Entity<Friendship>(b =>
+            {
+                b.HasKey(x => x.Id);
+
+                // Par ordenado (A,B) único — evitar duplicados (A,B) / (B,A)
+                b.HasIndex(x => new { x.UserAId, x.UserBId }).IsUnique();
+
+                // Check: A != B (API moderna via TableBuilder → elimina CS0618)
+                b.ToTable(t => t.HasCheckConstraint(
+                    "CK_Friendship_UserA_Not_UserB",
+                    "[UserAId] <> [UserBId]"));
+
+                // FKs para User com Restrict (evita cascatas indesejadas)
+                b.HasOne<User>()
+                    .WithMany()
+                    .HasForeignKey(x => x.UserAId)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                b.HasOne<User>()
+                    .WithMany()
+                    .HasForeignKey(x => x.UserBId)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                b.HasOne<User>()
+                    .WithMany()
+                    .HasForeignKey(x => x.InitiatorId)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                // Colunas simples
+                b.Property(x => x.Status).IsRequired();
+                b.Property(x => x.CreatedAt).IsRequired();
+                b.Property(x => x.UpdatedAt);
+                b.Property(x => x.BlockedById); // nullable
+            });
         }
     }
 }
