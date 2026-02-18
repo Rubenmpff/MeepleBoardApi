@@ -12,6 +12,8 @@ namespace MeepleBoard.Domain.Entities
 
         [Required]
         public Guid OrganizerId { get; private set; }
+        public virtual User Organizer { get; private set; } = null!;
+
 
         [MaxLength(200)]
         public string? Location { get; private set; }

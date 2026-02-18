@@ -10,6 +10,11 @@ namespace MeepleBoard.Services.Implementations
     public class MatchService : IMatchService
     {
         private readonly IMatchRepository _matchRepository;
+        private readonly IMatchPlayerRepository _matchPlayerRepository;
+
+        private readonly IGameSessionRepository _gameSessionRepository;
+        private readonly IGameSessionPlayerRepository _gameSessionPlayerRepository;
+
         private readonly IUserRepository _userRepository;
         private readonly IGameRepository _gameRepository;
         private readonly IBGGService _bggService;
@@ -17,12 +22,18 @@ namespace MeepleBoard.Services.Implementations
 
         public MatchService(
             IMatchRepository matchRepository,
+            IMatchPlayerRepository matchPlayerRepository,
+            IGameSessionRepository gameSessionRepository,
+            IGameSessionPlayerRepository gameSessionPlayerRepository,
             IUserRepository userRepository,
             IGameRepository gameRepository,
             IBGGService bggService,
             IMapper mapper)
         {
             _matchRepository = matchRepository;
+            _matchPlayerRepository = matchPlayerRepository;
+            _gameSessionRepository = gameSessionRepository;
+            _gameSessionPlayerRepository = gameSessionPlayerRepository;
             _userRepository = userRepository;
             _gameRepository = gameRepository;
             _bggService = bggService;
@@ -82,6 +93,98 @@ namespace MeepleBoard.Services.Implementations
             return _mapper.Map<IEnumerable<MatchDto>>(matches);
         }
 
+        /// <summary>
+        /// ✅ Criação com regras (quick vs session) + criação de MatchPlayers.
+        /// </summary>
+        public async Task<MatchDto> CreateAsync(CreateMatchDto dto, Guid authenticatedUserId, CancellationToken cancellationToken = default)
+        {
+            if (dto == null) throw new ArgumentNullException(nameof(dto));
+
+            // 1) Validar/obter jogo
+            var game = await ValidateOrFetchGameAsync(dto.GameId, dto.GameName, cancellationToken);
+
+            // 2) Normalizar players
+            var playerIds = (dto.PlayerIds ?? new List<Guid>())
+                .Where(x => x != Guid.Empty)
+                .Distinct()
+                .ToList();
+
+            if (playerIds.Count == 0)
+                throw new ArgumentException("A partida deve ter pelo menos um jogador.");
+
+            // 3) Regras quick vs session
+            if (dto.GameSessionId is null)
+            {
+                // Quick match: sempre incluir user autenticado
+                if (!playerIds.Contains(authenticatedUserId))
+                    playerIds.Add(authenticatedUserId);
+            }
+            else
+            {
+                var sessionId = dto.GameSessionId.Value;
+
+                // sessão existe? (usa método real do teu repo)
+                var session = await _gameSessionRepository.GetByIdWithDetailsAsync(sessionId, cancellationToken);
+                if (session == null)
+                    throw new KeyNotFoundException("Sessão não encontrada.");
+
+                // auth user pertence à sessão? (método real)
+                var authLink = await _gameSessionPlayerRepository.GetBySessionAndUserAsync(sessionId, authenticatedUserId);
+                if (authLink == null)
+                    throw new UnauthorizedAccessException("Você não é membro desta sessão.");
+
+                // players pertencem à sessão? (método real)
+                var sessionPlayers = await _gameSessionPlayerRepository.GetBySessionIdAsync(sessionId);
+                var memberSet = sessionPlayers.Select(p => p.UserId).ToHashSet();
+
+                if (playerIds.Any(pid => !memberSet.Contains(pid)))
+                    throw new InvalidOperationException("Todos os jogadores do match devem pertencer à sessão.");
+            }
+
+            // 4) winner tem de estar nos players (se existir)
+            if (dto.WinnerId.HasValue && dto.WinnerId.Value != Guid.Empty)
+            {
+                if (!playerIds.Contains(dto.WinnerId.Value))
+                    throw new ArgumentException("O vencedor tem de estar incluído nos jogadores da partida.");
+            }
+
+            // 5) Criar Match (o teu Match suporta sessionId no construtor ✅)
+            var match = new Match(game.Id, dto.MatchDate, dto.GameSessionId);
+
+            match.SetLocation(dto.Location);
+            match.SetSoloGame(dto.IsSoloGame);
+            match.SetDuration(dto.DurationInMinutes);
+            match.SetWinner(dto.WinnerId);
+
+            // Tens ScoreSummary no domínio, mas não tens setter dedicado:
+            // usa UpdateMatchDetails para guardar ScoreSummary sem inventar método novo.
+            match.UpdateMatchDetails(dto.Location, dto.ScoreSummary, dto.DurationInMinutes);
+            match.SetSoloGame(dto.IsSoloGame);
+
+            if (dto.WinnerId.HasValue)
+                match.SetWinner(dto.WinnerId);
+
+
+            await _matchRepository.AddAsync(match, cancellationToken);
+
+            // 6) Criar MatchPlayers
+            foreach (var userId in playerIds)
+            {
+                var mp = new MatchPlayer(match.Id, userId);
+
+                if (dto.WinnerId.HasValue && dto.WinnerId.Value == userId)
+                    mp.SetWinner(true);
+
+                await _matchPlayerRepository.AddAsync(mp, cancellationToken);
+            }
+
+            // 7) Um commit (se os repos partilham DbContext, como tens)
+            await _matchRepository.SaveChangesAsync(cancellationToken);
+
+            return _mapper.Map<MatchDto>(match);
+        }
+
+        // Legacy - mantido para não rebentar outras partes já existentes
         public async Task<MatchDto> AddAsync(MatchDto matchDto, CancellationToken cancellationToken = default)
         {
             if (matchDto == null)
@@ -90,9 +193,8 @@ namespace MeepleBoard.Services.Implementations
             var game = await ValidateOrFetchGameAsync(matchDto.GameId, matchDto.GameName, cancellationToken);
 
             var match = new Match(game.Id, matchDto.MatchDate);
-            match.SetLocation(matchDto.Location);
+            match.UpdateMatchDetails(matchDto.Location, matchDto.ScoreSummary, matchDto.DurationInMinutes);
             match.SetSoloGame(matchDto.IsSoloGame);
-            match.SetDuration(matchDto.DurationInMinutes);
             match.SetWinner(matchDto.WinnerId);
 
             await _matchRepository.AddAsync(match, cancellationToken);
@@ -109,8 +211,7 @@ namespace MeepleBoard.Services.Implementations
 
             match.SetGameId(matchDto.GameId);
             match.SetMatchDate(matchDto.MatchDate);
-            match.SetLocation(matchDto.Location);
-            match.SetDuration(matchDto.DurationInMinutes);
+            match.UpdateMatchDetails(matchDto.Location, matchDto.ScoreSummary, matchDto.DurationInMinutes);
             match.SetSoloGame(matchDto.IsSoloGame);
             match.SetWinner(matchDto.WinnerId);
 

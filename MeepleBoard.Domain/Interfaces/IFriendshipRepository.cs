@@ -12,4 +12,7 @@
         GetIncomingRequestsAsync(Guid currentUserId, CancellationToken ct = default);
 
     Task SaveChangesAsync(CancellationToken ct = default);
+
+    Task<Friendship?> GetByIdAsync(Guid id, CancellationToken ct = default);
+
 }

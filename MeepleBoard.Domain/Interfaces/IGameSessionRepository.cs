@@ -7,11 +7,18 @@ namespace MeepleBoard.Domain.Interfaces
     /// </summary>
     public interface IGameSessionRepository
     {
-        Task<GameSession?> GetByIdAsync(Guid id, bool includeRelations = false);
-        Task<IEnumerable<GameSession>> GetAllAsync(bool includeRelations = false);
-        Task AddAsync(GameSession session);
-        Task UpdateAsync(GameSession session);
-        Task DeleteAsync(Guid id);
-        Task SaveChangesAsync();
+        // Lista leve para o ecrã de sessões (sem Includes pesados)
+        Task<IReadOnlyList<GameSession>> GetListAsync(CancellationToken ct = default);
+
+        // Detalhe completo para /session/{id}
+        Task<GameSession?> GetByIdWithDetailsAsync(Guid id, CancellationToken ct = default);
+
+        // Para updates (tracking)
+        Task<GameSession?> GetByIdForUpdateAsync(Guid id, CancellationToken ct = default);
+
+        Task AddAsync(GameSession session, CancellationToken ct = default);
+        Task UpdateAsync(GameSession session, CancellationToken ct = default);
+        Task DeleteAsync(Guid id, CancellationToken ct = default);
+        Task SaveChangesAsync(CancellationToken ct = default);
     }
 }

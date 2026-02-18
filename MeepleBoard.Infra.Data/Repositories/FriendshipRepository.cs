@@ -132,7 +132,12 @@ namespace MeepleBoard.Infra.Data.Repositories
                 .ToList();
         }
 
+        public Task<Friendship?> GetByIdAsync(Guid id, CancellationToken ct = default)
+    => _context.Friendships.FirstOrDefaultAsync(x => x.Id == id, ct);
+
+
         public Task SaveChangesAsync(CancellationToken ct = default)
             => _context.SaveChangesAsync(ct);
+
     }
 }

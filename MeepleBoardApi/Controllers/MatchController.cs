@@ -1,6 +1,7 @@
 ﻿using MeepleBoard.CrossCutting.Security;
 using MeepleBoard.Services.DTOs;
 using MeepleBoard.Services.Interfaces;
+using MeepleBoard.Services.Mapping.Dtos;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -17,42 +18,21 @@ namespace MeepleBoardApi.Controllers
             _matchService = matchService;
         }
 
-        /// <summary>
-        /// 🔹 Obtém todas as partidas com paginação.
-        /// </summary>
-        /// <param name="pageIndex">Índice da página (padrão: 0).</param>
-        /// <param name="pageSize">Quantidade de itens por página (padrão: 10).</param>
-        /// <param name="cancellationToken">Token para cancelamento da requisição.</param>
-        /// <returns>Lista de partidas ou 204 se nenhuma partida for encontrada.</returns>
-        /// <response code="200">Retorna a lista de partidas.</response>
-        /// <response code="204">Nenhuma partida encontrada.</response>
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<MatchDto>>> GetAll(int pageIndex = 0, int pageSize = 10, CancellationToken cancellationToken = default)
+        public async Task<ActionResult<IEnumerable<MatchDto>>> GetAll(
+            int pageIndex = 0, int pageSize = 10, CancellationToken cancellationToken = default)
         {
             if (pageIndex < 0 || pageSize <= 0)
-            {
                 return BadRequest("Os parâmetros de paginação devem ser positivos.");
-            }
 
             var matches = await _matchService.GetAllAsync(pageIndex, pageSize, cancellationToken);
 
             if (matches == null || !matches.Any())
-            {
                 return NoContent();
-            }
 
             return Ok(matches);
         }
 
-        /// <summary>
-        /// 🔹 Obtém uma partida pelo ID.
-        /// </summary>
-        /// <param name="id">Identificador da partida.</param>
-        /// <param name="cancellationToken">Token para cancelamento da requisição.</param>
-        /// <returns>O jogo encontrado ou erro 404.</returns>
-        /// <response code="200">Retorna a partida encontrada.</response>
-        /// <response code="400">ID inválido.</response>
-        /// <response code="404">Partida não encontrada.</response>
         [HttpGet("{id:guid}")]
         public async Task<ActionResult<MatchDto>> GetById(Guid id, CancellationToken cancellationToken)
         {
@@ -70,7 +50,7 @@ namespace MeepleBoardApi.Controllers
         [Authorize]
         public async Task<IActionResult> GetLastMatchForUser()
         {
-            var userId = User.GetUserId(); // Usa extensão de ClaimsPrincipal
+            var userId = User.GetUserId();
 
             var lastMatch = await _matchService.GetLastMatchForUserAsync(userId);
 
@@ -82,36 +62,47 @@ namespace MeepleBoardApi.Controllers
 
         /// <summary>
         /// 🔹 Cria uma nova partida.
+        /// Regras no service:
+        /// - Quick match: inclui sempre o utilizador autenticado
+        /// - Match dentro de sessão: players têm de pertencer à sessão
         /// </summary>
-        /// <param name="matchDto">Dados da partida.</param>
-        /// <param name="cancellationToken">Token para cancelamento da requisição.</param>
-        /// <returns>Partida criada.</returns>
-        /// <response code="201">Partida criada com sucesso.</response>
-        /// <response code="400">Dados inválidos.</response>
         [HttpPost]
-        public async Task<ActionResult<MatchDto>> Create([FromBody] MatchDto matchDto, CancellationToken cancellationToken)
+        [Authorize]
+        public async Task<ActionResult<MatchDto>> Create([FromBody] CreateMatchDto dto, CancellationToken cancellationToken)
         {
-            if (matchDto == null)
+            if (dto == null)
                 return BadRequest("Os dados da partida são obrigatórios.");
 
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
-            var createdMatch = await _matchService.AddAsync(matchDto, cancellationToken);
-            return CreatedAtAction(nameof(GetById), new { id = createdMatch.Id }, createdMatch);
+            var userId = User.GetUserId();
+
+            try
+            {
+                var created = await _matchService.CreateAsync(dto, userId, cancellationToken);
+                return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return Forbid(ex.Message);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
         }
 
-        /// <summary>
-        /// 🔹 Atualiza uma partida existente.
-        /// </summary>
-        /// <param name="id">ID da partida a ser atualizada.</param>
-        /// <param name="matchDto">Dados da partida.</param>
-        /// <param name="cancellationToken">Token para cancelamento da requisição.</param>
-        /// <returns>Sem conteúdo em caso de sucesso.</returns>
-        /// <response code="204">Partida atualizada com sucesso.</response>
-        /// <response code="400">IDs não coincidem ou dados inválidos.</response>
-        /// <response code="404">Partida não encontrada.</response>
         [HttpPut("{id:guid}")]
+        [Authorize]
         public async Task<ActionResult> Update(Guid id, [FromBody] MatchDto matchDto, CancellationToken cancellationToken)
         {
             if (matchDto == null)
@@ -134,16 +125,8 @@ namespace MeepleBoardApi.Controllers
             return NoContent();
         }
 
-        /// <summary>
-        /// 🔹 Exclui uma partida pelo ID.
-        /// </summary>
-        /// <param name="id">ID da partida a ser excluída.</param>
-        /// <param name="cancellationToken">Token para cancelamento da requisição.</param>
-        /// <returns>Sem conteúdo se excluído com sucesso.</returns>
-        /// <response code="204">Partida excluída com sucesso.</response>
-        /// <response code="400">ID inválido.</response>
-        /// <response code="404">Partida não encontrada.</response>
         [HttpDelete("{id:guid}")]
+        [Authorize]
         public async Task<ActionResult> Delete(Guid id, CancellationToken cancellationToken)
         {
             if (id == Guid.Empty)

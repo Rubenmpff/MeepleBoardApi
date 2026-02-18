@@ -9,6 +9,7 @@ using MeepleBoard.Services.Settings;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using System.Net;
+using System.Net.Http.Headers;
 
 var builder = WebApplication.CreateBuilder(args);
 var configuration = builder.Configuration;
@@ -92,18 +93,23 @@ builder.Services.AddSwaggerGen(options =>
 });
 
 // ✅ Configura o HttpClient para descomprimir automaticamente respostas GZIP do BGG
-builder.Services.AddHttpClient<IBGGService, BGGService>()
-    .ConfigureHttpClient(client =>
+builder.Services.AddHttpClient<IBGGService, BGGService>((sp, client) =>
+{
+    var config = sp.GetRequiredService<IConfiguration>();
+
+    // Base URL SEM www
+    client.BaseAddress = new Uri(config["Bgg:BaseUrl"] ?? "https://boardgamegeek.com/xmlapi2/");
+
+    // Token vindo de config/user-secrets/env var
+    var token = config["Bgg:Token"];
+    if (!string.IsNullOrWhiteSpace(token))
     {
-        client.DefaultRequestHeaders.Add("Accept-Encoding", "gzip");
-    })
-    .ConfigurePrimaryHttpMessageHandler(() =>
-    {
-        return new HttpClientHandler
-        {
-            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
-        };
-    });
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", token);
+    }
+
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("MeepleBoard/1.0");
+});
 
 // ✅ Hangfire Configuração (armazenamento em SQL Server)
 builder.Services.AddHangfire(config =>

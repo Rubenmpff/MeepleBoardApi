@@ -74,6 +74,7 @@ namespace MeepleBoard.CrossCutting.IoC
             services.AddScoped<IAuthService, AuthService>();
             services.AddScoped<ITokenService, TokenService>(); // 🔐 TokenService com suporte a Refresh Token
             services.AddHttpClient<IBGGService, BGGService>(); // Integração com BoardGameGeek
+            services.AddScoped<IFriendshipService, FriendshipService>();
 
             services.AddScoped<UserCleanupJob>();
 

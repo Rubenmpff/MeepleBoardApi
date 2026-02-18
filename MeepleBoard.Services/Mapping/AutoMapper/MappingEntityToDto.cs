@@ -9,10 +9,20 @@ namespace MeepleBoardApi.Services.Mapping.AutoMapper
     {
         public MappingEntityToDto()
         {
+            // --- MatchPlayer ---
+            CreateMap<MatchPlayer, MatchPlayerDto>()
+                .ForMember(d => d.MatchId, o => o.MapFrom(s => s.MatchId))
+                .ForMember(d => d.UserId, o => o.MapFrom(s => s.UserId))
+                .ForMember(d => d.UserName, o => o.MapFrom(s => s.User != null ? s.User.UserName : "Jogador Desconhecido"))
+                .ForMember(d => d.Score, o => o.MapFrom(s => s.Score))
+                .ForMember(d => d.IsWinner, o => o.MapFrom(s => s.IsWinner))
+                .ForMember(d => d.RankPosition, o => o.MapFrom(s => s.RankPosition));
+
             // --- Match ---
             CreateMap<Match, MatchDto>()
                 .ForMember(d => d.GameName, o => o.MapFrom(s => s.Game != null ? s.Game.Name : "Jogo Desconhecido"))
-                .ForMember(d => d.WinnerName, o => o.MapFrom(s => s.Winner != null ? s.Winner.UserName : "Sem Vencedor"));
+                .ForMember(d => d.WinnerName, o => o.MapFrom(s => s.Winner != null ? s.Winner.UserName : "Sem Vencedor"))
+                .ForMember(d => d.Players, o => o.MapFrom(s => s.MatchPlayers));
 
             // --- User ---
             CreateMap<User, UserDto>();
@@ -34,9 +44,10 @@ namespace MeepleBoardApi.Services.Mapping.AutoMapper
 
             // --- GameSession ---
             CreateMap<GameSession, GameSessionDto>()
-                .ForMember(d => d.Organizer, o => o.MapFrom(s => s.OrganizerId.ToString()))
-                .ForMember(d => d.Players, o => o.MapFrom(s => s.Players))
-                .ForMember(d => d.Matches, o => o.MapFrom(s => s.Matches));
+                .ForMember(d => d.OrganizerId, opt => opt.MapFrom(s => s.OrganizerId))
+                .ForMember(d => d.OrganizerUserName, opt => opt.MapFrom(s => s.Organizer != null ? s.Organizer.UserName : string.Empty))
+                .ForMember(d => d.Players, opt => opt.MapFrom(s => s.Players))
+                .ForMember(d => d.Matches, opt => opt.MapFrom(s => s.Matches));
         }
     }
 }

@@ -7,26 +7,40 @@ namespace MeepleBoard.CrossCutting.Security
     {
         public static IServiceCollection AddOAuthProviders(this IServiceCollection services, IConfiguration configuration)
         {
-            services.AddAuthentication()
-                .AddGoogle(options =>
-                {
-                    options.ClientId = configuration["Authentication:Google:ClientId"] ?? string.Empty;
-                    options.ClientSecret = configuration["Authentication:Google:ClientSecret"] ?? string.Empty;
-                })
-                .AddApple(options =>
-                {
-                    options.ClientId = configuration["Authentication:Apple:ClientId"] ?? string.Empty;
-                    options.KeyId = configuration["Authentication:Apple:KeyId"] ?? string.Empty;
-                    options.TeamId = configuration["Authentication:Apple:TeamId"] ?? string.Empty;
+            var auth = services.AddAuthentication();
 
-                    // Certifique-se de que o ClientSecret está correto
-                    var clientSecret = configuration["Authentication:Apple:ClientSecret"] ?? string.Empty;
-                    if (string.IsNullOrEmpty(clientSecret))
-                    {
-                        throw new InvalidOperationException("Apple ClientSecret não foi encontrado no appsettings.json.");
-                    }
-                    options.ClientSecret = clientSecret;
+            // ✅ Google: só configura se tiver credenciais
+            var googleClientId = configuration["Authentication:Google:ClientId"];
+            var googleClientSecret = configuration["Authentication:Google:ClientSecret"];
+
+            if (!string.IsNullOrWhiteSpace(googleClientId) && !string.IsNullOrWhiteSpace(googleClientSecret))
+            {
+                auth.AddGoogle(options =>
+                {
+                    options.ClientId = googleClientId;
+                    options.ClientSecret = googleClientSecret;
                 });
+            }
+
+            // ✅ Apple: só configura se tiver credenciais
+            var appleClientId = configuration["Authentication:Apple:ClientId"];
+            var appleKeyId = configuration["Authentication:Apple:KeyId"];
+            var appleTeamId = configuration["Authentication:Apple:TeamId"];
+            var appleClientSecret = configuration["Authentication:Apple:ClientSecret"];
+
+            if (!string.IsNullOrWhiteSpace(appleClientId) &&
+                !string.IsNullOrWhiteSpace(appleKeyId) &&
+                !string.IsNullOrWhiteSpace(appleTeamId) &&
+                !string.IsNullOrWhiteSpace(appleClientSecret))
+            {
+                auth.AddApple(options =>
+                {
+                    options.ClientId = appleClientId;
+                    options.KeyId = appleKeyId;
+                    options.TeamId = appleTeamId;
+                    options.ClientSecret = appleClientSecret;
+                });
+            }
 
             return services;
         }

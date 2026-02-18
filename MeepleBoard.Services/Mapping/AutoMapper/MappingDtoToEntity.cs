@@ -16,13 +16,6 @@ namespace MeepleBoardApi.Services.Mapping.AutoMapper
                 .ForMember(dest => dest.UpdatedAt, opt => opt.Ignore())
                 .ReverseMap();
 
-            // --- Match ---
-            CreateMap<MatchDto, Match>()
-                .ForMember(dest => dest.Id, opt => opt.Ignore())
-                .ForMember(dest => dest.CreatedAt, opt => opt.Ignore())
-                .ForMember(dest => dest.UpdatedAt, opt => opt.Ignore())
-                .ReverseMap();
-
             // --- User ---
             CreateMap<UserDto, User>()
                 .ForMember(dest => dest.Id, opt => opt.Ignore())

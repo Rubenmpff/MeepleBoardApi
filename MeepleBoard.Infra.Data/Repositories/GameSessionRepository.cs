@@ -5,10 +5,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MeepleBoard.Infra.Data.Repositories
 {
-    /// <summary>
-    /// Implementação do repositório de sessões de jogo.
-    /// Controla persistência e carregamento de relacionamentos.
-    /// </summary>
     public class GameSessionRepository : IGameSessionRepository
     {
         private readonly MeepleBoardDbContext _context;
@@ -18,63 +14,65 @@ namespace MeepleBoard.Infra.Data.Repositories
             _context = context;
         }
 
-        public async Task<GameSession?> GetByIdAsync(Guid id, bool includeRelations = true)
+        /// <summary>
+        /// ✅ Lista LEVE (para screen de listagem).
+        /// Sem carregar Players/User e Matches em memória.
+        /// </summary>
+        public async Task<IReadOnlyList<GameSession>> GetListAsync(CancellationToken ct = default)
         {
-            IQueryable<GameSession> query = _context.GameSessions.AsNoTracking();
-
-            if (includeRelations)
-            {
-                query = query
-                    .Include(s => s.Players)
-                        .ThenInclude(p => p.User)
-                    .Include(s => s.Matches);
-            }
-
-            return await query.FirstOrDefaultAsync(s => s.Id == id);
+            return await _context.GameSessions
+                .AsNoTracking()
+                .Include(s => s.Organizer) // para OrganizerUserName
+                                           // ⚠️ Não usar Include(s => s.Players) / Include(s => s.Matches) aqui
+                .OrderByDescending(s => s.StartDate)
+                .ToListAsync(ct);
         }
 
-        public async Task<IEnumerable<GameSession>> GetAllAsync(bool includeRelations = true)
+        /// <summary>
+        /// ✅ Detalhe COMPLETO (para /session/{id}).
+        /// </summary>
+        public async Task<GameSession?> GetByIdWithDetailsAsync(Guid id, CancellationToken ct = default)
         {
-            IQueryable<GameSession> query = _context.GameSessions.AsNoTracking();
-
-            if (includeRelations)
-            {
-                query = query
-                    .Include(s => s.Players)
-                        .ThenInclude(p => p.User)
-                    .Include(s => s.Matches);
-            }
-
-            return await query.OrderByDescending(s => s.StartDate).ToListAsync();
+            return await _context.GameSessions
+                .AsNoTracking()
+                .Include(s => s.Organizer)
+                .Include(s => s.Players)
+                    .ThenInclude(p => p.User)
+                .Include(s => s.Matches)
+                // se precisares depois: .ThenInclude(m => m.MatchPlayers).ThenInclude(mp => mp.User)
+                .FirstOrDefaultAsync(s => s.Id == id, ct);
         }
 
-        public async Task AddAsync(GameSession session)
+        /// <summary>
+        /// ✅ Para updates (com tracking ligado).
+        /// </summary>
+        public async Task<GameSession?> GetByIdForUpdateAsync(Guid id, CancellationToken ct = default)
         {
-            if (session == null)
-                throw new ArgumentNullException(nameof(session));
-
-            await _context.GameSessions.AddAsync(session);
+            return await _context.GameSessions
+                .FirstOrDefaultAsync(s => s.Id == id, ct);
         }
 
-        public Task UpdateAsync(GameSession session)
+        public async Task AddAsync(GameSession session, CancellationToken ct = default)
         {
-            if (session == null)
-                throw new ArgumentNullException(nameof(session));
+            if (session == null) throw new ArgumentNullException(nameof(session));
+            await _context.GameSessions.AddAsync(session, ct);
+        }
 
+        public Task UpdateAsync(GameSession session, CancellationToken ct = default)
+        {
+            if (session == null) throw new ArgumentNullException(nameof(session));
             _context.GameSessions.Update(session);
-            return Task.CompletedTask; // Espera que SaveChangesAsync seja chamado externamente
+            return Task.CompletedTask;
         }
 
-        public async Task DeleteAsync(Guid id)
+        public async Task DeleteAsync(Guid id, CancellationToken ct = default)
         {
-            var session = await _context.GameSessions.FindAsync(id);
+            var session = await _context.GameSessions.FindAsync(new object[] { id }, ct);
             if (session != null)
                 _context.GameSessions.Remove(session);
         }
 
-        public async Task SaveChangesAsync()
-        {
-            await _context.SaveChangesAsync();
-        }
+        public Task SaveChangesAsync(CancellationToken ct = default)
+            => _context.SaveChangesAsync(ct);
     }
 }

@@ -53,14 +53,10 @@ namespace MeepleBoardApi.Controllers
         /// O utilizador autenticado é automaticamente o organizador.
         /// </summary>
         [HttpPost]
-        [ProducesResponseType(typeof(GameSessionDto), 201)]
-        [ProducesResponseType(400)]
-        [ProducesResponseType(401)]
         public async Task<IActionResult> Create([FromBody] CreateGameSessionDto dto)
         {
             try
             {
-                // 🔐 Extrai o utilizador autenticado do JWT
                 var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
                     ?? User.FindFirst("nameid")?.Value;
 
@@ -72,22 +68,24 @@ namespace MeepleBoardApi.Controllers
                 if (string.IsNullOrWhiteSpace(dto.Name))
                     return BadRequest(new { message = "O nome da sessão é obrigatório." });
 
-                var session = await _sessionService.CreateAsync(dto.Name, organizerId, dto.Location);
-                _logger.LogInformation("Sessão criada com sucesso por utilizador {UserId}", organizerId);
+                var session = await _sessionService.CreateAsync(dto, organizerId);
 
                 return CreatedAtAction(nameof(GetById), new { id = session.Id }, session);
             }
             catch (ArgumentException ex)
             {
-                _logger.LogWarning(ex, "Erro de validação ao criar sessão.");
                 return BadRequest(new { message = ex.Message });
             }
-            catch (Exception ex)
+            catch (InvalidOperationException ex)
             {
-                _logger.LogError(ex, "Erro inesperado ao criar sessão.");
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Exception)
+            {
                 return StatusCode(500, new { message = "Erro interno ao criar sessão." });
             }
         }
+
 
         /// <summary>
         /// Adiciona um jogador a uma sessão existente.

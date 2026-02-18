@@ -49,10 +49,11 @@ public class BGGService : IBGGService
 
         try
         {
-            var url = $"https://www.boardgamegeek.com/xmlapi2/search?query={Uri.EscapeDataString(gameName)}&type=boardgame,boardgameexpansion";
+            // URL relativa (BaseAddress deve ser https://boardgamegeek.com/xmlapi2/)
+            var url = $"search?query={Uri.EscapeDataString(gameName)}&type=boardgame,boardgameexpansion";
             var response = await GetWithRetryAsync(url, cancellationToken);
 
-            if (string.IsNullOrWhiteSpace(response) || !response.TrimStart().StartsWith("<"))
+            if (!IsXml(response))
             {
                 _logger.LogWarning("⚠️ Resposta inesperada ao buscar jogos: {Response}", response);
                 return new();
@@ -62,17 +63,28 @@ public class BGGService : IBGGService
             var items = xml.Descendants("item").ToList();
             if (!items.Any()) return new();
 
+            var ids = items
+                .Select(i => i.Attribute("id")?.Value)
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct()
+                .ToList();
+
+            if (!ids.Any()) return new();
+
+            // ⚡ Otimização: em vez de chamar /thing 1 a 1, faz bateladas
+            // (mantém a tua intenção de não "martelar" a API)
             var games = new List<GameDto>();
-            foreach (var item in items)
+            const int batchSize = 20;
+
+            for (int i = 0; i < ids.Count; i += batchSize)
             {
-                var id = item.Attribute("id")?.Value;
-                if (string.IsNullOrWhiteSpace(id)) continue;
+                var batch = ids.Skip(i).Take(batchSize).ToList();
+                var batchGames = await GetGamesByIdsAsync(batch, cancellationToken);
+                games.AddRange(batchGames);
 
-                var parsed = await GetGameByIdAsync(id, cancellationToken);
-                if (parsed != null)
-                    games.Add(parsed);
-
-                await Task.Delay(1000, cancellationToken); // Delay entre chamadas
+                // pequeno delay entre batches para ser "BGG-friendly"
+                if (i + batchSize < ids.Count)
+                    await Task.Delay(600, cancellationToken);
             }
 
             return games;
@@ -86,12 +98,14 @@ public class BGGService : IBGGService
 
     public async Task<GameDto?> GetGameByIdAsync(string gameId, CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(gameId)) return null;
+
         try
         {
-            var url = $"https://www.boardgamegeek.com/xmlapi2/thing?id={gameId}&stats=1";
+            var url = $"thing?id={gameId}&stats=1";
             var response = await GetWithRetryAsync(url, cancellationToken);
 
-            if (string.IsNullOrWhiteSpace(response) || !response.TrimStart().StartsWith("<"))
+            if (!IsXml(response))
             {
                 _logger.LogWarning("⚠️ Resposta inesperada do BGG para ID {GameId}. Não é XML: {Response}", gameId, response);
                 return null;
@@ -119,24 +133,15 @@ public class BGGService : IBGGService
     {
         try
         {
-            var url = "https://boardgamegeek.com/xmlapi2/hot?type=boardgame";
-            var response = await _httpClient.GetStringAsync(url, cancellationToken);
+            var response = await GetWithRetryAsync("hot?type=boardgame", cancellationToken);
 
-            XDocument xml;
-            try
+            if (!IsXml(response))
             {
-                if (string.IsNullOrWhiteSpace(response) || !response.TrimStart().StartsWith("<"))
-                {
-                    _logger.LogWarning("⚠️ Resposta inesperada da hot list do BGG: {Response}", response);
-                    return new();
-                }
-                xml = XDocument.Parse(response);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "❌ Erro ao parsear XML da hot list do BGG");
+                _logger.LogWarning("⚠️ Resposta inesperada da hot list do BGG: {Response}", response);
                 return new();
             }
+
+            var xml = XDocument.Parse(response);
 
             return xml.Descendants("item")
                 .Select(item => new GameDto
@@ -159,26 +164,27 @@ public class BGGService : IBGGService
 
     public async Task<List<GameDto>> GetGamesByIdsAsync(List<string> ids, CancellationToken cancellationToken = default)
     {
+        if (ids == null || ids.Count == 0) return new();
+
         try
         {
-            var url = $"https://www.boardgamegeek.com/xmlapi2/thing?id={string.Join(",", ids)}&stats=1&type=boardgame,boardgameexpansion";
-            var response = await _httpClient.GetStringAsync(url, cancellationToken);
+            var cleanIds = ids
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct()
+                .ToList();
 
-            XDocument xml;
-            try
+            if (!cleanIds.Any()) return new();
+
+            var url = $"thing?id={string.Join(",", cleanIds)}&stats=1&type=boardgame,boardgameexpansion";
+            var response = await GetWithRetryAsync(url, cancellationToken);
+
+            if (!IsXml(response))
             {
-                if (string.IsNullOrWhiteSpace(response) || !response.TrimStart().StartsWith("<"))
-                {
-                    _logger.LogWarning("⚠️ Resposta inesperada do BGG para GetGamesByIds");
-                    return new();
-                }
-                xml = XDocument.Parse(response);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "❌ Erro ao parsear XML no GetGamesByIdsAsync");
+                _logger.LogWarning("⚠️ Resposta inesperada do BGG para GetGamesByIds");
                 return new();
             }
+
+            var xml = XDocument.Parse(response);
 
             return xml.Descendants("item")
                 .Select(item => ParseGameItem(item, item.Attribute("id")?.Value))
@@ -193,64 +199,92 @@ public class BGGService : IBGGService
     }
 
     public async Task<List<GameSuggestionDto>> SearchGameSuggestionsAsync(
-    string query, int offset = 0, int limit = 10, CancellationToken cancellationToken = default)
+        string query,
+        int offset = 0,
+        int limit = 10,
+        CancellationToken cancellationToken = default)
     {
-        var url = $"https://www.boardgamegeek.com/xmlapi2/search?query={Uri.EscapeDataString(query)}&type=boardgame,boardgameexpansion";
-        var response = await _httpClient.GetStringAsync(url, cancellationToken);
+        if (string.IsNullOrWhiteSpace(query)) return new();
 
-        var xml = XDocument.Parse(response);
-        var allItems = xml.Descendants("item")
-            .Where(i => i.Attribute("id") != null)
-            .ToList();
-
-        // ✅ Aplica paginação de forma segura
-        var ids = allItems
-            .Select(i => i.Attribute("id")?.Value)
-            .Where(id => !string.IsNullOrWhiteSpace(id))
-            .Skip(offset)
-            .Take(limit * 2) // ← carrega mais para prevenir duplicados
-            .Distinct()
-            .Take(limit)
-            .ToList();
-
-        if (!ids.Any()) return new();
-
-        var detailUrl = $"https://boardgamegeek.com/xmlapi2/thing?id={string.Join(",", ids)}&stats=1";
-        var detailResponse = await _httpClient.GetStringAsync(detailUrl, cancellationToken);
-
-        var detailXml = XDocument.Parse(detailResponse);
-        var detailItems = detailXml.Descendants("item");
-
-        return detailItems.Select(item =>
+        try
         {
-            var idStr = item.Attribute("id")?.Value;
-            var name = item.Elements("name")
-                .FirstOrDefault(x => x.Attribute("type")?.Value == "primary")
-                ?.Attribute("value")?.Value;
-            var yearStr = item.Element("yearpublished")?.Attribute("value")?.Value;
-            var imageUrl = item.Element("thumbnail")?.Value;
+            var url = $"search?query={Uri.EscapeDataString(query)}&type=boardgame,boardgameexpansion";
+            var response = await GetWithRetryAsync(url, cancellationToken);
 
-            var type = item.Attribute("type")?.Value;
-            bool isExpansion = type == "boardgameexpansion";
-
-            if (int.TryParse(idStr, out var id) && !string.IsNullOrWhiteSpace(name))
+            if (!IsXml(response))
             {
-                return new GameSuggestionDto
-                {
-                    BggId = id,
-                    Name = name,
-                    YearPublished = int.TryParse(yearStr, out var y) ? y : null,
-                    ImageUrl = imageUrl,
-                    IsExpansion = isExpansion
-                };
+                _logger.LogWarning("⚠️ Resposta inesperada do BGG em SearchGameSuggestions: {Response}", response);
+                return new();
             }
 
-            return null;
-        }).Where(x => x != null).ToList()!;
+            var xml = XDocument.Parse(response);
+
+            var allIds = xml.Descendants("item")
+                .Select(i => i.Attribute("id")?.Value)
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct()
+                .ToList();
+
+            // paginação segura
+            var ids = allIds
+                .Skip(Math.Max(0, offset))
+                .Take(Math.Max(1, limit))
+                .ToList();
+
+            if (!ids.Any()) return new();
+
+            var detailUrl = $"thing?id={string.Join(",", ids)}&stats=1";
+            var detailResponse = await GetWithRetryAsync(detailUrl, cancellationToken);
+
+            if (!IsXml(detailResponse))
+            {
+                _logger.LogWarning("⚠️ Resposta inesperada do BGG em SearchGameSuggestions (/thing): {Response}", detailResponse);
+                return new();
+            }
+
+            var detailXml = XDocument.Parse(detailResponse);
+            var detailItems = detailXml.Descendants("item");
+
+            return detailItems
+                .Select(item =>
+                {
+                    var idStr = item.Attribute("id")?.Value;
+                    var name = item.Elements("name")
+                        .FirstOrDefault(x => x.Attribute("type")?.Value == "primary")
+                        ?.Attribute("value")?.Value;
+
+                    var yearStr = item.Element("yearpublished")?.Attribute("value")?.Value;
+
+                    // ⚠️ no XML API2, thumbnail/image são elementos com valor no texto (Value),
+                    // mas por vezes vêm como <thumbnail>url</thumbnail>
+                    var imageUrl = item.Element("thumbnail")?.Value;
+
+                    var type = item.Attribute("type")?.Value;
+                    var isExpansion = type == "boardgameexpansion";
+
+                    if (int.TryParse(idStr, out var id) && !string.IsNullOrWhiteSpace(name))
+                    {
+                        return new GameSuggestionDto
+                        {
+                            BggId = id,
+                            Name = name,
+                            YearPublished = int.TryParse(yearStr, out var y) ? y : null,
+                            ImageUrl = imageUrl,
+                            IsExpansion = isExpansion
+                        };
+                    }
+
+                    return null;
+                })
+                .Where(x => x != null)
+                .ToList()!;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Erro em SearchGameSuggestionsAsync");
+            return new();
+        }
     }
-
-
-
 
     private GameDto? ParseGameItem(XElement item, string? gameId)
     {
@@ -348,20 +382,40 @@ public class BGGService : IBGGService
 
     private async Task<string> GetWithRetryAsync(string url, CancellationToken cancellationToken)
     {
-        const int maxRetries = 5;
+        const int maxRetries = 6;
         var delay = TimeSpan.FromSeconds(2);
 
         for (int attempt = 1; attempt <= maxRetries; attempt++)
         {
+            HttpResponseMessage? response = null;
+
             try
             {
-                var response = await _httpClient.GetAsync(url, cancellationToken);
+                response = await _httpClient.GetAsync(url, cancellationToken);
 
-                if ((int)response.StatusCode == 429)
+                // 401: token/config errado (não adianta retry infinito)
+                if (response.StatusCode == HttpStatusCode.Unauthorized)
                 {
-                    _logger.LogWarning("⏳ [Tentativa {Attempt}] BGG retornou 429 (Too Many Requests). Aguardando {Delay}s...", attempt, delay.TotalSeconds);
+                    var body401 = await response.Content.ReadAsStringAsync(cancellationToken);
+                    _logger.LogError("❌ BGG 401 Unauthorized. Confere o Bearer token e BaseAddress. Body: {Body}", body401);
+                    response.EnsureSuccessStatusCode();
+                }
+
+                // 429: too many requests
+                if (response.StatusCode == (HttpStatusCode)429)
+                {
+                    _logger.LogWarning("⏳ [Tentativa {Attempt}] BGG retornou 429. Aguardando {Delay}s...", attempt, delay.TotalSeconds);
                     await Task.Delay(delay, cancellationToken);
-                    delay *= 2;
+                    delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * 2, 30));
+                    continue;
+                }
+
+                // 202: Accepted / a gerar resultado (muito comum em alguns endpoints)
+                if (response.StatusCode == HttpStatusCode.Accepted)
+                {
+                    _logger.LogInformation("⏳ [Tentativa {Attempt}] BGG retornou 202 (Accepted). Aguardando {Delay}s...", attempt, delay.TotalSeconds);
+                    await Task.Delay(delay, cancellationToken);
+                    delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * 1.5, 15));
                     continue;
                 }
 
@@ -372,12 +426,19 @@ public class BGGService : IBGGService
             {
                 _logger.LogWarning(ex, "⚠️ [Tentativa {Attempt}] Falha ao requisitar {Url}. Repetindo...", attempt, url);
                 await Task.Delay(delay, cancellationToken);
-                delay *= 2;
+                delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * 2, 30));
+            }
+            finally
+            {
+                response?.Dispose();
             }
         }
 
         throw new HttpRequestException($"❌ Todas as tentativas falharam para: {url}");
     }
+
+    private static bool IsXml(string? s)
+        => !string.IsNullOrWhiteSpace(s) && s.TrimStart().StartsWith("<");
 
     private bool IsPossiblyExpansion(string description)
     {
