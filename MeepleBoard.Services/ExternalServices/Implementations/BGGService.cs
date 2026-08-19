@@ -1,6 +1,7 @@
 ﻿using MeepleBoard.Services.DTOs;
 using MeepleBoard.Services.Interfaces;
 using MeepleBoard.Services.Mapping.Dtos;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using System.Globalization;
 using System.Net;
@@ -11,11 +12,38 @@ public class BGGService : IBGGService
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger<BGGService> _logger;
+    private readonly IMemoryCache _cache;
 
-    public BGGService(HttpClient httpClient, ILogger<BGGService> logger)
+    // Cache PARTILHADA por todos os utilizadores — se a Ana pesquisar "Wingspan"
+    // agora, o Bruno que pesquisar "Wingspan" daqui a 1 hora recebe a resposta
+    // guardada, sem ires ao BGG outra vez. Isto é o que protege o BGG quando há
+    // muita gente a usar a app ao mesmo tempo (o debounce no telemóvel de cada
+    // pessoa só protege contra ELA PRÓPRIA pedir demasiado, não contra muita
+    // gente diferente a pesquisar coisas diferentes ao mesmo tempo).
+    private static readonly TimeSpan SuggestionsCacheTtl = TimeSpan.FromHours(12);
+    private static readonly TimeSpan HotGamesCacheTtl = TimeSpan.FromHours(6);
+
+    private const string CooperativeMechanic = "Cooperative Game";
+
+    // Mecânicas/categoria do BGG que indicam que o jogo é (tipicamente) jogado em campanha
+    private static readonly string[] CampaignMechanics = { "Legacy Game", "Campaign / Battle Card Driven" };
+    private const string CampaignCategory = "Campaign Games";
+
+    /// <summary>Deteta se o item do BGG (XML) tem mecânica/categoria de campanha/legacy.</summary>
+    private static bool DetectSupportsCampaign(XElement item)
+    {
+        return item.Elements("link").Any(l =>
+            (l.Attribute("type")?.Value == "boardgamemechanic" &&
+             CampaignMechanics.Contains(l.Attribute("value")?.Value)) ||
+            (l.Attribute("type")?.Value == "boardgamecategory" &&
+             l.Attribute("value")?.Value == CampaignCategory));
+    }
+
+    public BGGService(HttpClient httpClient, ILogger<BGGService> logger, IMemoryCache cache)
     {
         _httpClient = httpClient;
         _logger = logger;
+        _cache = cache;
     }
 
     public async Task<GameDto?> GetGameByNameAsync(string gameName, CancellationToken cancellationToken = default)
@@ -66,6 +94,7 @@ public class BGGService : IBGGService
             var ids = items
                 .Select(i => i.Attribute("id")?.Value)
                 .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Select(id => id!)
                 .Distinct()
                 .ToList();
 
@@ -131,6 +160,14 @@ public class BGGService : IBGGService
 
     public async Task<List<GameDto>> GetHotGamesAsync(CancellationToken cancellationToken = default)
     {
+        const string cacheKey = "bgg:hot-games";
+
+        if (_cache.TryGetValue(cacheKey, out List<GameDto>? cached) && cached != null)
+        {
+            _logger.LogInformation("💾 Cache HIT para jogos em destaque — não foi preciso ir ao BGG.");
+            return cached;
+        }
+
         try
         {
             var response = await GetWithRetryAsync("hot?type=boardgame", cancellationToken);
@@ -143,7 +180,7 @@ public class BGGService : IBGGService
 
             var xml = XDocument.Parse(response);
 
-            return xml.Descendants("item")
+            var hotGames = xml.Descendants("item")
                 .Select(item => new GameDto
                 {
                     Name = item.Element("name")?.Attribute("value")?.Value ?? "Unknown",
@@ -154,6 +191,13 @@ public class BGGService : IBGGService
                 })
                 .Where(g => g.BggId.HasValue)
                 .ToList();
+
+            if (hotGames.Count > 0)
+            {
+                _cache.Set(cacheKey, hotGames, HotGamesCacheTtl);
+            }
+
+            return hotGames;
         }
         catch (Exception ex)
         {
@@ -199,13 +243,41 @@ public class BGGService : IBGGService
     }
 
     public async Task<List<GameSuggestionDto>> SearchGameSuggestionsAsync(
-        string query,
-        int offset = 0,
-        int limit = 10,
-        CancellationToken cancellationToken = default)
+    string query,
+    int offset = 0,
+    int limit = 10,
+    CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(query)) return new();
 
+        // Normaliza para a chave de cache não distinguir "Wingspan", " wingspan " e "WINGSPAN"
+        var normalizedQuery = query.Trim().ToLowerInvariant();
+        var cacheKey = $"bgg:suggestions:{normalizedQuery}:{offset}:{limit}";
+
+        if (_cache.TryGetValue(cacheKey, out List<GameSuggestionDto>? cached) && cached != null)
+        {
+            _logger.LogInformation("💾 Cache HIT para pesquisa \"{Query}\" — não foi preciso ir ao BGG.", normalizedQuery);
+            return cached;
+        }
+
+        var result = await SearchGameSuggestionsFromBggAsync(query, offset, limit, cancellationToken);
+
+        // Só guarda em cache se veio algo válido — um erro/lista vazia não deve
+        // "envenenar" a cache e impedir tentativas seguintes de funcionarem.
+        if (result.Count > 0)
+        {
+            _cache.Set(cacheKey, result, SuggestionsCacheTtl);
+        }
+
+        return result;
+    }
+
+    private async Task<List<GameSuggestionDto>> SearchGameSuggestionsFromBggAsync(
+    string query,
+    int offset,
+    int limit,
+    CancellationToken cancellationToken)
+    {
         try
         {
             var url = $"search?query={Uri.EscapeDataString(query)}&type=boardgame,boardgameexpansion";
@@ -225,7 +297,6 @@ public class BGGService : IBGGService
                 .Distinct()
                 .ToList();
 
-            // paginação segura
             var ids = allIds
                 .Skip(Math.Max(0, offset))
                 .Take(Math.Max(1, limit))
@@ -233,19 +304,19 @@ public class BGGService : IBGGService
 
             if (!ids.Any()) return new();
 
+            // Buscar detalhes completos incluindo mecânicas (stats=1)
             var detailUrl = $"thing?id={string.Join(",", ids)}&stats=1";
             var detailResponse = await GetWithRetryAsync(detailUrl, cancellationToken);
 
             if (!IsXml(detailResponse))
             {
-                _logger.LogWarning("⚠️ Resposta inesperada do BGG em SearchGameSuggestions (/thing): {Response}", detailResponse);
+                _logger.LogWarning("⚠️ Resposta inesperada do BGG em SearchGameSuggestions (/thing)");
                 return new();
             }
 
             var detailXml = XDocument.Parse(detailResponse);
-            var detailItems = detailXml.Descendants("item");
 
-            return detailItems
+            var byId = detailXml.Descendants("item")
                 .Select(item =>
                 {
                     var idStr = item.Attribute("id")?.Value;
@@ -253,29 +324,66 @@ public class BGGService : IBGGService
                         .FirstOrDefault(x => x.Attribute("type")?.Value == "primary")
                         ?.Attribute("value")?.Value;
 
+                    if (!int.TryParse(idStr, out var id) || string.IsNullOrWhiteSpace(name))
+                        return null;
+
                     var yearStr = item.Element("yearpublished")?.Attribute("value")?.Value;
-
-                    // ⚠️ no XML API2, thumbnail/image são elementos com valor no texto (Value),
-                    // mas por vezes vêm como <thumbnail>url</thumbnail>
                     var imageUrl = item.Element("thumbnail")?.Value;
-
                     var type = item.Attribute("type")?.Value;
                     var isExpansion = type == "boardgameexpansion";
 
-                    if (int.TryParse(idStr, out var id) && !string.IsNullOrWhiteSpace(name))
-                    {
-                        return new GameSuggestionDto
-                        {
-                            BggId = id,
-                            Name = name,
-                            YearPublished = int.TryParse(yearStr, out var y) ? y : null,
-                            ImageUrl = imageUrl,
-                            IsExpansion = isExpansion
-                        };
-                    }
+                    // ── Jogadores ──────────────────────────────────────────────
+                    int? minPlayers = int.TryParse(
+                        item.Element("minplayers")?.Attribute("value")?.Value, out var minP) ? minP : null;
+                    int? maxPlayers = int.TryParse(
+                        item.Element("maxplayers")?.Attribute("value")?.Value, out var maxP) ? maxP : null;
 
-                    return null;
+                    bool supportsSoloMode = minPlayers.HasValue && minPlayers.Value == 1;
+
+                    // ── Cooperativo ────────────────────────────────────────────
+                    bool isCooperative = item.Elements("link")
+                        .Any(l =>
+                            l.Attribute("type")?.Value == "boardgamemechanic" &&
+                            l.Attribute("value")?.Value == CooperativeMechanic);
+
+                    // ── Campanha/Legacy ──────────────────────────────────────────
+                    bool supportsCampaign = DetectSupportsCampaign(item);
+
+                    // ── Nota BGG (já vem no mesmo pedido, stats=1) ────────────────
+                    var avgStr = item.Descendants("average")?.FirstOrDefault()?.Attribute("value")?.Value;
+                    double? averageRating = double.TryParse(
+                        avgStr, System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture, out var avg) && avg > 0
+                        ? avg : null;
+
+                    // ── Nº de avaliações no BGG (mede "fama", sem pedido extra) ───
+                    var usersRatedStr = item.Descendants("usersrated")?.FirstOrDefault()?.Attribute("value")?.Value;
+                    int? ratingsCount = int.TryParse(usersRatedStr, out var ur) ? ur : null;
+
+                    return new GameSuggestionDto
+                    {
+                        BggId = id,
+                        Name = name,
+                        YearPublished = int.TryParse(yearStr, out var y) ? y : null,
+                        ImageUrl = imageUrl,
+                        IsExpansion = isExpansion,
+                        MinPlayers = minPlayers,
+                        MaxPlayers = maxPlayers,
+                        SupportsSoloMode = supportsSoloMode,
+                        IsCooperative = isCooperative,
+                        SupportsCampaign = supportsCampaign,
+                        AverageRating = averageRating,
+                        RatingsCount = ratingsCount,
+                    };
                 })
+                .Where(x => x != null)
+                .ToDictionary(x => x!.BggId, x => x!);
+
+            // ⚠️ O /thing NÃO garante devolver pela mesma ordem dos IDs pedidos —
+            // reconstruímos a lista pela ordem original do /search (a que mais se
+            // aproxima da relevância que o BGG calculou para esta pesquisa).
+            return ids
+                .Select(idStr => int.TryParse(idStr, out var id) && byId.TryGetValue(id, out var dto) ? dto : null)
                 .Where(x => x != null)
                 .ToList()!;
         }
@@ -315,12 +423,32 @@ public class BGGService : IBGGService
             var avgWeight = double.TryParse(weightStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var weight)
                 ? weight : (double?)null;
 
+            var usersRatedStr = item.Descendants("usersrated")?.FirstOrDefault()?.Attribute("value")?.Value;
+            var usersRatedCount = int.TryParse(usersRatedStr, out var ur) ? ur : (int?)null;
+
             var yearStr = item.Element("yearpublished")?.Attribute("value")?.Value;
             int? yearPublished = int.TryParse(yearStr, out var parsedYear) ? parsedYear : null;
 
-            int? minPlayers = int.TryParse(item.Element("minplayers")?.Attribute("value")?.Value, out var min) ? min : null;
-            int? maxPlayers = int.TryParse(item.Element("maxplayers")?.Attribute("value")?.Value, out var max) ? max : null;
+            // ── Jogadores ──────────────────────────────────────────────────────
+            int? minPlayers = int.TryParse(item.Element("minplayers")?.Attribute("value")?.Value, out var min)
+                ? min : null;
+            int? maxPlayers = int.TryParse(item.Element("maxplayers")?.Attribute("value")?.Value, out var max)
+                ? max : null;
 
+            // Solo: verdadeiro se minPlayers == 1
+            bool supportsSoloMode = minPlayers.HasValue && minPlayers.Value == 1;
+
+            // ── Cooperativo ────────────────────────────────────────────────────
+            // Deteta a mecânica "Cooperative Game" no BGG
+            bool isCooperative = item.Elements("link")
+                .Any(l =>
+                    l.Attribute("type")?.Value == "boardgamemechanic" &&
+                    l.Attribute("value")?.Value == CooperativeMechanic);
+
+            // ── Campanha/Legacy ──────────────────────────────────────────────────
+            bool supportsCampaign = DetectSupportsCampaign(item);
+
+            // ── Expansão ───────────────────────────────────────────────────────
             var type = item.Attribute("type")?.Value;
             bool isExpansion = type == "boardgameexpansion";
 
@@ -364,6 +492,10 @@ public class BGGService : IBGGService
                 MinPlayers = minPlayers,
                 MaxPlayers = maxPlayers,
                 AverageWeight = avgWeight,
+                UsersRatedCount = usersRatedCount,
+                SupportsSoloMode = supportsSoloMode,   // ← NOVO
+                IsCooperative = isCooperative,           // ← NOVO
+                SupportsCampaign = supportsCampaign,     // ← NOVO
                 Categories = item.Elements("link")
                     .Where(x => x.Attribute("type")?.Value == "boardgamecategory")
                     .Select(x => x.Attribute("value")?.Value)

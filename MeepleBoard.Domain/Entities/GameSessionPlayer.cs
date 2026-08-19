@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MeepleBoard.Domain.Enums;
 
 namespace MeepleBoard.Domain.Entities
 {
@@ -22,13 +23,29 @@ namespace MeepleBoard.Domain.Entities
 
         public bool IsOrganizer { get; private set; }
 
-        public DateTime JoinedAt { get; private set; }
+        /// <summary>
+        /// Estado do convite/participação nesta sessão.
+        /// Organizer entra sempre como Accepted.
+        /// </summary>
+        public GameSessionInviteStatus Status { get; private set; } = GameSessionInviteStatus.Pending;
+
+        public DateTime InvitedAt { get; private set; } = DateTime.UtcNow;
+
+        public DateTime? RespondedAt { get; private set; }
+
+        // Mantém (pode ser útil para auditoria/compat)
+        public DateTime JoinedAt { get; private set; } = DateTime.UtcNow;
+
+        // Se no futuro quiseres permitir "sair" (por agora não usas)
         public DateTime? LeftAt { get; private set; }
 
-        // Construtor privado para o EF
         private GameSessionPlayer() { }
 
-        // Construtor público
+        /// <summary>
+        /// Cria um vínculo de convite/participação.
+        /// Organizer: Accepted.
+        /// Convidados: Pending.
+        /// </summary>
         public GameSessionPlayer(Guid sessionId, Guid userId, bool isOrganizer = false)
         {
             if (sessionId == Guid.Empty)
@@ -40,8 +57,28 @@ namespace MeepleBoard.Domain.Entities
             Id = Guid.NewGuid();
             SessionId = sessionId;
             UserId = userId;
+
             IsOrganizer = isOrganizer;
+
+            InvitedAt = DateTime.UtcNow;
             JoinedAt = DateTime.UtcNow;
+
+            Status = isOrganizer ? GameSessionInviteStatus.Accepted : GameSessionInviteStatus.Pending;
+            RespondedAt = isOrganizer ? DateTime.UtcNow : null;
+        }
+
+        public void Accept()
+        {
+            if (Status == GameSessionInviteStatus.Accepted) return;
+            Status = GameSessionInviteStatus.Accepted;
+            RespondedAt = DateTime.UtcNow;
+        }
+
+        public void Decline()
+        {
+            if (Status == GameSessionInviteStatus.Declined) return;
+            Status = GameSessionInviteStatus.Declined;
+            RespondedAt = DateTime.UtcNow;
         }
 
         public void MarkAsLeft()

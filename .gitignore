@@ -12,26 +12,53 @@
 # =========================
 bin/
 obj/
+out/
 
 # =========================
 # Logs
 # =========================
 *.log
+logs/
 
 # =========================
-# Environment files (IMPORTANT)
+# Environment / secrets
 # =========================
 .env
 **/.env
-.env.*.local
+.env.*
+!.env.example
+
+appsettings.Development.json
+appsettings.Local.json
+appsettings.*.local.json
 
 # =========================
-# Node / Frontend (caso uses Expo/React)
+# Certificates / keys
+# =========================
+*.pfx
+*.p12
+*.pem
+*.key
+
+# =========================
+# Node / Frontend
 # =========================
 node_modules/
 .expo/
 dist/
 web-build/
+
+# =========================
+# Test / Coverage
+# =========================
+TestResults/
+coverage/
+coverage.*
+
+# =========================
+# JetBrains
+# =========================
+.idea/
 
 # =========================
 # OS Files

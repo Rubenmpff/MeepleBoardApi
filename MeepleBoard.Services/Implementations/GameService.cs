@@ -32,6 +32,72 @@ namespace MeepleBoard.Services.Implementations
         }
 
 
+        // -----------------------------------------------------------------------------
+        // MÉTODO PÚBLICO CENTRAL – GetOrCreateMinimalGameAsync
+        // Garante que o jogo existe na BD com o mínimo necessário.
+        // Usado por MatchService, UserGameLibraryService, e qualquer outro serviço
+        // que precise de uma referência local ao jogo sem importar tudo do BGG.
+        // REGRA: só guarda quando há interação real (partida, biblioteca, comentário).
+        // Pesquisas NUNCA chamam este método — apenas interações reais.
+        // -----------------------------------------------------------------------------
+        /// <summary>
+        /// Verifica se o jogo já existe na BD pelo BggId.
+        /// Se não existir, vai ao BGG, guarda só os campos essenciais (sem Description) e retorna.
+        /// Nunca deve ser chamado em pesquisas/sugestões — apenas em interações reais.
+        /// </summary>
+        /// <param name="bggId">ID do jogo no BoardGameGeek.</param>
+        /// <param name="ct">Token opcional de cancelamento.</param>
+        /// <returns>Entidade Game existente ou recém-criada com dados mínimos.</returns>
+        public async Task<Game> GetOrCreateMinimalGameAsync(int bggId, CancellationToken ct = default)
+        {
+            // 1. Já existe localmente pelo BggId?
+            var existing = await _gameRepository.GetGameByBggIdAsync(bggId, ct);
+            if (existing != null)
+            {
+                _logger.LogInformation("✅ Jogo já existe na BD (BggId: {BggId})", bggId);
+                return existing;
+            }
+
+            // 2. Vai ao BGG buscar dados
+            var bggGame = await _bggService.GetGameByIdAsync(bggId.ToString(), ct);
+            if (bggGame == null)
+                throw new KeyNotFoundException($"Jogo com BggId {bggId} não encontrado no BGG.");
+
+            // 3. Cria registo na BD com os campos essenciais
+            var game = new Game(
+                bggGame.Name,
+                "",                         // Description vazia — vem do BGG via cache
+                bggGame.ImageUrl,
+                bggGame.SupportsSoloMode    // solo mode vindo do BGG
+            );
+
+            game.SetBggId(bggGame.BggId);
+            game.ApproveGame();
+
+            // ── Guardar dados de jogadores e modo ─────────────────────────────────
+            game.SetPlayerCount(bggGame.MinPlayers, bggGame.MaxPlayers);
+            game.SetCooperative(bggGame.IsCooperative);
+            game.SetSupportsCampaign(bggGame.SupportsCampaign);
+            game.SetAverageRating(bggGame.AverageRating);
+            game.SetUsersRatedCount(bggGame.UsersRatedCount);
+            // ─────────────────────────────────────────────────────────────────────
+
+            // Guarda relação de expansão se aplicável
+            if (bggGame.IsExpansion && bggGame.BaseGameBggId.HasValue)
+                game.SetBaseGameBggId(bggGame.BaseGameBggId);
+
+            await _gameRepository.AddAsync(game, ct);
+            await _gameRepository.CommitAsync(ct);
+
+            _logger.LogInformation(
+                "💾 Jogo guardado na BD: {Name} (BggId: {BggId}) | Solo: {Solo} | Coop: {Coop} | {Min}-{Max} jogadores",
+                game.Name, bggId,
+                game.SupportsSoloMode, game.IsCooperative,
+                game.MinPlayers, game.MaxPlayers);
+
+            return game;
+        }
+
 
         /// <summary>
         /// Retrieves a paginated list of games from the repository,
@@ -61,6 +127,59 @@ namespace MeepleBoard.Services.Implementations
         }
 
 
+        public async Task<int> RecomputeAllMeepleBoardScoresAsync(CancellationToken ct = default)
+        {
+            var allGames = await _gameRepository.GetAllAsync(0, int.MaxValue, ct);
+            int updated = 0;
+
+            foreach (var game in allGames)
+            {
+                var avg = await _gameRepository.GetAveragePersonalRatingAsync(game.Id, ct);
+                var newScore = avg.HasValue ? (int?)Math.Round(avg.Value * 10) : null;
+
+                if (game.MeepleBoardScore != newScore)
+                {
+                    game.SetMeepleBoardScore(newScore);
+                    await _gameRepository.UpdateAsync(game, ct);
+                    updated++;
+                }
+            }
+
+            _logger.LogInformation("🏆 Recompute de MeepleBoardScore: {Updated}/{Total} jogos atualizados.", updated, allGames.Count);
+            return updated;
+        }
+
+        public async Task<PagedResponse<GameDto>> GetRankingsAsync(int pageIndex, int pageSize, CancellationToken ct = default)
+            => await GetRankingsAsync(pageIndex, pageSize, "meepleboard", ct);
+
+        public async Task<PagedResponse<GameDto>> GetRankingsAsync(int pageIndex, int pageSize, string source, CancellationToken ct = default)
+        {
+            var (items, total) = source == "bgg"
+                ? await _gameRepository.GetRankedByBggRatingAsync(pageIndex, pageSize, ct)
+                : await _gameRepository.GetRankedByMeepleBoardScoreAsync(pageIndex, pageSize, ct);
+
+            return new PagedResponse<GameDto>(
+                _mapper.Map<IReadOnlyList<GameDto>>(items),
+                total,
+                pageSize,
+                pageIndex
+            );
+        }
+
+        public async Task<PagedResponse<GameDto>> GetPersonalRankingsAsync(
+            Guid userId, int pageIndex, int pageSize, CancellationToken ct = default)
+        {
+            var (items, total) = await _gameRepository.GetPersonalRankingsAsync(userId, pageIndex, pageSize, ct);
+
+            var dtos = items.Select(x =>
+            {
+                var dto = _mapper.Map<GameDto>(x.Game);
+                dto.PersonalAverageRating = x.Rating;
+                return dto;
+            }).ToList();
+
+            return new PagedResponse<GameDto>(dtos, total, pageSize, pageIndex);
+        }
 
 
         /// <summary>
@@ -107,11 +226,6 @@ namespace MeepleBoard.Services.Implementations
         }
 
 
-
-
-
-
-
         /// <summary>
         /// Devolve um jogo existente na base de dados local com base no nome fornecido.
         /// Não realiza chamadas externas nem importa dados do BGG.
@@ -139,13 +253,6 @@ namespace MeepleBoard.Services.Implementations
             // Retorna o DTO do jogo se encontrado; senão, null.
             return game != null ? _mapper.Map<GameDto>(game) : null;
         }
-
-
-
-
-
-
-
 
 
         /// <summary>
@@ -182,12 +289,6 @@ namespace MeepleBoard.Services.Implementations
         }
 
 
-
-
-
-
-
-
         /// <summary>
         /// Tenta associar expansões órfãs ao jogo base recentemente importado.
         /// Expansões "órfãs" são aquelas que possuem o BGGId do jogo base,
@@ -222,10 +323,6 @@ namespace MeepleBoard.Services.Implementations
         }
 
 
-
-
-
-
         /// <summary>
         /// Importa um jogo diretamente do BGG, usando o seu ID.
         /// Se o jogo já existir localmente, ele será retornado. Caso contrário, será importado do BGG.
@@ -245,11 +342,8 @@ namespace MeepleBoard.Services.Implementations
         }
 
 
-
-
-
         public async Task<List<GameSuggestionDto>> SearchSuggestionsAsync(
-    string query, int offset = 0, int limit = 10, CancellationToken ct = default)
+            string query, int offset = 0, int limit = 10, CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(query))
                 return new List<GameSuggestionDto>();
@@ -263,7 +357,16 @@ namespace MeepleBoard.Services.Implementations
                 BggId = g.BGGId ?? 0,
                 Name = g.Name,
                 YearPublished = g.YearPublished,
-                ImageUrl = g.ImageUrl
+                ImageUrl = g.ImageUrl,
+                IsExpansion = g.BaseGameId.HasValue,
+                MinPlayers = g.MinPlayers,
+                MaxPlayers = g.MaxPlayers,
+                SupportsSoloMode = g.SupportsSoloMode,
+                IsCooperative = g.IsCooperative,
+                SupportsCampaign = g.SupportsCampaign,
+                AverageRating = g.AverageRating,
+                MeepleBoardScore = g.MeepleBoardScore,
+                RatingsCount = g.UsersRatedCount,
             }).ToList();
 
             // 2) Buscar no BGG apenas se faltar resultados locais
@@ -294,16 +397,14 @@ namespace MeepleBoard.Services.Implementations
                 }
             }
 
-            // **NÃO fazer Take(limit) aqui → devolve todos os resultados que achou**
-            return suggestions
-                .OrderBy(s => s.Name)
-                .ToList();
+            // ⚠️ NÃO ordenar por nome aqui — isso apagava a ordem de relevância
+            // que o BGG devolve (correspondência exata, popularidade, etc.) e
+            // trocava tudo por A-Z, fazendo a pesquisa parecer "diferente" do
+            // site do BGG. Os resultados locais vêm primeiro (já na ordem do
+            // repositório), seguidos pelos do BGG na ordem que o BGG escolheu.
+            // NÃO fazer Take(limit) aqui → devolve todos os resultados que achou
+            return suggestions;
         }
-
-
-
-
-
 
 
         /// <summary>
@@ -334,10 +435,20 @@ namespace MeepleBoard.Services.Implementations
                 .Where(g => g.BGGId.HasValue) // Garante que tem referência ao BGG
                 .Select(g => new GameSuggestionDto
                 {
+                    Id = g.Id.ToString(),
                     BggId = g.BGGId!.Value,
                     Name = g.Name,
                     YearPublished = g.YearPublished,
-                    ImageUrl = g.ImageUrl
+                    ImageUrl = g.ImageUrl,
+                    IsExpansion = true,
+                    MinPlayers = g.MinPlayers,
+                    MaxPlayers = g.MaxPlayers,
+                    SupportsSoloMode = g.SupportsSoloMode,
+                    IsCooperative = g.IsCooperative,
+                    SupportsCampaign = g.SupportsCampaign,
+                    AverageRating = g.AverageRating,
+                    MeepleBoardScore = g.MeepleBoardScore,
+                    RatingsCount = g.UsersRatedCount,
                 })
                 .ToList();
 
@@ -371,8 +482,6 @@ namespace MeepleBoard.Services.Implementations
         }
 
 
-
-
         /// <summary>
         /// Retorna sugestões de expansões para um jogo base, combinando dados locais e do BGG.
         /// </summary>
@@ -401,10 +510,20 @@ namespace MeepleBoard.Services.Implementations
                 .Where(g => g.BGGId.HasValue) // Garante que as expansões têm BGGId
                 .Select(g => new GameSuggestionDto
                 {
+                    Id = g.Id.ToString(),
                     BggId = g.BGGId!.Value,
                     Name = g.Name,
                     YearPublished = g.YearPublished,
-                    ImageUrl = g.ImageUrl
+                    ImageUrl = g.ImageUrl,
+                    IsExpansion = true,
+                    MinPlayers = g.MinPlayers,
+                    MaxPlayers = g.MaxPlayers,
+                    SupportsSoloMode = g.SupportsSoloMode,
+                    IsCooperative = g.IsCooperative,
+                    SupportsCampaign = g.SupportsCampaign,
+                    AverageRating = g.AverageRating,
+                    MeepleBoardScore = g.MeepleBoardScore,
+                    RatingsCount = g.UsersRatedCount,
                 })
                 .ToList();
 
@@ -436,88 +555,6 @@ namespace MeepleBoard.Services.Implementations
 
             return suggestions;
         }
-
-
-
-
-
-        ///// <summary>
-        ///// Pesquisa jogos base localmente e, se necessário, complementa com dados do BGG.
-        ///// Jogos importados do BGG são adicionados e persistidos na base de dados.
-        ///// </summary>
-        ///// <param name="query">Texto de pesquisa (nome do jogo).</param>
-        ///// <param name="offset">Deslocamento de paginação para os jogos locais.</param>
-        ///// <param name="limit">Número máximo de jogos a retornar.</param>
-        ///// <param name="cancellationToken">Token de cancelamento.</param>
-        ///// <returns>Lista de GameDto contendo os jogos encontrados ou importados.</returns>
-        //public async Task<List<GameDto>> SearchBaseGamesWithFallbackAsync(string query, int offset = 0, int limit = 10, CancellationToken cancellationToken = default)
-        //{
-        //    // ─────────────────────────────────────
-        //    // 1. Busca local: jogos base já existentes na base de dados
-        //    // ─────────────────────────────────────
-        //    var localBaseGames = await _gameRepository.SearchBaseGamesByNameAsync(
-        //        query, offset, limit, cancellationToken);
-
-        //    // Se já encontrou jogos suficientes localmente, retorna mapeados
-        //    if (localBaseGames.Count >= limit)
-        //        return _mapper.Map<List<GameDto>>(localBaseGames);
-
-        //    // ─────────────────────────────────────
-        //    // 2. Complementa com jogos do BGG (se houver espaço)
-        //    // ─────────────────────────────────────
-        //    var bggSuggestions = await _bggService.SearchGamesAsync(query, cancellationToken);
-
-        //    // Filtra apenas jogos base (não expansões) com BGG ID
-        //    // e que ainda não existem localmente
-        //    var filtered = bggSuggestions
-        //        .Where(g => !g.IsExpansion && g.BggId.HasValue)
-        //        .Where(bgg => !localBaseGames.Any(local => local.BGGId == bgg.BggId))
-        //        .Take(limit - localBaseGames.Count)
-        //        .ToList();
-
-        //    // ─────────────────────────────────────
-        //    // 3. Cria e persiste localmente os jogos importados
-        //    // ─────────────────────────────────────
-        //    var importedGames = new List<Game>();
-        //    foreach (var bgg in filtered)
-        //    {
-        //        var game = new Game(
-        //            bgg.Name,
-        //            bgg.Description,
-        //            bgg.ImageUrl,
-        //            bgg.SupportsSoloMode);
-
-        //        game.SetBggId(bgg.BggId);
-        //        game.SetAverageRating(bgg.AverageRating);
-        //        game.SetBggRanking(bgg.BggRanking);
-        //        game.UpdateBggStats(
-        //            bgg.Description,
-        //            bgg.ImageUrl,
-        //            bgg.BggRanking,
-        //            bgg.AverageRating,
-        //            bgg.YearPublished);
-
-        //        await _gameRepository.AddAsync(game, cancellationToken);
-        //        importedGames.Add(game);
-        //    }
-
-        //    // Confirma as inserções no repositório
-        //    await _gameRepository.CommitAsync(cancellationToken);
-
-        //    // ─────────────────────────────────────
-        //    // 4. Retorna a lista final mapeada (local + importados)
-        //    // ─────────────────────────────────────
-        //    return _mapper.Map<List<GameDto>>(
-        //        localBaseGames.Concat(importedGames).ToList());
-        //}
-
-
-
-
-
-
-
-
 
 
         /// <summary>
@@ -553,7 +590,15 @@ namespace MeepleBoard.Services.Implementations
                     Name = g.Name,
                     YearPublished = g.YearPublished,
                     ImageUrl = g.ImageUrl,
-                    IsExpansion = g.IsExpansion
+                    IsExpansion = g.IsExpansion,
+                    MinPlayers = g.MinPlayers,
+                    MaxPlayers = g.MaxPlayers,
+                    SupportsSoloMode = g.SupportsSoloMode,
+                    IsCooperative = g.IsCooperative,
+                    SupportsCampaign = g.SupportsCampaign,
+                    AverageRating = g.AverageRating,
+                    MeepleBoardScore = g.MeepleBoardScore,
+                    RatingsCount = g.UsersRatedCount,
                 })
                 .ToList();
 
@@ -584,14 +629,6 @@ namespace MeepleBoard.Services.Implementations
         }
 
 
-
-
-
-
-
-
-
-
         /// <summary>
         /// Retorna a lista de jogos que ainda estão pendentes de aprovação.
         /// </summary>
@@ -607,13 +644,6 @@ namespace MeepleBoard.Services.Implementations
         }
 
 
-
-
-
-
-
-
-
         /// <summary>
         /// Verifica se existe um jogo com o ID especificado.
         /// </summary>
@@ -624,13 +654,6 @@ namespace MeepleBoard.Services.Implementations
             (await _gameRepository.GetByIdAsync(id, cancellationToken)) != null;
 
 
-
-
-
-
-
-
-
         /// <summary>
         /// Verifica se existe um jogo com o nome especificado (ignorando espaços em branco).
         /// </summary>
@@ -639,13 +662,6 @@ namespace MeepleBoard.Services.Implementations
         /// <returns>Verdadeiro se o jogo existir na base de dados; caso contrário, falso.</returns>
         public async Task<bool> ExistsByNameAsync(string name, CancellationToken cancellationToken = default) =>
             await _gameRepository.ExistsByNameAsync(name.Trim(), cancellationToken);
-
-
-
-
-
-
-
 
 
         /// <summary>
@@ -673,6 +689,11 @@ namespace MeepleBoard.Services.Implementations
             if (gameDto.BggId.HasValue)
                 newGame.SetBggId(gameDto.BggId);
 
+            // ✅ Aprova sempre — não existe (ainda) nenhum ecrã/endpoint de admin
+            // para rever jogos pendentes, por isso um jogo por aprovar ficava
+            // escondido para sempre sem ninguém o conseguir corrigir.
+            newGame.ApproveGame();
+
             // Persiste o novo jogo na base de dados.
             await _gameRepository.AddAsync(newGame, cancellationToken);
             await _gameRepository.CommitAsync(cancellationToken);
@@ -680,9 +701,6 @@ namespace MeepleBoard.Services.Implementations
             // Retorna o ID do jogo recém-adicionado.
             return newGame.Id;
         }
-
-
-
 
 
         /// <summary>
@@ -714,9 +732,6 @@ namespace MeepleBoard.Services.Implementations
         }
 
 
-
-
-
         /// <summary>
         /// Remove um jogo da base de dados com base no seu ID.
         /// </summary>
@@ -736,9 +751,6 @@ namespace MeepleBoard.Services.Implementations
             // Confirma a operação e retorna o número de alterações persistidas.
             return await _gameRepository.CommitAsync(cancellationToken);
         }
-
-
-
 
 
         /// <summary>
@@ -765,10 +777,6 @@ namespace MeepleBoard.Services.Implementations
         }
 
 
-
-
-
-
         /// <summary>
         /// Obtém a lista de jogos mais recentemente jogados, até um limite definido.
         /// </summary>
@@ -783,10 +791,6 @@ namespace MeepleBoard.Services.Implementations
             // Mapeia as entidades para DTOs e retorna a lista.
             return _mapper.Map<IReadOnlyList<GameDto>>(games);
         }
-
-
-
-
 
 
         /// <summary>
@@ -805,12 +809,10 @@ namespace MeepleBoard.Services.Implementations
         }
 
 
-
-
-
-
         // -----------------------------------------------------------------------------
         // MÉTODO PRIVADO CENTRAL – Importa um jogo (base ou expansão) recursivamente.
+        // Usado APENAS quando o utilizador importa explicitamente via ImportByBggIdAsync.
+        // Guarda TUDO do BGG (descrição, ranking, etc.) — comportamento intencional.
         // -----------------------------------------------------------------------------
         /// <summary>
         /// Importa um jogo a partir do BGG (BoardGameGeek) de forma recursiva, garantindo que expansões
@@ -852,12 +854,16 @@ namespace MeepleBoard.Services.Implementations
 
             _logger.LogInformation("📦 Jogo encontrado no BGG: {Name} (ID: {BggId}) - Expansão: {IsExpansion}", bgg.Name, bgg.BggId, bgg.IsExpansion);
 
-            // C) Cria nova entidade Game com os dados do BGG
+            // C) Cria nova entidade Game com os dados do BGG — importação explícita guarda TUDO
             var game = new Game(bgg.Name, bgg.Description, bgg.ImageUrl, bgg.SupportsSoloMode);
             game.SetBggId(bgg.BggId);
+            game.ApproveGame(); // ✅ Jogos vindos do BGG são de fonte fiável — aprovados automaticamente
             game.SetAverageRating(bgg.AverageRating);
             game.SetBggRanking(bgg.BggRanking);
-            game.UpdateBggStats(bgg.Description, bgg.ImageUrl, bgg.BggRanking, bgg.AverageRating, bgg.YearPublished);
+            game.SetUsersRatedCount(bgg.UsersRatedCount);
+            game.UpdateBggStats(
+                bgg.Description, bgg.ImageUrl, bgg.BggRanking, bgg.AverageRating, bgg.YearPublished,
+                usersRatedCount: bgg.UsersRatedCount);
 
             // D) Se for expansão, importa também o jogo base
             if (bgg.IsExpansion && bgg.BaseGameBggId.HasValue)
@@ -896,12 +902,6 @@ namespace MeepleBoard.Services.Implementations
         // Sobrecarga conveniente que inicializa o conjunto de visitados
         private Task<Game?> ImportGameRecursiveAsync(int bggId, CancellationToken ct) =>
             ImportGameRecursiveAsync(bggId, new HashSet<int>(), ct);
-
-
-
-
-
-
 
 
         /// <summary>
@@ -948,6 +948,7 @@ namespace MeepleBoard.Services.Implementations
 
             existingGame.SetBggRanking(bggUpdated.BggRanking);
             existingGame.SetAverageRating(bggUpdated.AverageRating);
+            existingGame.SetUsersRatedCount(bggUpdated.UsersRatedCount);
 
             // 💾 Persiste as alterações na base de dados
             await _gameRepository.UpdateAsync(existingGame, cancellationToken);

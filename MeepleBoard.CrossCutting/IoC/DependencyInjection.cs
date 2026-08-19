@@ -3,8 +3,11 @@ using FluentValidation;
 using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Infra.Data.Context;
 using MeepleBoard.Infra.Data.Repositories;
+using MeepleBoard.Services.ExternalServices.Implementations;
+using MeepleBoard.Services.ExternalServices.Interfaces;
 using MeepleBoard.Services.Implementations;
 using MeepleBoard.Services.Interfaces;
+using MeepleBoard.Services.Job;
 using MeepleBoard.Services.Validator;
 using MeepleBoardApi.Services.Mapping.AutoMapper;
 using Microsoft.EntityFrameworkCore;
@@ -52,9 +55,10 @@ namespace MeepleBoard.CrossCutting.IoC
             services.AddScoped<IMatchRepository, MatchRepository>();
             services.AddScoped<IMatchPlayerRepository, MatchPlayerRepository>();
             services.AddScoped<IUserGameLibraryRepository, UserGameLibraryRepository>();
-            services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>(); // 🔐 Suporte para Refresh Tokens
+            services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>(); //  Suporte para Refresh Tokens
             services.AddScoped<IEmailResendLogRepository, EmailResendLogRepository>();
             services.AddScoped<IFriendshipRepository, FriendshipRepository>();
+            services.AddScoped<ICampaignRepository, CampaignRepository>();
 
             return services;
         }
@@ -72,11 +76,21 @@ namespace MeepleBoard.CrossCutting.IoC
             services.AddScoped<IUserGameLibraryService, UserGameLibraryService>();
             services.AddScoped<IEmailService, EmailService>();
             services.AddScoped<IAuthService, AuthService>();
-            services.AddScoped<ITokenService, TokenService>(); // 🔐 TokenService com suporte a Refresh Token
-            services.AddHttpClient<IBGGService, BGGService>(); // Integração com BoardGameGeek
+            services.AddScoped<ITokenService, TokenService>(); // TokenService com suporte a Refresh Token
             services.AddScoped<IFriendshipService, FriendshipService>();
+            services.AddScoped<ICampaignService, CampaignService>();
+            
 
+            // ── Fotos do diário de partidas (Cloudinary)
+            services.AddSingleton<IPhotoStorageService, CloudinaryPhotoStorageService>();
+
+            // ── Notificações push (Expo) 
+            services.AddHttpClient<INotificationService, NotificationService>();
+
+            // ── Jobs (Hangfire) 
             services.AddScoped<UserCleanupJob>();
+            services.AddScoped<SessionCleanupJob>();
+            services.AddScoped<MatchCleanupJob>();
 
             return services;
         }

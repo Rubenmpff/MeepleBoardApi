@@ -5,5 +5,6 @@
         public string Name { get; set; } = string.Empty;
         public string Date { get; set; } = string.Empty;
         public string Winner { get; set; } = "Desconhecido";
+        public string? ImageUrl { get; set; }
     }
 }

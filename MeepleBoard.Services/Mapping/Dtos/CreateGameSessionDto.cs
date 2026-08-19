@@ -11,7 +11,21 @@ namespace MeepleBoard.Application.DTOs
         [MaxLength(200)]
         public string? Location { get; set; }
 
-        // membros da sessão escolhidos (amigos)
+        /// <summary>
+        /// Data/hora planeada para começar (UTC).
+        /// </summary>
+        public DateTime? ScheduledStartDate { get; set; }
+
+        /// <summary>
+        /// Data limite para os convidados responderem (UTC).
+        /// Tem de ser anterior a ScheduledStartDate.
+        /// Se null, usa ScheduledStartDate como limite.
+        /// </summary>
+        public DateTime? ResponseDeadline { get; set; }
+
+        /// <summary>
+        /// IDs dos utilizadores a convidar inicialmente (Pending).
+        /// </summary>
         public List<Guid> PlayerIds { get; set; } = new();
     }
 }

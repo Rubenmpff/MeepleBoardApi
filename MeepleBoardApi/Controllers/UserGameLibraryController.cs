@@ -1,11 +1,14 @@
-﻿using MeepleBoard.Services.DTOs;
+﻿using MeepleBoard.CrossCutting.Security;
+using MeepleBoard.Services.DTOs;
 using MeepleBoard.Services.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace MeepleBoardApi.Controllers
 {
     [Route("MeepleBoard/users")]
     [ApiController]
+    [Authorize]
     public class UserGameLibraryController : ControllerBase
     {
         private readonly IUserGameLibraryService _libraryService;
@@ -15,15 +18,6 @@ namespace MeepleBoardApi.Controllers
             _libraryService = libraryService;
         }
 
-        /// <summary>
-        /// 🔹 Obtém a biblioteca de jogos de um usuário.
-        /// </summary>
-        /// <param name="userId">ID do usuário.</param>
-        /// <param name="cancellationToken">Token para cancelamento da requisição.</param>
-        /// <returns>Lista de jogos na biblioteca do usuário.</returns>
-        /// <response code="200">Retorna a biblioteca do usuário.</response>
-        /// <response code="204">Nenhum jogo na biblioteca.</response>
-        /// <response code="404">Usuário não encontrado.</response>
         [HttpGet("{userId:guid}/games")]
         public async Task<ActionResult<IEnumerable<UserGameLibraryDto>>> GetUserLibrary(Guid userId, CancellationToken cancellationToken)
         {
@@ -32,12 +26,17 @@ namespace MeepleBoardApi.Controllers
 
             try
             {
-                var library = await _libraryService.GetUserLibraryAsync(userId, cancellationToken);
+                var requesterId = User.GetUserId();
+                var library = await _libraryService.GetUserLibraryAsync(requesterId, userId, cancellationToken);
 
                 if (library == null || !library.Any())
                     return NoContent();
 
                 return Ok(library);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return Forbid(ex.Message);
             }
             catch (KeyNotFoundException ex)
             {
@@ -49,17 +48,31 @@ namespace MeepleBoardApi.Controllers
             }
         }
 
-        /// <summary>
-        /// 🔹 Adiciona um jogo à biblioteca do usuário.
-        /// </summary>
-        /// <param name="userId">ID do usuário.</param>
-        /// <param name="gameDto">Dados do jogo a ser adicionado.</param>
-        /// <param name="cancellationToken">Token para cancelamento da requisição.</param>
-        /// <returns>Mensagem de sucesso.</returns>
-        /// <response code="201">Jogo adicionado com sucesso.</response>
-        /// <response code="400">Dados inválidos.</response>
-        /// <response code="404">Usuário não encontrado.</response>
-        /// <response code="409">Jogo já existe na biblioteca.</response>
+        [HttpGet("{userId:guid}/played-games")]
+        public async Task<ActionResult<IEnumerable<PlayedGameDto>>> GetPlayedGames(Guid userId, CancellationToken cancellationToken)
+        {
+            if (userId == Guid.Empty)
+                return BadRequest(new { Message = "O ID do usuário não pode ser vazio." });
+
+            try
+            {
+                var played = await _libraryService.GetPlayedGamesAsync(userId, cancellationToken);
+
+                if (played == null || !played.Any())
+                    return NoContent();
+
+                return Ok(played);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { Message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { Message = "Erro ao obter jogos jogados.", Details = ex.Message });
+            }
+        }
+
         [HttpPost("{userId:guid}/games")]
         public async Task<ActionResult> AddGameToLibrary(Guid userId, [FromBody] UserGameLibraryDto gameDto, CancellationToken cancellationToken)
         {
@@ -68,6 +81,9 @@ namespace MeepleBoardApi.Controllers
 
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
+
+            if (userId != User.GetUserId())
+                return Forbid();
 
             try
             {
@@ -92,21 +108,46 @@ namespace MeepleBoardApi.Controllers
             }
         }
 
-        /// <summary>
-        /// 🔹 Remove um jogo da biblioteca do usuário.
-        /// </summary>
-        /// <param name="userId">ID do usuário.</param>
-        /// <param name="gameId">ID do jogo a ser removido.</param>
-        /// <param name="cancellationToken">Token para cancelamento da requisição.</param>
-        /// <returns>204 No Content se removido.</returns>
-        /// <response code="204">Jogo removido com sucesso.</response>
-        /// <response code="400">ID inválido.</response>
-        /// <response code="404">Jogo não encontrado.</response>
+        [HttpPatch("{userId:guid}/games/{gameId:guid}")]
+        public async Task<ActionResult> UpdateGameInLibrary(
+            Guid userId, Guid gameId, [FromBody] UpdateUserGameLibraryDto dto, CancellationToken cancellationToken)
+        {
+            if (dto == null)
+                return BadRequest(new { Message = "Os dados são obrigatórios." });
+
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            if (userId != User.GetUserId())
+                return Forbid();
+
+            try
+            {
+                await _libraryService.UpdateGameInLibraryAsync(userId, gameId, dto.Status, dto.PricePaid, cancellationToken);
+                return NoContent();
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { Message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return NotFound(new { Message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { Message = "Erro ao atualizar jogo na biblioteca.", Details = ex.Message });
+            }
+        }
+
         [HttpDelete("{userId:guid}/games/{gameId:guid}")]
         public async Task<ActionResult> RemoveGameFromLibrary(Guid userId, Guid gameId, CancellationToken cancellationToken)
         {
             if (userId == Guid.Empty || gameId == Guid.Empty)
                 return BadRequest(new { Message = "Os IDs do usuário e do jogo não podem ser vazios." });
+
+            if (userId != User.GetUserId())
+                return Forbid();
 
             try
             {

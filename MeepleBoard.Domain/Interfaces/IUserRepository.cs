@@ -36,5 +36,9 @@ namespace MeepleBoard.Domain.Interfaces
 
         // 🔹 Salva as mudanças no banco
         Task<int> CommitAsync(CancellationToken cancellationToken = default);
+
+        // 🔹 Atualiza a última atividade do utilizador (indicador "online" nos Amigos).
+        // Não carrega a entidade — é um UPDATE direto, só quando o valor está desatualizado.
+        Task TouchLastActiveAsync(Guid userId, CancellationToken cancellationToken = default);
     }
 }

@@ -121,5 +121,19 @@ namespace MeepleBoard.Infra.Data.Repositories
         {
             return await _context.SaveChangesAsync(cancellationToken);
         }
+
+        // 🔹 Atualiza a última atividade do utilizador (indicador "online" nos Amigos).
+        // Usa ExecuteUpdateAsync para não ter de carregar a entidade inteira, e só
+        // escreve quando o valor já está desatualizado (>1 min) — evita um UPDATE
+        // em todos os pedidos autenticados, que na app acontecem constantemente.
+        public async Task TouchLastActiveAsync(Guid userId, CancellationToken cancellationToken = default)
+        {
+            var now = DateTime.UtcNow;
+            var staleThreshold = now.AddMinutes(-1);
+
+            await _context.Users
+                .Where(u => u.Id == userId && (u.LastActiveAt == null || u.LastActiveAt < staleThreshold))
+                .ExecuteUpdateAsync(setters => setters.SetProperty(u => u.LastActiveAt, now), cancellationToken);
+        }
     }
 }

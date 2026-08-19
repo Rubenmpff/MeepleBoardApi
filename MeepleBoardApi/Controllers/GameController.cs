@@ -1,8 +1,10 @@
 ﻿using AutoMapper;
+using MeepleBoard.CrossCutting.Security;
 using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Services.DTOs;
 using MeepleBoard.Services.Interfaces;
 using MeepleBoard.Services.Mapping.Dtos;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 
@@ -38,7 +40,7 @@ namespace MeepleBoardApi.Controllers
         [HttpGet]
         [ProducesResponseType(typeof(PagedResponse<GameDto>), 200)] // Sucesso com conteúdo paginado
         [ProducesResponseType(204)] // Nenhum conteúdo encontrado
-        public async Task<IActionResult> GetAll( int pageIndex = 0, int pageSize = 10, CancellationToken cancellationToken = default)
+        public async Task<IActionResult> GetAll(int pageIndex = 0, int pageSize = 10, CancellationToken cancellationToken = default)
         {
             // Solicita ao serviço a lista paginada de jogos
             var result = await _gameService.GetAllAsync(pageIndex, pageSize, cancellationToken);
@@ -49,6 +51,56 @@ namespace MeepleBoardApi.Controllers
 
             // Caso contrário, retorna HTTP 200 com os dados paginados
             return Ok(result);
+        }
+
+        /// <summary>
+        /// Ranking de jogos ordenado pela nota interna do MeepleBoard (média das avaliações dos jogadores no diário).
+        /// Só inclui jogos aprovados que já têm pelo menos 1 avaliação.
+        /// </summary>
+        [HttpGet("rankings")]
+        [ProducesResponseType(typeof(PagedResponse<GameDto>), 200)]
+        [ProducesResponseType(204)]
+        public async Task<IActionResult> GetRankings(
+            int pageIndex = 0, int pageSize = 20, string source = "meepleboard", CancellationToken cancellationToken = default)
+        {
+            var result = await _gameService.GetRankingsAsync(pageIndex, pageSize, source, cancellationToken);
+
+            if (result.Data == null || result.Data.Count == 0)
+                return NoContent();
+
+            return Ok(result);
+        }
+
+        /// <summary>
+        /// Ranking PESSOAL — só os jogos que o utilizador autenticado já avaliou, ordenados
+        /// pela média das SUAS PRÓPRIAS notas (não mistura com as avaliações de outros jogadores).
+        /// </summary>
+        [HttpGet("rankings/mine")]
+        [Authorize]
+        public async Task<IActionResult> GetMyRankings(
+            int pageIndex = 0, int pageSize = 20, CancellationToken cancellationToken = default)
+        {
+            var userId = User.GetUserId();
+            var result = await _gameService.GetPersonalRankingsAsync(userId, pageIndex, pageSize, cancellationToken);
+
+            if (result.Data == null || result.Data.Count == 0)
+                return NoContent();
+
+            return Ok(result);
+        }
+
+        /// <summary>
+        /// Backfill: recalcula o MeepleBoardScore de todos os jogos a partir das avaliações
+        /// já existentes. Só precisa de ser corrido uma vez (ex: depois de ligar esta feature
+        /// pela primeira vez, para apanhar avaliações antigas). Daí em diante o score já se
+        /// mantém sincronizado sozinho a cada nova avaliação.
+        /// </summary>
+        [HttpPost("rankings/recompute")]
+        [Authorize(Roles = "Admin")]
+        public async Task<IActionResult> RecomputeRankings(CancellationToken cancellationToken = default)
+        {
+            var updated = await _gameService.RecomputeAllMeepleBoardScoresAsync(cancellationToken);
+            return Ok(new { updated });
         }
 
 
@@ -72,7 +124,7 @@ namespace MeepleBoardApi.Controllers
         [ProducesResponseType(typeof(GameDto), 200)]
         [ProducesResponseType(404)]
         [ProducesResponseType(400)]
-        public async Task<IActionResult> SearchOrImport( [FromQuery] string name, CancellationToken cancellationToken)
+        public async Task<IActionResult> SearchOrImport([FromQuery] string name, CancellationToken cancellationToken)
         {
             // Valida se o nome foi informado corretamente
             if (string.IsNullOrWhiteSpace(name))
@@ -141,7 +193,7 @@ namespace MeepleBoardApi.Controllers
         /// </returns>
         [HttpGet("base-search")]
         [ProducesResponseType(typeof(List<GameSuggestionDto>), 200)]
-        public async Task<IActionResult> SearchBaseGamesWithFallback( [FromQuery] string query, [FromQuery] int offset = 0, [FromQuery] int limit = 10, CancellationToken cancellationToken = default)
+        public async Task<IActionResult> SearchBaseGamesWithFallback([FromQuery] string query, [FromQuery] int offset = 0, [FromQuery] int limit = 10, CancellationToken cancellationToken = default)
         {
             // Chama o serviço para obter sugestões, misturando dados locais e do BGG
             var suggestions = await _gameService.SearchBaseGameSuggestionsAsync(
@@ -206,7 +258,7 @@ namespace MeepleBoardApi.Controllers
         /// </returns>
         [HttpGet("expansion-suggestions")]
         [ProducesResponseType(typeof(List<GameSuggestionDto>), 200)]
-        public async Task<IActionResult> SearchExpansions( [FromQuery] string query, [FromQuery] int offset = 0, [FromQuery] int limit = 10, CancellationToken cancellationToken = default)
+        public async Task<IActionResult> SearchExpansions([FromQuery] string query, [FromQuery] int offset = 0, [FromQuery] int limit = 10, CancellationToken cancellationToken = default)
         {
             // Executa a busca de sugestões de expansões via serviço
             var suggestions = await _gameService.SearchExpansionSuggestionsAsync(query, offset, limit, cancellationToken);

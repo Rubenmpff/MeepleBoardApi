@@ -43,6 +43,17 @@ namespace MeepleBoard.Infra.Data.Repositories
                 .FirstOrDefaultAsync(g => g.Id == id, cancellationToken);
         }
 
+        public async Task<IReadOnlyList<Game>> GetByIdsAsync(IEnumerable<Guid> ids, CancellationToken cancellationToken = default)
+        {
+            var idList = ids.Distinct().ToList();
+            if (idList.Count == 0) return Array.Empty<Game>();
+
+            return await _context.Games
+                .AsNoTracking()
+                .Where(g => idList.Contains(g.Id))
+                .ToListAsync(cancellationToken);
+        }
+
         public async Task<List<Game>> SearchByNameAsync(string query, int offset, int limit, CancellationToken cancellationToken)
         {
             return await _context.Games
@@ -209,6 +220,114 @@ namespace MeepleBoard.Infra.Data.Repositories
                 .Select(g => g.First().Game!)
                 .Take(limit)
                 .ToListAsync(cancellationToken);
+        }
+
+        // 🏆 Média de todas as avaliações pessoais (diário) das partidas deste jogo.
+        // Devolve null se ainda não houver nenhuma avaliação.
+        public async Task<double?> GetAveragePersonalRatingAsync(Guid gameId, CancellationToken cancellationToken = default)
+        {
+            // Fonte principal: avaliações por jogador (MatchJournalEntry) — o fluxo normal.
+            var journalRatings = _context.MatchJournalEntries
+                .AsNoTracking()
+                .Where(e => e.PersonalRating.HasValue && e.Match!.GameId == gameId)
+                .Select(e => (double)e.PersonalRating!.Value);
+
+            // Fonte secundária (legado): partidas registadas antes de existir o espelho
+            // automático para o diário, onde a avaliação ficou só em Match.PersonalRating
+            // sem nenhum MatchJournalEntry associado. Assim que uma partida tiver pelo
+            // menos 1 entrada no diário, deixa de contar aqui (evita duplicar a mesma nota).
+            var legacyMatchRatings = _context.Matches
+                .AsNoTracking()
+                .Where(m => m.GameId == gameId && m.PersonalRating.HasValue && !m.JournalEntries.Any())
+                .Select(m => m.PersonalRating!.Value);
+
+            var ratings = await journalRatings.Concat(legacyMatchRatings).ToListAsync(cancellationToken);
+
+            return ratings.Count > 0 ? ratings.Average() : (double?)null;
+        }
+
+        public async Task<(IReadOnlyList<Game> Items, int TotalCount)> GetRankedByMeepleBoardScoreAsync(
+            int pageIndex, int pageSize, CancellationToken cancellationToken = default)
+        {
+            var query = _context.Games
+                .AsNoTracking()
+                .Where(g => g.IsApproved && g.MeepleBoardScore != null);
+
+            var total = await query.CountAsync(cancellationToken);
+
+            var items = await query
+                .OrderByDescending(g => g.MeepleBoardScore)
+                .ThenBy(g => g.Name)
+                .Skip(pageIndex * pageSize)
+                .Take(pageSize)
+                .ToListAsync(cancellationToken);
+
+            return (items, total);
+        }
+
+        public async Task<(IReadOnlyList<Game> Items, int TotalCount)> GetRankedByBggRatingAsync(
+            int pageIndex, int pageSize, CancellationToken cancellationToken = default)
+        {
+            var query = _context.Games
+                .AsNoTracking()
+                .Where(g => g.IsApproved && g.AverageRating != null);
+
+            var total = await query.CountAsync(cancellationToken);
+
+            var items = await query
+                .OrderByDescending(g => g.AverageRating)
+                .ThenBy(g => g.Name)
+                .Skip(pageIndex * pageSize)
+                .Take(pageSize)
+                .ToListAsync(cancellationToken);
+
+            return (items, total);
+        }
+
+        public async Task<(IReadOnlyList<(Game Game, double Rating)> Items, int TotalCount)> GetPersonalRankingsAsync(
+            Guid userId, int pageIndex, int pageSize, CancellationToken cancellationToken = default)
+        {
+            // Fonte principal: as avaliações desta pessoa no diário
+            var journalRatings = await _context.MatchJournalEntries
+                .AsNoTracking()
+                .Where(e => e.UserId == userId && e.PersonalRating.HasValue)
+                .Select(e => new { e.Match!.GameId, Rating = (double)e.PersonalRating!.Value })
+                .ToListAsync(cancellationToken);
+
+            // Legado: partidas desta pessoa com PersonalRating no Match mas ainda sem
+            // nenhuma entrada de diário (mesma lógica do resto do ranking).
+            var legacyRatings = await _context.Matches
+                .AsNoTracking()
+                .Where(m =>
+                    m.PersonalRating != null &&
+                    !m.JournalEntries.Any() &&
+                    m.MatchPlayers.Any(mp => mp.UserId == userId))
+                .Select(m => new { m.GameId, Rating = m.PersonalRating!.Value })
+                .ToListAsync(cancellationToken);
+
+            var grouped = journalRatings
+                .Concat(legacyRatings)
+                .GroupBy(x => x.GameId)
+                .Select(g => new { GameId = g.Key, Avg = g.Average(x => x.Rating) })
+                .OrderByDescending(x => x.Avg)
+                .ToList();
+
+            var total = grouped.Count;
+            var page = grouped.Skip(pageIndex * pageSize).Take(pageSize).ToList();
+
+            var gameIds = page.Select(p => p.GameId).ToList();
+            var games = await _context.Games
+                .AsNoTracking()
+                .Where(g => gameIds.Contains(g.Id))
+                .ToListAsync(cancellationToken);
+            var gameMap = games.ToDictionary(g => g.Id);
+
+            var items = page
+                .Where(p => gameMap.ContainsKey(p.GameId))
+                .Select(p => (gameMap[p.GameId], p.Avg))
+                .ToList();
+
+            return (items, total);
         }
 
         #endregion 🔥 Funções Especiais para Jobs (Ranking, Atualizações, etc.)

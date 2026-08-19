@@ -16,12 +16,13 @@ namespace MeepleBoard.Domain.Entities
             UserGameLibraries = new HashSet<UserGameLibrary>();
         }
 
-        public Game(string name, string description, string imageUrl, bool supportsSoloMode = false)
+        // ✅ imageUrl agora opcional — alguns jogos no BGG não têm imagem
+        public Game(string name, string description, string? imageUrl, bool supportsSoloMode = false)
         {
             Id = Guid.NewGuid();
             Name = ValidateNotEmpty(name, "O nome do jogo é obrigatório.");
-            Description = ValidateNotEmpty(description, "A descrição do jogo é obrigatória.");
-            ImageUrl = ValidateNotEmpty(imageUrl, "A URL da imagem é obrigatória.");
+            Description = description ?? string.Empty; // descrição pode ser vazia
+            ImageUrl = imageUrl ?? string.Empty;        // imagem pode ser nula
             SupportsSoloMode = supportsSoloMode;
             CreatedAt = DateTime.UtcNow;
             Matches = new HashSet<Match>();
@@ -43,12 +44,9 @@ namespace MeepleBoard.Domain.Entities
         [MaxLength(10000)]
         public string Description { get; private set; }
 
-        [Required]
+        // ✅ Não é mais [Required] — pode estar vazio se o BGG não tiver imagem
         public string ImageUrl { get; private set; }
 
-        /// <summary>
-        /// Ano de publicação original do jogo (caso disponível no BGG).
-        /// </summary>
         [Range(1000, 2100)]
         public int? YearPublished { get; private set; }
 
@@ -62,13 +60,30 @@ namespace MeepleBoard.Domain.Entities
 
         public double? AverageRating { get; private set; }
 
+        /// <summary>
+        /// Número de pessoas que avaliaram o jogo no BGG ("usersrated") — a melhor
+        /// medida de "quão conhecido" o jogo é (melhor que a nota média, que pode
+        /// favorecer jogos obscuros com poucos votos muito altos).
+        /// </summary>
+        public int? UsersRatedCount { get; private set; }
+
         public int? MeepleBoardScore { get; private set; }
+
+        public int? MinPlayers { get; private set; }
+
+        public int? MaxPlayers { get; private set; }
+
+        public bool IsCooperative { get; private set; } = false;
+
+        // ✅ Detetado a partir do BGG (mecânica "Legacy Game"/"Campaign / Battle Card Driven"
+        // ou categoria "Campaign Games"). Usado para avisar o utilizador ao criar uma
+        // campanha com um jogo que normalmente não é jogado em campanha.
+        public bool SupportsCampaign { get; private set; } = false;
 
         public DateTime CreatedAt { get; private set; } = DateTime.UtcNow;
 
         public DateTime? UpdatedAt { get; private set; }
 
-        // Expansões vinculadas (EF irá preencher com jogos que referenciem este como base)
         public virtual ICollection<Game> Expansions { get; private set; }
 
         public virtual ICollection<Match> Matches { get; private set; }
@@ -86,16 +101,62 @@ namespace MeepleBoard.Domain.Entities
         [NotMapped]
         public bool IsExpansion => BaseGameId.HasValue || BaseGameBggId.HasValue;
 
-        public void UpdateDetails(string name, string description, string imageUrl, bool supportsSoloMode)
+        // ─── Métodos de atualização ───────────────────────────────────────────
+
+        // ✅ imageUrl agora opcional
+        public void UpdateDetails(string name, string description, string? imageUrl, bool supportsSoloMode)
         {
-            bool hasChanges = Name != name || Description != description || ImageUrl != imageUrl || SupportsSoloMode != supportsSoloMode;
+            bool hasChanges = Name != name || Description != description
+                || ImageUrl != (imageUrl ?? string.Empty) || SupportsSoloMode != supportsSoloMode;
 
             if (hasChanges)
             {
                 Name = ValidateNotEmpty(name, "O nome do jogo não pode estar vazio.");
-                Description = ValidateNotEmpty(description, "A descrição do jogo não pode estar vazia.");
-                ImageUrl = ValidateNotEmpty(imageUrl, "A URL da imagem não pode estar vazia.");
+                Description = description ?? string.Empty;
+                ImageUrl = imageUrl ?? string.Empty;
                 SupportsSoloMode = supportsSoloMode;
+                SetUpdatedAt();
+            }
+        }
+
+        public void SetPlayerCount(int? minPlayers, int? maxPlayers)
+        {
+            if (minPlayers.HasValue && minPlayers < 0)
+                throw new ArgumentException("O número mínimo de jogadores não pode ser negativo.");
+
+            if (maxPlayers.HasValue && maxPlayers < 0)
+                throw new ArgumentException("O número máximo de jogadores não pode ser negativo.");
+
+            if (minPlayers.HasValue && maxPlayers.HasValue && minPlayers > maxPlayers)
+                throw new ArgumentException("O número mínimo de jogadores não pode ser maior que o máximo.");
+
+            bool changed = MinPlayers != minPlayers || MaxPlayers != maxPlayers;
+            if (changed)
+            {
+                MinPlayers = minPlayers;
+                MaxPlayers = maxPlayers;
+
+                if (minPlayers.HasValue && minPlayers == 1)
+                    SupportsSoloMode = true;
+
+                SetUpdatedAt();
+            }
+        }
+
+        public void SetCooperative(bool isCooperative)
+        {
+            if (IsCooperative != isCooperative)
+            {
+                IsCooperative = isCooperative;
+                SetUpdatedAt();
+            }
+        }
+
+        public void SetSupportsCampaign(bool supportsCampaign)
+        {
+            if (SupportsCampaign != supportsCampaign)
+            {
+                SupportsCampaign = supportsCampaign;
                 SetUpdatedAt();
             }
         }
@@ -145,6 +206,18 @@ namespace MeepleBoard.Domain.Entities
             }
         }
 
+        public void SetUsersRatedCount(int? count)
+        {
+            if (count.HasValue && count < 0)
+                throw new ArgumentException("O número de avaliações não pode ser negativo.");
+
+            if (UsersRatedCount != count)
+            {
+                UsersRatedCount = count;
+                SetUpdatedAt();
+            }
+        }
+
         public void SetMeepleBoardScore(int? score)
         {
             if (score.HasValue && (score < 0 || score > 100))
@@ -182,7 +255,17 @@ namespace MeepleBoard.Domain.Entities
             }
         }
 
-        public void UpdateBggStats(string? description, string? imageUrl, int? bggRanking, double? averageRating, int? yearPublished = null)
+        public void UpdateBggStats(
+            string? description,
+            string? imageUrl,
+            int? bggRanking,
+            double? averageRating,
+            int? yearPublished = null,
+            int? minPlayers = null,
+            int? maxPlayers = null,
+            bool? isCooperative = null,
+            bool? supportsCampaign = null,
+            int? usersRatedCount = null)
         {
             bool updated = false;
 
@@ -210,9 +293,45 @@ namespace MeepleBoard.Domain.Entities
                 updated = true;
             }
 
+            if (usersRatedCount.HasValue && UsersRatedCount != usersRatedCount)
+            {
+                UsersRatedCount = usersRatedCount;
+                updated = true;
+            }
+
             if (YearPublished != yearPublished)
             {
                 YearPublished = yearPublished;
+                updated = true;
+            }
+
+            if (MinPlayers != minPlayers)
+            {
+                MinPlayers = minPlayers;
+                updated = true;
+            }
+
+            if (MaxPlayers != maxPlayers)
+            {
+                MaxPlayers = maxPlayers;
+                updated = true;
+            }
+
+            if (isCooperative.HasValue && IsCooperative != isCooperative.Value)
+            {
+                IsCooperative = isCooperative.Value;
+                updated = true;
+            }
+
+            if (supportsCampaign.HasValue && SupportsCampaign != supportsCampaign.Value)
+            {
+                SupportsCampaign = supportsCampaign.Value;
+                updated = true;
+            }
+
+            if (minPlayers.HasValue && minPlayers == 1 && !SupportsSoloMode)
+            {
+                SupportsSoloMode = true;
                 updated = true;
             }
 
@@ -222,6 +341,7 @@ namespace MeepleBoard.Domain.Entities
 
         private void SetUpdatedAt() => UpdatedAt = DateTime.UtcNow;
 
+        // ✅ Só valida que não é nulo/vazio — usado apenas para campos obrigatórios (Name)
         private static string ValidateNotEmpty(string value, string errorMessage)
         {
             return string.IsNullOrWhiteSpace(value)

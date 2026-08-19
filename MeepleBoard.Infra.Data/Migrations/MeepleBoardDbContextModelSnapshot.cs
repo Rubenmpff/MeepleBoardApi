@@ -64,6 +64,116 @@ namespace MeepleBoard.Infra.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("MeepleBoard.Domain.Entities.Campaign", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("CreatorId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("GameId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(5000)
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatorId");
+
+                    b.HasIndex("GameId");
+
+                    b.ToTable("Campaigns");
+                });
+
+            modelBuilder.Entity("MeepleBoard.Domain.Entities.CampaignMatch", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("AddedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("MatchId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("SessionNumber")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SessionTitle")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MatchId");
+
+                    b.HasIndex("CampaignId", "MatchId")
+                        .IsUnique();
+
+                    b.ToTable("CampaignMatches");
+                });
+
+            modelBuilder.Entity("MeepleBoard.Domain.Entities.CampaignMember", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CampaignId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("InvitedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsCreator")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("RemovedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("RespondedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("CampaignId", "UserId");
+
+                    b.ToTable("CampaignMembers");
+                });
+
             modelBuilder.Entity("MeepleBoard.Domain.Entities.EmailResendLog", b =>
                 {
                     b.Property<int>("Id")
@@ -130,7 +240,16 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.Property<bool>("IsApproved")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("IsCooperative")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("MaxPlayers")
+                        .HasColumnType("int");
+
                     b.Property<int?>("MeepleBoardScore")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("MinPlayers")
                         .HasColumnType("int");
 
                     b.Property<string>("Name")
@@ -138,11 +257,17 @@ namespace MeepleBoard.Infra.Data.Migrations
                         .HasMaxLength(150)
                         .HasColumnType("nvarchar(150)");
 
+                    b.Property<bool>("SupportsCampaign")
+                        .HasColumnType("bit");
+
                     b.Property<bool>("SupportsSoloMode")
                         .HasColumnType("bit");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
+
+                    b.Property<int?>("UsersRatedCount")
+                        .HasColumnType("int");
 
                     b.Property<int?>("YearPublished")
                         .HasColumnType("int");
@@ -163,7 +288,7 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.Property<DateTime?>("EndDate")
                         .HasColumnType("datetime2");
 
-                    b.Property<bool>("IsActive")
+                    b.Property<bool>("IsCancelled")
                         .HasColumnType("bit");
 
                     b.Property<string>("Location")
@@ -177,6 +302,12 @@ namespace MeepleBoard.Infra.Data.Migrations
 
                     b.Property<Guid>("OrganizerId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ResponseDeadline")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("ScheduledStartDate")
+                        .HasColumnType("datetime2");
 
                     b.Property<DateTime>("StartDate")
                         .HasColumnType("datetime2");
@@ -194,6 +325,9 @@ namespace MeepleBoard.Infra.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<DateTime>("InvitedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<bool>("IsOrganizer")
                         .HasColumnType("bit");
 
@@ -203,8 +337,14 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.Property<DateTime?>("LeftAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<DateTime?>("RespondedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<Guid>("SessionId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
 
                     b.Property<Guid>("UserId")
                         .HasColumnType("uniqueidentifier");
@@ -225,6 +365,12 @@ namespace MeepleBoard.Infra.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<DateTime>("AutoCloseAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("ClosedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -237,8 +383,14 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.Property<Guid?>("GameSessionId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("IsOfficialMode")
+                        .HasColumnType("bit");
+
                     b.Property<bool>("IsSoloGame")
                         .HasColumnType("bit");
+
+                    b.Property<int>("JournalStatus")
+                        .HasColumnType("int");
 
                     b.Property<string>("Location")
                         .HasMaxLength(200)
@@ -247,7 +399,22 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.Property<DateTime>("MatchDate")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<double?>("PersonalRating")
+                        .HasColumnType("float");
+
                     b.Property<string>("ScoreSummary")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("Tags")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("UnofficialModeJustification")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
@@ -266,6 +433,49 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.HasIndex("WinnerId");
 
                     b.ToTable("Matches");
+                });
+
+            modelBuilder.Entity("MeepleBoard.Domain.Entities.MatchJournalEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("MatchId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(3000)
+                        .HasColumnType("nvarchar(3000)");
+
+                    b.Property<int?>("PersonalRating")
+                        .HasColumnType("int");
+
+                    b.Property<string>("PhotoUrlsJson")
+                        .HasMaxLength(5000)
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Tags")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("MatchId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("MatchJournalEntries");
                 });
 
             modelBuilder.Entity("MeepleBoard.Domain.Entities.MatchPlayer", b =>
@@ -359,6 +569,16 @@ namespace MeepleBoard.Infra.Data.Migrations
 
                     b.Property<bool>("EmailConfirmed")
                         .HasColumnType("bit");
+
+                    b.Property<string>("ExpoPushToken")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("LastActiveAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("LibraryPrivacy")
+                        .HasColumnType("int");
 
                     b.Property<bool>("LockoutEnabled")
                         .HasColumnType("bit");
@@ -610,6 +830,63 @@ namespace MeepleBoard.Infra.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("MeepleBoard.Domain.Entities.Campaign", b =>
+                {
+                    b.HasOne("MeepleBoard.Domain.Entities.User", "Creator")
+                        .WithMany()
+                        .HasForeignKey("CreatorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MeepleBoard.Domain.Entities.Game", "Game")
+                        .WithMany()
+                        .HasForeignKey("GameId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Creator");
+
+                    b.Navigation("Game");
+                });
+
+            modelBuilder.Entity("MeepleBoard.Domain.Entities.CampaignMatch", b =>
+                {
+                    b.HasOne("MeepleBoard.Domain.Entities.Campaign", "Campaign")
+                        .WithMany("CampaignMatches")
+                        .HasForeignKey("CampaignId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("MeepleBoard.Domain.Entities.Match", "Match")
+                        .WithMany("CampaignMatches")
+                        .HasForeignKey("MatchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Campaign");
+
+                    b.Navigation("Match");
+                });
+
+            modelBuilder.Entity("MeepleBoard.Domain.Entities.CampaignMember", b =>
+                {
+                    b.HasOne("MeepleBoard.Domain.Entities.Campaign", "Campaign")
+                        .WithMany("Members")
+                        .HasForeignKey("CampaignId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("MeepleBoard.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Campaign");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("MeepleBoard.Domain.Entities.EmailResendLog", b =>
                 {
                     b.HasOne("MeepleBoard.Domain.Entities.User", "User")
@@ -684,6 +961,25 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.Navigation("GameSession");
 
                     b.Navigation("Winner");
+                });
+
+            modelBuilder.Entity("MeepleBoard.Domain.Entities.MatchJournalEntry", b =>
+                {
+                    b.HasOne("MeepleBoard.Domain.Entities.Match", "Match")
+                        .WithMany("JournalEntries")
+                        .HasForeignKey("MatchId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("MeepleBoard.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Match");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("MeepleBoard.Domain.Entities.MatchPlayer", b =>
@@ -786,6 +1082,13 @@ namespace MeepleBoard.Infra.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("MeepleBoard.Domain.Entities.Campaign", b =>
+                {
+                    b.Navigation("CampaignMatches");
+
+                    b.Navigation("Members");
+                });
+
             modelBuilder.Entity("MeepleBoard.Domain.Entities.Game", b =>
                 {
                     b.Navigation("Expansions");
@@ -804,6 +1107,10 @@ namespace MeepleBoard.Infra.Data.Migrations
 
             modelBuilder.Entity("MeepleBoard.Domain.Entities.Match", b =>
                 {
+                    b.Navigation("CampaignMatches");
+
+                    b.Navigation("JournalEntries");
+
                     b.Navigation("MatchPlayers");
                 });
 

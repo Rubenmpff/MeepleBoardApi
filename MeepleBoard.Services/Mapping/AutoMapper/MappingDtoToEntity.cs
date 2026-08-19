@@ -28,12 +28,13 @@ namespace MeepleBoardApi.Services.Mapping.AutoMapper
                 .ForMember(dest => dest.Id, opt => opt.Ignore())
                 .ReverseMap();
 
-            // --- GameSession (para criar) ---
-            CreateMap<CreateGameSessionDto, GameSession>()
-                .ForMember(d => d.Id, o => o.Ignore())
-                .ForMember(d => d.IsActive, o => o.Ignore())
-                .ForMember(d => d.StartDate, o => o.Ignore())
-                .ForMember(d => d.EndDate, o => o.Ignore());
+            // --- GameSession ---
+            // Nota: GameSession usa construtor com parâmetros — o AutoMapper
+            // NÃO cria a entidade diretamente. O GameSessionService faz isso
+            // manualmente via construtor. Este mapeamento é removido para evitar
+            // erros com propriedades calculadas (IsActive, Status, etc.).
+            // Se precisares de mapear CreateGameSessionDto → GameSession
+            // no futuro, usa ConstructUsing().
 
             // --- GameSessionPlayer ---
             CreateMap<GameSessionPlayerDto, GameSessionPlayer>()
