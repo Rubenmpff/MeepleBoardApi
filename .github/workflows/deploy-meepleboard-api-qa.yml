@@ -1,0 +1,75 @@
+name: Deploy MeepleBoard API QA
+
+on:
+  push:
+    branches:
+      - develop
+  workflow_dispatch:
+
+env:
+  AZURE_WEBAPP_NAME: meepleboard-api-qa
+  DOTNET_VERSION: '9.x'
+  API_PROJECT: './MeepleBoardApi/MeepleBoardApi.csproj'
+  PUBLISH_DIR: './publish'
+
+jobs:
+  build:
+    name: Build API
+    runs-on: windows-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore dependencies
+        run: dotnet restore "${{ env.API_PROJECT }}"
+
+      - name: Build
+        run: dotnet build "${{ env.API_PROJECT }}" --configuration Release --no-restore
+
+      - name: Publish
+        run: dotnet publish "${{ env.API_PROJECT }}" --configuration Release --no-build --output "${{ env.PUBLISH_DIR }}"
+
+      - name: Upload deployment artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: meepleboard-api
+          path: ${{ env.PUBLISH_DIR }}
+
+  deploy:
+    name: Deploy QA
+    runs-on: windows-latest
+    needs: build
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Download deployment artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: meepleboard-api
+          path: ./publish
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_7B1BF4C8930848F8A6104DD2E0C314F3 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_30A586BBD0344CF1908BF0EDA3641686 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_B38BE6FC45BC479A912035BEE2240482 }}
+
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          slot-name: Production
+          package: ./publish
