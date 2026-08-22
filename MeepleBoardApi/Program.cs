@@ -19,6 +19,14 @@ var builder = WebApplication.CreateBuilder(args);
 var configuration = builder.Configuration;
 
 // ======================================================
+// AMBIENTES
+// ======================================================
+
+var isDevelopment = builder.Environment.IsDevelopment();
+var isQa = builder.Environment.IsEnvironment("QA");
+var isProduction = builder.Environment.IsProduction();
+
+// ======================================================
 // CONFIGURAÇÃO JWT
 // ======================================================
 
@@ -30,7 +38,7 @@ if (string.IsNullOrWhiteSpace(jwtKey) || jwtKey.Length < 32)
         "A variável JWT_KEY não foi encontrada ou tem menos de 32 caracteres.");
 }
 
-if (builder.Environment.IsDevelopment())
+if (isDevelopment)
 {
     Console.WriteLine("JWT_KEY carregada e validada com sucesso.");
 }
@@ -61,12 +69,49 @@ builder.Services.Configure<JwtSettings>(options =>
 
 builder.Services.AddCors(options =>
 {
+    // --------------------------------------------------
+    // DEVELOPMENT / QA
+    // --------------------------------------------------
+    //
+    // Durante desenvolvimento e testes permitimos
+    // qualquer origem para facilitar testes locais,
+    // Expo, Postman, Swagger, etc.
+
     options.AddPolicy("DevelopmentCors", policy =>
     {
         policy
             .AllowAnyOrigin()
             .AllowAnyMethod()
             .AllowAnyHeader();
+    });
+
+    // --------------------------------------------------
+    // PRODUCTION
+    // --------------------------------------------------
+    //
+    // Em produção apenas serão permitidas origens
+    // configuradas explicitamente.
+    //
+    // Exemplo no Azure:
+    //
+    // Cors__AllowedOrigins__0 = https://meepleboard.com
+    // Cors__AllowedOrigins__1 = https://www.meepleboard.com
+
+    options.AddPolicy("ProductionCors", policy =>
+    {
+        var allowedOrigins =
+            configuration
+                .GetSection("Cors:AllowedOrigins")
+                .Get<string[]>()
+            ?? Array.Empty<string>();
+
+        if (allowedOrigins.Length > 0)
+        {
+            policy
+                .WithOrigins(allowedOrigins)
+                .AllowAnyMethod()
+                .AllowAnyHeader();
+        }
     });
 });
 
@@ -91,8 +136,6 @@ if (string.IsNullOrWhiteSpace(connectionString))
         "A connection string DefaultConnection não foi encontrada.");
 }
 
-
-
 // ======================================================
 // CONTROLLERS
 // ======================================================
@@ -106,12 +149,14 @@ builder.Services.AddEndpointsApiExplorer();
 
 builder.Services.AddSwaggerGen(options =>
 {
-    options.SwaggerDoc("v1", new OpenApiInfo
-    {
-        Title = "MeepleBoard API",
-        Version = "v1",
-        Description = "API da aplicação MeepleBoard"
-    });
+    options.SwaggerDoc(
+        "v1",
+        new OpenApiInfo
+        {
+            Title = "MeepleBoard API",
+            Version = "v1",
+            Description = "API da aplicação MeepleBoard"
+        });
 
     options.AddSecurityDefinition(
         "Bearer",
@@ -195,7 +240,14 @@ builder.Services.AddHangfire(config =>
         .UseSqlServerStorage(connectionString);
 });
 
-// Mantém o processamento dos jobs ativo.
+// IMPORTANTE:
+// O Hangfire Server executa os jobs.
+//
+// Deve permanecer ativo em TODOS os ambientes,
+// incluindo Production.
+//
+// Isto é independente do Dashboard /hangfire.
+
 builder.Services.AddHangfireServer();
 
 builder.Services.AddScoped<UserCleanupJob>();
@@ -205,24 +257,38 @@ builder.Services.AddScoped<MatchCleanupJob>();
 // ======================================================
 // CREDENCIAIS DO DASHBOARD DO HANGFIRE
 // ======================================================
+//
+// O Dashboard só está ativo em Development e QA.
+//
+// Por isso só exigimos estas credenciais nesses ambientes.
+//
+// Em Azure QA:
+// HangfireDashboard__Username
+// HangfireDashboard__Password
 
-var hangfireUsername =
-    configuration["HangfireDashboard:Username"];
+string? hangfireUsername = null;
+string? hangfirePassword = null;
 
-var hangfirePassword =
-    configuration["HangfireDashboard:Password"];
-
-if (string.IsNullOrWhiteSpace(hangfireUsername))
+if (isDevelopment || isQa)
 {
-    throw new InvalidOperationException(
-        "HangfireDashboard:Username não está configurado.");
-}
+    hangfireUsername =
+        configuration["HangfireDashboard:Username"];
 
-if (string.IsNullOrWhiteSpace(hangfirePassword)
-    || hangfirePassword.Length < 16)
-{
-    throw new InvalidOperationException(
-        "HangfireDashboard:Password não está configurada ou tem menos de 16 caracteres.");
+    hangfirePassword =
+        configuration["HangfireDashboard:Password"];
+
+    if (string.IsNullOrWhiteSpace(hangfireUsername))
+    {
+        throw new InvalidOperationException(
+            "HangfireDashboard:Username não está configurado.");
+    }
+
+    if (string.IsNullOrWhiteSpace(hangfirePassword)
+        || hangfirePassword.Length < 16)
+    {
+        throw new InvalidOperationException(
+            "HangfireDashboard:Password não está configurada ou tem menos de 16 caracteres.");
+    }
 }
 
 // ======================================================
@@ -240,8 +306,14 @@ app.UseMiddleware<ExceptionMiddleware>();
 // ======================================================
 // SWAGGER
 // ======================================================
+//
+// Development: ✅
+// QA:          ✅
+// Production:  ❌
+//
+// Em produção o Swagger fica desligado publicamente.
 
-if (app.Environment.IsDevelopment())
+if (isDevelopment || isQa)
 {
     app.UseSwagger();
 
@@ -259,21 +331,35 @@ if (app.Environment.IsDevelopment())
 // CORS
 // ======================================================
 
-if (app.Environment.IsDevelopment())
+if (isDevelopment || isQa)
 {
     app.UseCors("DevelopmentCors");
 }
+else if (isProduction)
+{
+    app.UseCors("ProductionCors");
+}
 
-// Não ativar durante o teste com Cloudflare Quick Tunnel.
-// A ligação pública já será HTTPS.
+// ======================================================
+// HTTPS
+// ======================================================
+//
+// Em Azure, o HTTPS é tratado pelo App Service.
+//
+// Mantém-se comentado enquanto também utilizarmos
+// ambientes locais/túneis que possam necessitar disso.
 //
 // app.UseHttpsRedirection();
 
 // ======================================================
 // RATE LIMITING
 // ======================================================
-
-// ⚠️ TEMPORARIAMENTE DESATIVADO PARA DIAGNÓSTICO — volta a ativar depois
+//
+// ⚠️ TEMPORARIAMENTE DESATIVADO.
+//
+// Antes de Production devemos rever a configuração
+// e voltar a ativar o rate limiting.
+//
 // app.UseIpRateLimiting();
 
 // ======================================================
@@ -286,10 +372,32 @@ app.UseAuthorization();
 // ======================================================
 // HANGFIRE DASHBOARD
 // ======================================================
+//
+// IMPORTANTE:
+//
+// O Hangfire Server e os jobs continuam ativos em
+// Development, QA e Production.
+//
+// Este bloco controla APENAS o painel visual /hangfire.
+//
+// Development: ✅ protegido
+// QA:          ✅ protegido
+// Production:  ❌ por enquanto
+//
+// TODO PRODUCTION:
+// Quando o MeepleBoard for colocado em produção,
+// avaliar a ativação do Dashboard apenas depois de
+// adicionar uma camada adicional de segurança no Azure,
+// por exemplo:
+//
+// - Azure App Service Access Restrictions / IP allowlist
+// - VPN ou acesso privado
+// - autenticação administrativa adicional
+//
+// Não expor o Dashboard diretamente na Internet em
+// Production apenas com Basic Authentication.
 
-// O dashboard exige sempre autenticação Basic.
-// Isto protege o painel tanto localmente como através do túnel.
-if (app.Environment.IsDevelopment())
+if (isDevelopment || isQa)
 {
     app.UseHangfireDashboard(
         "/hangfire",
@@ -298,8 +406,8 @@ if (app.Environment.IsDevelopment())
             Authorization =
             [
                 new HangfireDashboardBasicAuthFilter(
-                    hangfireUsername,
-                    hangfirePassword)
+                    hangfireUsername!,
+                    hangfirePassword!)
             ],
 
             IsReadOnlyFunc = _ => false,
@@ -311,9 +419,12 @@ if (app.Environment.IsDevelopment())
 // ======================================================
 // RENOVAÇÃO AUTOMÁTICA DO TOKEN + LAST ACTIVE
 // ======================================================
-
-// Estes middlewares só são aplicados aos endpoints da API.
-// Assim, não interferem com:
+//
+// Estes middlewares só são aplicados aos endpoints
+// que começam por /MeepleBoard.
+//
+// Assim não interferem com:
+//
 // - /hangfire
 // - /swagger
 // - /index.html
@@ -355,9 +466,13 @@ app.UseWhen(
         // --------------------------------------------------
         // ÚLTIMA ATIVIDADE DO UTILIZADOR
         // --------------------------------------------------
+        //
+        // Regista a última atividade do utilizador
+        // autenticado.
+        //
+        // Serve para o indicador "online" nos ecrãs
+        // de Amigos.
 
-        // Regista a última atividade do utilizador autenticado.
-        // Serve para o indicador "online" nos ecrãs de Amigos.
         branch.Use(async (context, next) =>
         {
             using var scope =
@@ -388,14 +503,23 @@ app.UseWhen(
 
 app.MapControllers();
 
-app.MapGet("/", () => Results.Ok(new
-{
-    message = "MeepleBoard API está a funcionar."
-}));
+app.MapGet(
+    "/",
+    () => Results.Ok(
+        new
+        {
+            message = "MeepleBoard API está a funcionar."
+        }));
 
 // ======================================================
 // JOBS RECORRENTES
 // ======================================================
+//
+// Estes jobs são registados em TODOS os ambientes:
+//
+// Development ✅
+// QA          ✅
+// Production  ✅
 
 using (var scope = app.Services.CreateScope())
 {
@@ -425,10 +549,21 @@ using (var scope = app.Services.CreateScope())
 // SEED DA BASE DE DADOS
 // ======================================================
 
+// As Roles são necessárias em qualquer ambiente.
+//
+// Development ✅
+// QA          ✅
+// Production  ✅
+
 await UserSeeder.SeedRolesAsync(app.Services);
 
-if (app.Environment.IsDevelopment()
-    || app.Environment.IsEnvironment("QA"))
+// Os utilizadores de TESTE só são criados em:
+//
+// Development ✅
+// QA          ✅
+// Production  ❌
+
+if (isDevelopment || isQa)
 {
     await UserSeeder.SeedTestUsersAsync(
         app.Services,
@@ -483,6 +618,7 @@ public sealed class HangfireDashboardBasicAuthFilter
                 StringComparison.OrdinalIgnoreCase))
         {
             RequestAuthentication(httpContext);
+
             return false;
         }
 
@@ -507,6 +643,7 @@ public sealed class HangfireDashboardBasicAuthFilter
             if (separatorIndex <= 0)
             {
                 RequestAuthentication(httpContext);
+
                 return false;
             }
 
@@ -532,6 +669,7 @@ public sealed class HangfireDashboardBasicAuthFilter
                 || !passwordMatches)
             {
                 RequestAuthentication(httpContext);
+
                 return false;
             }
 
@@ -540,11 +678,13 @@ public sealed class HangfireDashboardBasicAuthFilter
         catch (FormatException)
         {
             RequestAuthentication(httpContext);
+
             return false;
         }
         catch (ArgumentException)
         {
             RequestAuthentication(httpContext);
+
             return false;
         }
     }
