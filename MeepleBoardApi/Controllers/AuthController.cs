@@ -26,69 +26,148 @@ namespace MeepleBoardApi.Controllers
             IEmailService emailService,
             ILogger<AuthController> logger)
         {
-            _authService = authService ?? throw new ArgumentNullException(nameof(authService));
-            _tokenService = tokenService ?? throw new ArgumentNullException(nameof(tokenService));
-            _userManager = userManager ?? throw new ArgumentNullException(nameof(userManager));
-            _emailService = emailService ?? throw new ArgumentNullException(nameof(emailService));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _authService =
+                authService
+                ?? throw new ArgumentNullException(nameof(authService));
+
+            _tokenService =
+                tokenService
+                ?? throw new ArgumentNullException(nameof(tokenService));
+
+            _userManager =
+                userManager
+                ?? throw new ArgumentNullException(nameof(userManager));
+
+            _emailService =
+                emailService
+                ?? throw new ArgumentNullException(nameof(emailService));
+
+            _logger =
+                logger
+                ?? throw new ArgumentNullException(nameof(logger));
         }
+
+        // ======================================================
+        // REGISTER
+        // ======================================================
 
         [HttpPost("register")]
-        public async Task<IActionResult> Register([FromBody] RegisterDto registerDto)
+        public async Task<IActionResult> Register(
+            [FromBody] RegisterDto registerDto)
         {
             if (registerDto == null)
-                return BadRequest("Os dados de registro não podem ser nulos.");
+            {
+                return BadRequest(
+                    "Os dados de registro não podem ser nulos.");
+            }
 
-            var result = await _authService.RegisterAsync(registerDto, registerDto.IsMobile);
-            if (!result.IsSuccess)
-                return BadRequest(result);
+            var result =
+                await _authService.RegisterAsync(
+                    registerDto,
+                    registerDto.IsMobile);
 
-            return Ok(new { Message = result.Message });
-        }
-
-        [HttpPost("login")]
-        public async Task<IActionResult> Login([FromBody] LoginDto loginDto)
-        {
-            if (loginDto == null)
-                return BadRequest(new { success = false, message = "Os dados de login são obrigatórios." });
-
-            string deviceInfo = Request.Headers["User-Agent"].ToString();
-
-            var result = await _authService.LoginAsync(loginDto, deviceInfo);
-
-            // 🧠 Se falhou (ex: credenciais inválidas, email não confirmado, etc)
             if (!result.IsSuccess)
             {
-                _logger.LogWarning($"❌ Falha no login para {loginDto.Email}: {result.Message}");
+                return BadRequest(result);
+            }
+
+            return Ok(new
+            {
+                Message = result.Message
+            });
+        }
+
+        // ======================================================
+        // LOGIN
+        // ======================================================
+
+        [HttpPost("login")]
+        public async Task<IActionResult> Login(
+            [FromBody] LoginDto loginDto)
+        {
+            if (loginDto == null)
+            {
                 return BadRequest(new
                 {
                     success = false,
-                    message = result.Message ?? "Login falhou.",
-                    errors = result.Errors
+                    message =
+                        "Os dados de login são obrigatórios."
                 });
             }
 
-            // 🛡️ Segurança extra – esse check agora raramente será atingido
-            if (string.IsNullOrEmpty(result.RefreshToken))
+            var deviceInfo =
+                Request.Headers["User-Agent"]
+                    .ToString();
+
+            if (string.IsNullOrWhiteSpace(deviceInfo))
             {
-                _logger.LogError("❌ Login falhou: Refresh Token não foi gerado.");
-                return StatusCode(500, "Erro ao gerar token de atualização.");
+                deviceInfo = "Unknown Device";
             }
 
-            _logger.LogInformation($"✅ Login bem-sucedido para {loginDto.Email}");
-            _logger.LogDebug($"🔑 JWT: {result.Token?.Substring(0, 20)}...");
-            _logger.LogDebug($"🔁 Refresh Token: {result.RefreshToken}");
+            var result =
+                await _authService.LoginAsync(
+                    loginDto,
+                    deviceInfo);
 
-            // 🍪 Salva o refreshToken com segurança no cookie (caso use no frontend web)
-            Response.Cookies.Append("refreshToken", result.RefreshToken, new CookieOptions
+            if (!result.IsSuccess)
             {
-                HttpOnly = true,
-                Secure = true,
-                SameSite = SameSiteMode.Strict,
-                Expires = DateTime.UtcNow.AddDays(7)
-            });
+                _logger.LogWarning(
+                    "Falha no login para o utilizador {Email}: {Message}",
+                    loginDto.Email,
+                    result.Message);
 
-            // 🎯 Retorna os tokens no body para uso mobile
+                return BadRequest(new
+                {
+                    success = false,
+
+                    message =
+                        result.Message
+                        ?? "Login falhou.",
+
+                    errors =
+                        result.Errors
+                });
+            }
+
+            if (string.IsNullOrWhiteSpace(result.Token))
+            {
+                _logger.LogError(
+                    "Login falhou porque o Access Token não foi gerado.");
+
+                return StatusCode(
+                    StatusCodes.Status500InternalServerError,
+                    new
+                    {
+                        success = false,
+                        message =
+                            "Erro ao gerar token de autenticação."
+                    });
+            }
+
+            if (string.IsNullOrWhiteSpace(result.RefreshToken))
+            {
+                _logger.LogError(
+                    "Login falhou porque o Refresh Token não foi gerado.");
+
+                return StatusCode(
+                    StatusCodes.Status500InternalServerError,
+                    new
+                    {
+                        success = false,
+                        message =
+                            "Erro ao gerar token de atualização."
+                    });
+            }
+
+            _logger.LogInformation(
+                "Login bem-sucedido para o utilizador {Email}.",
+                loginDto.Email);
+
+            Response.Cookies.Append(
+                "refreshToken",
+                result.RefreshToken,
+                CreateRefreshTokenCookieOptions());
+
             return Ok(new
             {
                 success = true,
@@ -98,112 +177,330 @@ namespace MeepleBoardApi.Controllers
             });
         }
 
+        // ======================================================
+        // CONFIRM EMAIL
+        // ======================================================
+
         [HttpGet("confirm-email")]
-        public async Task<IActionResult> ConfirmEmail([FromQuery] string token, [FromQuery] string email)
+        public async Task<IActionResult> ConfirmEmail(
+            [FromQuery] string token,
+            [FromQuery] string email)
         {
-            if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(email))
-                return BadRequest("Token e email são obrigatórios.");
+            if (string.IsNullOrWhiteSpace(token)
+                || string.IsNullOrWhiteSpace(email))
+            {
+                return BadRequest(
+                    "Token e email são obrigatórios.");
+            }
 
-            var result = await _authService.ConfirmEmailAsync(token, email);
+            var result =
+                await _authService.ConfirmEmailAsync(
+                    token,
+                    email);
+
             if (!result.IsSuccess)
+            {
                 return BadRequest(result);
+            }
 
-            return Ok(new { Message = result.Message });
+            return Ok(new
+            {
+                Message = result.Message
+            });
         }
+
+        // ======================================================
+        // FORGOT PASSWORD
+        // ======================================================
 
         [HttpPost("forgot-password")]
-        public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordDto forgotPasswordDto)
+        public async Task<IActionResult> ForgotPassword(
+            [FromBody] ForgotPasswordDto forgotPasswordDto)
         {
             if (forgotPasswordDto == null)
-                return BadRequest("Os dados são obrigatórios.");
+            {
+                return BadRequest(
+                    "Os dados são obrigatórios.");
+            }
 
-            var result = await _authService.ForgotPasswordAsync(forgotPasswordDto);
+            var result =
+                await _authService.ForgotPasswordAsync(
+                    forgotPasswordDto);
+
             if (!result.IsSuccess)
+            {
                 return BadRequest(result);
+            }
 
-            return Ok(new { Message = result.Message });
+            return Ok(new
+            {
+                Message = result.Message
+            });
         }
+
+        // ======================================================
+        // RESET PASSWORD
+        // ======================================================
 
         [HttpPost("reset-password")]
-        public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordDto resetPasswordDto)
+        public async Task<IActionResult> ResetPassword(
+            [FromBody] ResetPasswordDto resetPasswordDto)
         {
             if (resetPasswordDto == null)
-                return BadRequest("Os dados são obrigatórios.");
+            {
+                return BadRequest(
+                    "Os dados são obrigatórios.");
+            }
 
-            var result = await _authService.ResetPasswordAsync(resetPasswordDto);
+            var result =
+                await _authService.ResetPasswordAsync(
+                    resetPasswordDto);
+
             if (!result.IsSuccess)
+            {
                 return BadRequest(result);
+            }
 
-            return Ok(new { Message = result.Message });
+            return Ok(new
+            {
+                Message = result.Message
+            });
         }
+
+        // ======================================================
+        // RESEND EMAIL CONFIRMATION
+        // ======================================================
 
         [HttpPost("resend-confirmation")]
-        public async Task<IActionResult> ResendEmailConfirmation([FromBody] ResendConfirmationDto dto)
+        public async Task<IActionResult> ResendEmailConfirmation(
+            [FromBody] ResendConfirmationDto dto)
         {
-            if (string.IsNullOrWhiteSpace(dto.Email))
-                return BadRequest("O e-mail é obrigatório.");
+            if (dto == null
+                || string.IsNullOrWhiteSpace(dto.Email))
+            {
+                return BadRequest(
+                    "O e-mail é obrigatório.");
+            }
 
-            var result = await _authService.ResendConfirmationEmailAsync(dto.Email, dto.IsMobile);
+            var result =
+                await _authService
+                    .ResendConfirmationEmailAsync(
+                        dto.Email,
+                        dto.IsMobile);
+
             if (!result.IsSuccess)
+            {
                 return BadRequest(result);
+            }
 
-            return Ok(new { Message = result.Message });
+            return Ok(new
+            {
+                Message = result.Message
+            });
         }
+
+        // ======================================================
+        // REFRESH TOKEN
+        // ======================================================
 
         [HttpPost("refresh-token")]
-        public async Task<IActionResult> RefreshToken()
+        public async Task<IActionResult> RefreshToken(
+            [FromBody] RefreshTokenRequestDto? request)
         {
-            if (!Request.Cookies.TryGetValue("refreshToken", out string? refreshToken))
-                return BadRequest("Nenhum Refresh Token encontrado.");
+            var refreshToken =
+                request?.RefreshToken;
 
-            var result = await _tokenService.RefreshTokenAsync(refreshToken);
-            if (!result.IsSuccess)
-                return Unauthorized("Refresh Token inválido ou expirado.");
+            // ==================================================
+            // WEB FALLBACK
+            // ==================================================
+            //
+            // Se não vier no body, tentamos usar o cookie.
+            // Isto deixa o backend preparado para um futuro
+            // frontend web.
 
-            return Ok(new { Token = result.Token });
+            if (string.IsNullOrWhiteSpace(refreshToken))
+            {
+                Request.Cookies.TryGetValue(
+                    "refreshToken",
+                    out refreshToken);
+            }
+
+            if (string.IsNullOrWhiteSpace(refreshToken))
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message =
+                        "Nenhum Refresh Token foi fornecido."
+                });
+            }
+
+            var result =
+                await _tokenService.RefreshTokenAsync(
+                    refreshToken);
+
+            if (!result.IsSuccess
+                || string.IsNullOrWhiteSpace(result.Token)
+                || string.IsNullOrWhiteSpace(result.RefreshToken))
+            {
+                return Unauthorized(new
+                {
+                    success = false,
+
+                    message =
+                        "Refresh Token inválido ou expirado.",
+
+                    errors =
+                        result.Errors
+                });
+            }
+
+            // Atualiza o cookie para clientes web.
+            Response.Cookies.Append(
+                "refreshToken",
+                result.RefreshToken,
+                CreateRefreshTokenCookieOptions());
+
+            // Mobile recebe os novos tokens no body.
+            return Ok(new
+            {
+                success = true,
+                token = result.Token,
+                refreshToken = result.RefreshToken
+            });
         }
+
+        // ======================================================
+        // REVOKE TOKEN
+        // ======================================================
 
         [Authorize]
         [HttpPost("revoke-token")]
-        public async Task<IActionResult> RevokeToken([FromBody] RefreshTokenRequestDto revokeRequest)
+        public async Task<IActionResult> RevokeToken(
+            [FromBody] RefreshTokenRequestDto revokeRequest)
         {
-            if (revokeRequest == null || string.IsNullOrWhiteSpace(revokeRequest.RefreshToken))
-                return BadRequest("O Refresh Token é obrigatório.");
+            if (revokeRequest == null
+                || string.IsNullOrWhiteSpace(
+                    revokeRequest.RefreshToken))
+            {
+                return BadRequest(
+                    "O Refresh Token é obrigatório.");
+            }
 
-            bool revoked = await _tokenService.RevokeTokenAsync(revokeRequest.RefreshToken);
+            var revoked =
+                await _tokenService.RevokeTokenAsync(
+                    revokeRequest.RefreshToken);
+
             if (!revoked)
-                return NotFound("O Refresh Token não foi encontrado ou já foi revogado.");
+            {
+                return NotFound(
+                    "O Refresh Token não foi encontrado ou já foi revogado.");
+            }
 
-            return Ok(new { Message = "Refresh Token revogado com sucesso." });
+            return Ok(new
+            {
+                Message =
+                    "Refresh Token revogado com sucesso."
+            });
         }
+
+        // ======================================================
+        // LOGOUT
+        // ======================================================
 
         [Authorize]
         [HttpPost("logout")]
         public IActionResult Logout()
         {
-            Response.Cookies.Delete("refreshToken");
-            return Ok(new { Message = "Logout realizado com sucesso." });
+            Response.Cookies.Delete(
+                "refreshToken");
+
+            return Ok(new
+            {
+                Message =
+                    "Logout realizado com sucesso."
+            });
         }
+
+        // ======================================================
+        // LOGOUT ALL DEVICES
+        // ======================================================
 
         [Authorize]
         [HttpPost("logout-all")]
         public async Task<IActionResult> LogoutAll()
         {
-            var userIdString = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userIdString =
+                User.FindFirst(
+                    ClaimTypes.NameIdentifier)
+                    ?.Value;
 
-            if (string.IsNullOrEmpty(userIdString) || !Guid.TryParse(userIdString, out Guid userId))
-                return Unauthorized("Usuário não autenticado.");
+            if (string.IsNullOrWhiteSpace(userIdString)
+                || !Guid.TryParse(
+                    userIdString,
+                    out var userId))
+            {
+                return Unauthorized(
+                    "Usuário não autenticado.");
+            }
 
-            await _tokenService.RevokeAllTokensForUserAsync(userId);
-            return Ok(new { Message = "Todos os Refresh Tokens foram revogados." });
+            var result =
+                await _tokenService
+                    .RevokeAllTokensForUserAsync(
+                        userId);
+
+            if (!result)
+            {
+                return BadRequest(new
+                {
+                    Message =
+                        "Não foi possível revogar as sessões do utilizador."
+                });
+            }
+
+            Response.Cookies.Delete(
+                "refreshToken");
+
+            return Ok(new
+            {
+                Message =
+                    "Todos os Refresh Tokens foram revogados."
+            });
         }
+
+        // ======================================================
+        // ADMIN TEST
+        // ======================================================
 
         [Authorize(Roles = "Admin")]
         [HttpGet("admin")]
-        public async Task<IActionResult> IsAdmin()
+        public IActionResult IsAdmin()
         {
-            await Task.Delay(1);
-            return Ok(new { Message = "Usuário é administrador" });
+            return Ok(new
+            {
+                Message =
+                    "Usuário é administrador"
+            });
+        }
+
+        // ======================================================
+        // COOKIE OPTIONS
+        // ======================================================
+
+        private static CookieOptions
+            CreateRefreshTokenCookieOptions()
+        {
+            return new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = true,
+                SameSite = SameSiteMode.Strict,
+
+                Expires =
+                    DateTimeOffset.UtcNow.AddDays(7),
+
+                Path = "/"
+            };
         }
     }
 }
