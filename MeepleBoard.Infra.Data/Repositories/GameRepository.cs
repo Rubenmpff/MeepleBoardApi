@@ -14,7 +14,7 @@ namespace MeepleBoard.Infra.Data.Repositories
             _context = context;
         }
 
-        #region ✅ Consultas de Existência
+        #region  Consultas de Existência
 
         public async Task<bool> ExistsByNameAsync(string name, CancellationToken cancellationToken = default)
         {
@@ -30,9 +30,9 @@ namespace MeepleBoard.Infra.Data.Repositories
                 .AnyAsync(g => g.BGGId == bggId, cancellationToken);
         }
 
-        #endregion ✅ Consultas de Existência
+        #endregion Consultas de Existência
 
-        #region 🔍 Leitura de Dados
+        #region  Leitura de Dados
 
         public async Task<Game?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
         {
@@ -54,18 +54,46 @@ namespace MeepleBoard.Infra.Data.Repositories
                 .ToListAsync(cancellationToken);
         }
 
-        public async Task<List<Game>> SearchByNameAsync(string query, int offset, int limit, CancellationToken cancellationToken)
+        public async Task<List<Game>> SearchByNameAsync(
+            string query,
+            int offset,
+            int limit,
+            CancellationToken cancellationToken)
         {
+            if (string.IsNullOrWhiteSpace(query))
+                return new List<Game>();
+
+            var searchTerm = query.Trim();
+            var safeOffset = Math.Max(0, offset);
+            var safeLimit = Math.Clamp(limit, 1, 100);
+
+            /*
+             * IMPORTANTE:
+             * Esta query serve para obter CANDIDATOS locais.
+             * O ranking final é feito no GameService, juntamente com os resultados do BGG.
+             *
+             * Evitamos OrderBy(Name) puro porque isso fazia resultados pouco relevantes
+             * aparecerem antes de jogos muito mais conhecidos.
+             *
+             * A ordem local agora favorece:
+             * 1) nome exato
+             * 2) nome começa pelo termo
+             * 3) popularidade (UsersRatedCount)
+             * 4) nome, apenas como desempate previsível
+             */
             return await _context.Games
                 .AsNoTracking()
-                .Where(g => EF.Functions.Like(g.Name, $"%{query}%"))
-                .OrderBy(g => g.Name)
-                .Skip(offset)
-                .Take(limit)
+                .Where(g =>
+                    g.Name.StartsWith(searchTerm) ||
+                    g.Name.Contains(searchTerm))
+                .OrderByDescending(g => g.Name == searchTerm)
+                .ThenByDescending(g => g.Name.StartsWith(searchTerm))
+                .ThenByDescending(g => g.UsersRatedCount ?? 0)
+                .ThenBy(g => g.Name)
+                .Skip(safeOffset)
+                .Take(safeLimit)
                 .ToListAsync(cancellationToken);
         }
-
-
 
         public async Task<IReadOnlyList<Game>> GetAllAsync(int pageIndex = 0, int pageSize = 10, CancellationToken cancellationToken = default)
         {
@@ -127,40 +155,67 @@ namespace MeepleBoard.Infra.Data.Repositories
                 .ToListAsync(cancellationToken);
         }
 
-        public async Task<List<Game>> SearchBaseGamesByNameAsync(string query, int offset = 0, int limit = 10, CancellationToken cancellationToken = default)
+        public async Task<List<Game>> SearchBaseGamesByNameAsync(
+            string query,
+            int offset = 0,
+            int limit = 10,
+            CancellationToken cancellationToken = default)
         {
+            if (string.IsNullOrWhiteSpace(query))
+                return new List<Game>();
+
+            var searchTerm = query.Trim();
+            var safeOffset = Math.Max(0, offset);
+            var safeLimit = Math.Clamp(limit, 1, 100);
+
             return await _context.Games
                 .AsNoTracking()
                 .Where(g =>
                     g.BaseGameId == null &&
                     g.BaseGameBggId == null &&
-                    EF.Functions.Like(g.Name, $"%{query}%"))
-                .OrderBy(g => g.Name)
-                .Skip(offset)
-                .Take(limit)
+                    (g.Name.StartsWith(searchTerm) ||
+                     g.Name.Contains(searchTerm)))
+                .OrderByDescending(g => g.Name == searchTerm)
+                .ThenByDescending(g => g.Name.StartsWith(searchTerm))
+                .ThenByDescending(g => g.UsersRatedCount ?? 0)
+                .ThenBy(g => g.Name)
+                .Skip(safeOffset)
+                .Take(safeLimit)
                 .ToListAsync(cancellationToken);
         }
 
-
-        public async Task<List<Game>> SearchExpansionsByNameAsync(string query, int offset = 0, int limit = 10, CancellationToken cancellationToken = default)
+        public async Task<List<Game>> SearchExpansionsByNameAsync(
+            string query,
+            int offset = 0,
+            int limit = 10,
+            CancellationToken cancellationToken = default)
         {
+            if (string.IsNullOrWhiteSpace(query))
+                return new List<Game>();
+
+            var searchTerm = query.Trim();
+            var safeOffset = Math.Max(0, offset);
+            var safeLimit = Math.Clamp(limit, 1, 100);
+
             return await _context.Games
                 .AsNoTracking()
                 .Where(g =>
-                    (g.BaseGameId != null || g.BaseGameBggId != null) &&
-                    EF.Functions.Like(g.Name, $"%{query}%"))
-                .OrderBy(g => g.Name)
-                .Skip(offset)
-                .Take(limit)
+                    (g.BaseGameId != null ||
+                     g.BaseGameBggId != null) &&
+                    (g.Name.StartsWith(searchTerm) ||
+                     g.Name.Contains(searchTerm)))
+                .OrderByDescending(g => g.Name == searchTerm)
+                .ThenByDescending(g => g.Name.StartsWith(searchTerm))
+                .ThenByDescending(g => g.UsersRatedCount ?? 0)
+                .ThenBy(g => g.Name)
+                .Skip(safeOffset)
+                .Take(safeLimit)
                 .ToListAsync(cancellationToken);
         }
 
+        #endregion Leitura de Dados
 
-
-
-        #endregion 🔍 Leitura de Dados
-
-        #region ✍️ Escrita de Dados
+        #region Escrita de Dados
 
         public async Task AddAsync(Game game, CancellationToken cancellationToken = default)
         {
@@ -196,9 +251,9 @@ namespace MeepleBoard.Infra.Data.Repositories
             return await _context.SaveChangesAsync(cancellationToken);
         }
 
-        #endregion ✍️ Escrita de Dados
+        #endregion Escrita de Dados
 
-        #region 🔥 Funções Especiais para Jobs (Ranking, Atualizações, etc.)
+        #region Funções Especiais para Jobs (Ranking, Atualizações, etc.)
 
         public async Task<IReadOnlyList<Game>> GetRecentlyPlayedAsync(int limit, CancellationToken cancellationToken = default)
         {
@@ -330,6 +385,6 @@ namespace MeepleBoard.Infra.Data.Repositories
             return (items, total);
         }
 
-        #endregion 🔥 Funções Especiais para Jobs (Ranking, Atualizações, etc.)
+        #endregion Funções Especiais para Jobs (Ranking, Atualizações, etc.)
     }
 }

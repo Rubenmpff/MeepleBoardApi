@@ -65,3 +65,9 @@ coverage.*
 # =========================
 .DS_Store
 Thumbs.db
+
+# =========================
+# BGG data dumps
+# =========================
+MeepleBoardApi/Data/Bgg/*.zip
+MeepleBoardApi/Data/Bgg/*.csv
