@@ -196,11 +196,64 @@ builder.Services.AddHangfire(config =>
 });
 
 // Mantém o processamento dos jobs ativo.
-builder.Services.AddHangfireServer();
+//
+// Separamos os jobs normais da importação pesada do catálogo BGG.
+// Desta forma, o catálogo nunca ocupa os workers utilizados pelos
+// cleanups e pelos restantes jobs da aplicação.
+//
+// Os valores podem ser sobrescritos por configuração, por exemplo:
+// Hangfire:DefaultWorkerCount
+// Hangfire:BggCatalogWorkerCount
+//
+// Os defaults mantêm um total máximo de 4 workers neste ambiente:
+// 3 para a fila normal + 1 dedicado ao catálogo BGG.
+var defaultHangfireWorkerCount =
+    Math.Max(
+        1,
+        configuration.GetValue<int?>(
+            "Hangfire:DefaultWorkerCount")
+        ?? 3);
+
+var bggCatalogWorkerCount =
+    Math.Max(
+        1,
+        configuration.GetValue<int?>(
+            "Hangfire:BggCatalogWorkerCount")
+        ?? 1);
+
+// Jobs normais da aplicação.
+builder.Services.AddHangfireServer(options =>
+{
+    options.WorkerCount =
+        defaultHangfireWorkerCount;
+
+    options.Queues =
+    [
+        "default"
+    ];
+});
+
+// Importação pesada do catálogo BGG.
+//
+// A queue tem, por defeito, apenas um worker.
+// Em conjunto com DisableConcurrentExecution no job,
+// isto dá-nos duas camadas de proteção contra concorrência.
+builder.Services.AddHangfireServer(options =>
+{
+    options.WorkerCount =
+        bggCatalogWorkerCount;
+
+    options.Queues =
+    [
+        "bgg-catalog"
+    ];
+});
 
 builder.Services.AddScoped<UserCleanupJob>();
 builder.Services.AddScoped<SessionCleanupJob>();
 builder.Services.AddScoped<MatchCleanupJob>();
+builder.Services.AddScoped<BGGSyncJob>();
+builder.Services.AddScoped<BggGameCatalogImportJob>();
 
 // ======================================================
 // CREDENCIAIS DO DASHBOARD DO HANGFIRE
@@ -419,6 +472,18 @@ using (var scope = app.Services.CreateScope())
         job => job.ExecuteAsync(
             CancellationToken.None),
         Cron.Hourly);
+
+    recurringJobManager.AddOrUpdate<BGGSyncJob>(
+        "bgg-sync",
+        job => job.ExecuteAsync(
+            CancellationToken.None),
+        Cron.Daily);
+
+    recurringJobManager.AddOrUpdate<BggGameCatalogImportJob>(
+        "bgg-game-catalog-import",
+        job => job.ExecuteAsync(
+            CancellationToken.None),
+        Cron.Daily);
 }
 
 // ======================================================

@@ -9,14 +9,20 @@ namespace MeepleBoard.Infra.Data.Context
     public class MeepleBoardDbContext
         : IdentityDbContext<User, IdentityRole<Guid>, Guid>
     {
-        public MeepleBoardDbContext(DbContextOptions<MeepleBoardDbContext> options)
+        public MeepleBoardDbContext(
+            DbContextOptions<MeepleBoardDbContext> options)
             : base(options)
         {
-            ChangeTracker.QueryTrackingBehavior = QueryTrackingBehavior.TrackAll;
+            ChangeTracker.QueryTrackingBehavior =
+                QueryTrackingBehavior.TrackAll;
         }
 
         // ── Existentes ────────────────────────────────────────────────────────
         public DbSet<Game> Games { get; set; }
+
+        // ── Catálogo leve para pesquisa ──────────────────────────────────────
+        public DbSet<GameSearchCatalog> GameSearchCatalog { get; set; }
+
         public DbSet<GameSession> GameSessions { get; set; }
         public DbSet<GameSessionPlayer> GameSessionPlayers { get; set; }
         public DbSet<Match> Matches { get; set; }
@@ -26,13 +32,14 @@ namespace MeepleBoard.Infra.Data.Context
         public DbSet<EmailResendLog> EmailResendLogs { get; set; }
         public DbSet<Friendship> Friendships { get; set; }
 
-        // ── Campanhas (novos) ─────────────────────────────────────────────────
+        // ── Campanhas ─────────────────────────────────────────────────────────
         public DbSet<Campaign> Campaigns { get; set; }
         public DbSet<CampaignMember> CampaignMembers { get; set; }
         public DbSet<CampaignMatch> CampaignMatches { get; set; }
         public DbSet<MatchJournalEntry> MatchJournalEntries { get; set; }
 
-        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        protected override void OnModelCreating(
+            ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
 
@@ -75,15 +82,23 @@ namespace MeepleBoard.Infra.Data.Context
                     .HasForeignKey(e => e.MatchId)
                     .OnDelete(DeleteBehavior.Cascade);
 
-                b.Property(x => x.Notes).HasMaxLength(2000);
-                b.Property(x => x.Tags).HasMaxLength(500);
+                b.Property(x => x.Notes)
+                    .HasMaxLength(2000);
+
+                b.Property(x => x.Tags)
+                    .HasMaxLength(500);
             });
 
             modelBuilder.Entity<MatchPlayer>(b =>
             {
                 b.HasKey(x => x.Id);
 
-                b.HasIndex(x => new { x.MatchId, x.UserId }).IsUnique();
+                b.HasIndex(x => new
+                {
+                    x.MatchId,
+                    x.UserId
+                })
+                .IsUnique();
 
                 b.HasOne(x => x.Match)
                     .WithMany(m => m.MatchPlayers)
@@ -119,12 +134,94 @@ namespace MeepleBoard.Infra.Data.Context
 
             modelBuilder.Entity<Game>(b =>
             {
-                b.Property(x => x.Description).HasMaxLength(10_000);
+                b.Property(x => x.Description)
+                    .HasMaxLength(10_000);
 
                 b.HasMany(g => g.Expansions)
                     .WithOne(g => g.BaseGame)
                     .HasForeignKey(g => g.BaseGameId)
                     .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            /* =========================================================
+               GAME SEARCH CATALOG
+            ========================================================== */
+
+            modelBuilder.Entity<GameSearchCatalog>(b =>
+            {
+                b.HasKey(x => x.Id);
+
+                /*
+                 * Cada BGG ID só pode existir uma vez no catálogo.
+                 *
+                 * Isto evita duplicados durante sincronizações.
+                 */
+                b.HasIndex(x => x.BggId)
+                    .IsUnique();
+
+                /*
+                 * Índice principal para autocomplete.
+                 *
+                 * É particularmente útil para pesquisas por prefixo:
+                 *
+                 * "ro"
+                 * "roo"
+                 * "root"
+                 */
+                b.HasIndex(x => x.NormalizedName);
+
+                /*
+                 * Ajuda nos endpoints onde queremos pesquisar
+                 * especificamente jogos base ou expansões.
+                 */
+                b.HasIndex(x => new
+                {
+                    x.IsExpansion,
+                    x.NormalizedName
+                });
+
+                /*
+                 * Pode ajudar nas operações de atualização do catálogo,
+                 * onde precisamos encontrar registos antigos.
+                 */
+                b.HasIndex(x => x.LastSyncedAt);
+
+                /*
+                 * Permite encontrar rapidamente jogos que:
+                 *
+                 * - ainda nunca foram enriquecidos através do BGG /thing;
+                 * - possuem detalhes antigos e precisam de refresh.
+                 *
+                 * DetailsSyncedAt == null significa que o catálogo pode
+                 * conter apenas os dados básicos provenientes do CSV.
+                 */
+                b.HasIndex(x => x.DetailsSyncedAt);
+
+                b.Property(x => x.Name)
+                    .IsRequired()
+                    .HasMaxLength(500);
+
+                b.Property(x => x.NormalizedName)
+                    .IsRequired()
+                    .HasMaxLength(500);
+
+                b.Property(x => x.ThumbnailUrl)
+                    .HasMaxLength(1000);
+
+                /*
+                 * A precisão é mais do que suficiente para ratings
+                 * como 8.07069 sem usar um tipo exageradamente grande.
+                 */
+                b.Property(x => x.AverageRating)
+                    .HasPrecision(8, 5);
+
+                /*
+                 * Nome explícito da tabela.
+                 *
+                 * Assim fica claro na BD que esta tabela é apenas
+                 * infraestrutura de pesquisa e não a entidade Game.
+                 */
+                b.ToTable("GameSearchCatalog");
             });
 
             /* =========================================================
@@ -134,8 +231,13 @@ namespace MeepleBoard.Infra.Data.Context
             modelBuilder.Entity<GameSession>(b =>
             {
                 b.HasKey(x => x.Id);
-                b.Property(x => x.Name).IsRequired().HasMaxLength(200);
-                b.Property(x => x.Location).HasMaxLength(200);
+
+                b.Property(x => x.Name)
+                    .IsRequired()
+                    .HasMaxLength(200);
+
+                b.Property(x => x.Location)
+                    .HasMaxLength(200);
 
                 b.HasOne(x => x.Organizer)
                     .WithMany()
@@ -151,7 +253,13 @@ namespace MeepleBoard.Infra.Data.Context
             modelBuilder.Entity<GameSessionPlayer>(b =>
             {
                 b.HasKey(x => x.Id);
-                b.HasIndex(x => new { x.SessionId, x.UserId }).IsUnique();
+
+                b.HasIndex(x => new
+                {
+                    x.SessionId,
+                    x.UserId
+                })
+                .IsUnique();
 
                 b.HasOne(x => x.Session)
                     .WithMany(s => s.Players)
@@ -163,7 +271,8 @@ namespace MeepleBoard.Infra.Data.Context
                     .HasForeignKey(x => x.UserId)
                     .OnDelete(DeleteBehavior.Restrict);
 
-                b.Property(x => x.JoinedAt).IsRequired();
+                b.Property(x => x.JoinedAt)
+                    .IsRequired();
             });
 
             /* =========================================================
@@ -185,19 +294,40 @@ namespace MeepleBoard.Infra.Data.Context
             modelBuilder.Entity<Friendship>(b =>
             {
                 b.HasKey(x => x.Id);
-                b.HasIndex(x => new { x.UserAId, x.UserBId }).IsUnique();
 
-                b.ToTable(t => t.HasCheckConstraint(
-                    "CK_Friendship_UserA_Not_UserB",
-                    "[UserAId] <> [UserBId]"
-                ));
+                b.HasIndex(x => new
+                {
+                    x.UserAId,
+                    x.UserBId
+                })
+                .IsUnique();
 
-                b.HasOne<User>().WithMany().HasForeignKey(x => x.UserAId).OnDelete(DeleteBehavior.Restrict);
-                b.HasOne<User>().WithMany().HasForeignKey(x => x.UserBId).OnDelete(DeleteBehavior.Restrict);
-                b.HasOne<User>().WithMany().HasForeignKey(x => x.InitiatorId).OnDelete(DeleteBehavior.Restrict);
+                b.ToTable(t =>
+                    t.HasCheckConstraint(
+                        "CK_Friendship_UserA_Not_UserB",
+                        "[UserAId] <> [UserBId]"
+                    ));
 
-                b.Property(x => x.Status).IsRequired();
-                b.Property(x => x.CreatedAt).IsRequired();
+                b.HasOne<User>()
+                    .WithMany()
+                    .HasForeignKey(x => x.UserAId)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                b.HasOne<User>()
+                    .WithMany()
+                    .HasForeignKey(x => x.UserBId)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                b.HasOne<User>()
+                    .WithMany()
+                    .HasForeignKey(x => x.InitiatorId)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                b.Property(x => x.Status)
+                    .IsRequired();
+
+                b.Property(x => x.CreatedAt)
+                    .IsRequired();
             });
 
             /* =========================================================
@@ -207,8 +337,13 @@ namespace MeepleBoard.Infra.Data.Context
             modelBuilder.Entity<Campaign>(b =>
             {
                 b.HasKey(x => x.Id);
-                b.Property(x => x.Name).IsRequired().HasMaxLength(200);
-                b.Property(x => x.Notes).HasMaxLength(5000);
+
+                b.Property(x => x.Name)
+                    .IsRequired()
+                    .HasMaxLength(200);
+
+                b.Property(x => x.Notes)
+                    .HasMaxLength(5000);
 
                 b.HasOne(x => x.Game)
                     .WithMany()
@@ -239,8 +374,12 @@ namespace MeepleBoard.Infra.Data.Context
             {
                 b.HasKey(x => x.Id);
 
-                // Índice único: um utilizador só pode ter um registo ativo por campanha
-                b.HasIndex(x => new { x.CampaignId, x.UserId });
+                // Índice: um utilizador por campanha.
+                b.HasIndex(x => new
+                {
+                    x.CampaignId,
+                    x.UserId
+                });
 
                 b.HasOne(x => x.Campaign)
                     .WithMany(c => c.Members)
@@ -261,10 +400,16 @@ namespace MeepleBoard.Infra.Data.Context
             {
                 b.HasKey(x => x.Id);
 
-                // Uma partida só pode estar associada uma vez à mesma campanha
-                b.HasIndex(x => new { x.CampaignId, x.MatchId }).IsUnique();
+                // Uma partida só pode estar associada uma vez à mesma campanha.
+                b.HasIndex(x => new
+                {
+                    x.CampaignId,
+                    x.MatchId
+                })
+                .IsUnique();
 
-                b.Property(x => x.SessionTitle).HasMaxLength(200);
+                b.Property(x => x.SessionTitle)
+                    .HasMaxLength(200);
 
                 b.HasOne(x => x.Campaign)
                     .WithMany(c => c.CampaignMatches)
@@ -274,7 +419,7 @@ namespace MeepleBoard.Infra.Data.Context
                 b.HasOne(x => x.Match)
                     .WithMany(m => m.CampaignMatches)
                     .HasForeignKey(x => x.MatchId)
-                    .OnDelete(DeleteBehavior.Restrict); // não apaga a partida ao remover da campanha
+                    .OnDelete(DeleteBehavior.Restrict);
             });
 
             /* =========================================================
@@ -285,12 +430,22 @@ namespace MeepleBoard.Infra.Data.Context
             {
                 b.HasKey(x => x.Id);
 
-                // Um jogador só pode ter uma entrada por partida
-                b.HasIndex(x => new { x.MatchId, x.UserId }).IsUnique();
+                // Um jogador só pode ter uma entrada por partida.
+                b.HasIndex(x => new
+                {
+                    x.MatchId,
+                    x.UserId
+                })
+                .IsUnique();
 
-                b.Property(x => x.Notes).HasMaxLength(3000);
-                b.Property(x => x.Tags).HasMaxLength(500);
-                b.Property(x => x.PhotoUrlsJson).HasMaxLength(5000);
+                b.Property(x => x.Notes)
+                    .HasMaxLength(3000);
+
+                b.Property(x => x.Tags)
+                    .HasMaxLength(500);
+
+                b.Property(x => x.PhotoUrlsJson)
+                    .HasMaxLength(5000);
 
                 b.HasOne(x => x.Match)
                     .WithMany(m => m.JournalEntries)

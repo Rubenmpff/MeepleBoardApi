@@ -7,9 +7,11 @@ using System.Diagnostics;
 namespace MeepleBoard.Services.Job
 {
     /// <summary>
-    /// Job para sincronizar periodicamente jogos com o BGG (BoardGameGeek).
-    /// Atualiza jogos cadastrados, mais buscados, populares e recentemente jogados.
-    /// Executado por Hangfire.
+    /// Atualiza periodicamente os jogos reais existentes na MeepleBoard
+    /// com dados atuais do BoardGameGeek.
+    ///
+    /// Não serve para alimentar o catálogo de pesquisa.
+    /// O GameSearchCatalog será mantido através do data dump do BGG.
     /// </summary>
     public class BGGSyncJob
     {
@@ -28,108 +30,122 @@ namespace MeepleBoard.Services.Job
         }
 
         [AutomaticRetry(Attempts = 2)]
-        public async Task ExecuteAsync(CancellationToken cancellationToken = default)
+        public async Task ExecuteAsync(
+            CancellationToken cancellationToken = default)
         {
             var stopwatch = Stopwatch.StartNew();
-            _logger.LogInformation("🚀 Iniciando job de sincronização com o BGG...");
 
-            var jogosParaAtualizar = new HashSet<int>();
-
-            // 🔹 1. Jogos cadastrados no sistema
             try
             {
-                var paged = await _gameService.GetAllAsync(0, int.MaxValue, cancellationToken);
-                var jogosDaApp = paged.Data;
-                foreach (var jogo in jogosDaApp.Where(j => j.BggId.HasValue))
-                    jogosParaAtualizar.Add(jogo.BggId!.Value);
+                _logger.LogInformation(
+                    "A iniciar sincronização dos jogos locais com o BGG.");
 
-                _logger.LogInformation("📌 {Count} jogos cadastrados encontrados.", jogosDaApp.Count);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "⚠️ Falha ao buscar jogos cadastrados.");
-            }
+                /*
+                 * Apenas entidades Game reais existentes na MeepleBoard.
+                 *
+                 * Não precisamos de:
+                 * - Hot Games;
+                 * - jogos recentes;
+                 * - jogos mais pesquisados.
+                 *
+                 * Esses subconjuntos já estão incluídos nos jogos existentes.
+                 */
+                var pagedGames =
+                    await _gameService.GetAllAsync(
+                        0,
+                        int.MaxValue,
+                        cancellationToken);
 
-            // 🔹 2. Jogos da hot list do BGG
-            try
-            {
-                var hotGames = await _bggService.GetHotGamesAsync(cancellationToken);
-                foreach (var jogo in hotGames.Where(j => j.BggId.HasValue))
-                    jogosParaAtualizar.Add(jogo.BggId!.Value);
+                var gamesWithBggId =
+                    pagedGames.Data
+                        .Where(x => x.BggId.HasValue)
+                        .ToList();
 
-                _logger.LogInformation("🔥 {Count} jogos da hot list encontrados.", hotGames.Count);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "⚠️ Falha ao buscar hot list do BGG.");
-            }
-
-            // 🔹 3. Jogos recentemente jogados
-            try
-            {
-                var recentes = await _gameService.GetRecentlyPlayedAsync(50, cancellationToken);
-                foreach (var jogo in recentes.Where(j => j.BggId.HasValue))
-                    jogosParaAtualizar.Add(jogo.BggId!.Value);
-
-                _logger.LogInformation("🎲 {Count} jogos recentemente jogados encontrados.", recentes.Count);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "⚠️ Falha ao buscar jogos recentemente jogados.");
-            }
-
-            // 🔹 4. Jogos mais buscados
-            try
-            {
-                var populares = await _gameService.GetMostSearchedAsync(50, cancellationToken);
-                foreach (var jogo in populares.Where(j => j.BggId.HasValue))
-                    jogosParaAtualizar.Add(jogo.BggId!.Value);
-
-                _logger.LogInformation("🔍 {Count} jogos mais buscados encontrados.", populares.Count);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "⚠️ Falha ao buscar jogos mais buscados.");
-            }
-
-            _logger.LogInformation("📦 Total de jogos únicos a sincronizar: {Total}", jogosParaAtualizar.Count);
-
-            if (!jogosParaAtualizar.Any())
-            {
-                _logger.LogWarning("🚫 Nenhum jogo com BGG ID foi encontrado para sincronização.");
-                return;
-            }
-
-            // 🔄 Busca detalhes atualizados do BGG
-            List<GameDto> jogosAtualizados;
-            try
-            {
-                var ids = jogosParaAtualizar.Select(id => id.ToString()).ToList();
-                jogosAtualizados = await _bggService.GetGamesByIdsAsync(ids, cancellationToken);
-                _logger.LogInformation("📥 {Count} jogos recebidos com detalhes do BGG.", jogosAtualizados.Count);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "❌ Erro ao buscar detalhes dos jogos no BGG.");
-                return;
-            }
-
-            int totalAtualizados = 0;
-            foreach (var jogo in jogosAtualizados)
-            {
-                try
+                if (gamesWithBggId.Count == 0)
                 {
-                    var sucesso = await _gameService.UpdateFromBggAsync(jogo, cancellationToken);
-                    if (sucesso) totalAtualizados++;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "⚠️ Falha ao atualizar jogo local: {Name}", jogo.Name);
-                }
-            }
+                    _logger.LogInformation(
+                        "Não existem jogos locais com BGG ID para sincronizar.");
 
-            stopwatch.Stop();
-            _logger.LogInformation("✅ {Count} jogos atualizados com sucesso. ⏱️ Tempo total: {Time} ms", totalAtualizados, stopwatch.ElapsedMilliseconds);
+                    return;
+                }
+
+                var ids =
+                    gamesWithBggId
+                        .Select(x => x.BggId!.Value)
+                        .Distinct()
+                        .Select(x => x.ToString())
+                        .ToList();
+
+                _logger.LogInformation(
+                    "{Count} jogos locais serão sincronizados com o BGG.",
+                    ids.Count);
+
+                /*
+                 * Uma chamada em batch ao BGG.
+                 */
+                var updatedGames =
+                    await _bggService.GetGamesByIdsAsync(
+                        ids,
+                        cancellationToken);
+
+                var totalUpdated = 0;
+
+                foreach (var updatedGame in updatedGames)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    try
+                    {
+                        var success =
+                            await _gameService.UpdateFromBggAsync(
+                                updatedGame,
+                                cancellationToken);
+
+                        if (success)
+                        {
+                            totalUpdated++;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(
+                            ex,
+                            "Falha ao atualizar jogo local '{Name}' (BGG ID: {BggId}).",
+                            updatedGame.Name,
+                            updatedGame.BggId);
+                    }
+                }
+
+                stopwatch.Stop();
+
+                _logger.LogInformation(
+                    "Sincronização BGG concluída. " +
+                    "{Updated}/{Total} jogos atualizados em {ElapsedMilliseconds} ms.",
+                    totalUpdated,
+                    updatedGames.Count,
+                    stopwatch.ElapsedMilliseconds);
+            }
+            catch (OperationCanceledException)
+            {
+                stopwatch.Stop();
+
+                _logger.LogWarning(
+                    "Sincronização BGG cancelada após {ElapsedMilliseconds} ms.",
+                    stopwatch.ElapsedMilliseconds);
+
+                throw;
+            }
+            catch (Exception ex)
+            {
+                stopwatch.Stop();
+
+                _logger.LogError(
+                    ex,
+                    "Erro durante sincronização BGG após {ElapsedMilliseconds} ms.",
+                    stopwatch.ElapsedMilliseconds);
+
+                throw;
+            }
         }
     }
 }

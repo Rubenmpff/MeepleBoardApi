@@ -4,6 +4,7 @@ using MeepleBoard.Infra.Data.Context;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace MeepleBoard.Infra.Data.Migrations
 {
     [DbContext(typeof(MeepleBoardDbContext))]
-    partial class MeepleBoardDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260823085716_AddGameSearchCatalog")]
+    partial class AddGameSearchCatalog
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -298,9 +301,6 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<DateTime?>("DetailsSyncedAt")
-                        .HasColumnType("datetime2");
-
                     b.Property<bool>("IsCooperative")
                         .HasColumnType("bit");
 
@@ -318,13 +318,13 @@ namespace MeepleBoard.Infra.Data.Migrations
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("NormalizedName")
                         .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<int?>("RatingsCount")
                         .HasColumnType("int");
@@ -344,8 +344,6 @@ namespace MeepleBoard.Infra.Data.Migrations
 
                     b.HasIndex("BggId")
                         .IsUnique();
-
-                    b.HasIndex("DetailsSyncedAt");
 
                     b.HasIndex("LastSyncedAt");
 
