@@ -17,6 +17,31 @@ namespace MeepleBoard.Domain.Interfaces
             int offset = 0,
             int limit = 10,
             bool? isExpansion = null,
+            int? playerCount = null,
+            double? minBggRating = null,
+            string sort = "relevance",
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Obtém candidatos prioritários para enriquecimento através do BGG /thing.
+        ///
+        /// Apenas devolve registos já existentes no GameSearchCatalog que ainda
+        /// não possuem detalhes sincronizados (DetailsSyncedAt == null).
+        ///
+        /// A prioridade deve favorecer jogos mais conhecidos/relevantes para que
+        /// as capas e restantes detalhes apareçam primeiro nos resultados que têm
+        /// maior probabilidade de ser pesquisados pelos utilizadores.
+        ///
+        /// Esta operação é apenas de leitura e nunca cria entidades Game reais.
+        /// </summary>
+        /// <param name="limit">
+        /// Número máximo de candidatos a devolver.
+        /// </param>
+        /// <param name="cancellationToken">
+        /// Token utilizado para cancelar a operação quando necessário.
+        /// </param>
+        Task<List<GameSearchCatalog>> GetCandidatesForEnrichmentAsync(
+            int limit,
             CancellationToken cancellationToken = default);
 
         Task AddAsync(
@@ -43,6 +68,20 @@ namespace MeepleBoard.Domain.Interfaces
         /// </summary>
         Task<int> BulkUpsertAsync(
             IReadOnlyCollection<GameSearchCatalog> games,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Reconstrói em bloco o índice auxiliar de tokens usado pelo
+        /// autocomplete para pesquisas por início de palavra.
+        ///
+        /// A implementação deve ser set-based/bulk e não deve inserir
+        /// tokens individualmente através do Entity Framework.
+        ///
+        /// O índice é reconstruível a partir de GameSearchCatalog e,
+        /// por isso, pode ser apagado e recriado sem afetar dados de
+        /// domínio ou dados pertencentes aos utilizadores.
+        /// </summary>
+        Task<int> RebuildSearchTokensAsync(
             CancellationToken cancellationToken = default);
 
         /// <summary>

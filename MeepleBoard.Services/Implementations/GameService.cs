@@ -1,9 +1,12 @@
-﻿using AutoMapper;
+﻿
+using AutoMapper;
+using Hangfire;
 using MeepleBoard.Domain.Entities;
 using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Services.DTOs;
 using MeepleBoard.Services.Interfaces;
 using MeepleBoard.Services.Mapping.Dtos;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using System.Globalization;
 using System.Text;
@@ -19,21 +22,57 @@ namespace MeepleBoard.Services.Implementations
         private readonly IGameRepository _gameRepository;
         private readonly IBGGService _bggService;
         private readonly IGameSearchCatalogService _gameSearchCatalogService;
+        private readonly IBackgroundJobClient _backgroundJobs;
+        private readonly IMemoryCache _cache;
         private readonly IMapper _mapper;
         private readonly ILogger<GameService> _logger;
+
+        private static readonly TimeSpan LazyEnrichmentThrottle =
+            TimeSpan.FromMinutes(10);
 
         public GameService(
             IGameRepository gameRepository,
             IBGGService bggService,
             IGameSearchCatalogService gameSearchCatalogService,
+            IBackgroundJobClient backgroundJobs,
+            IMemoryCache cache,
             IMapper mapper,
             ILogger<GameService> logger)
         {
-            _gameRepository = gameRepository;
-            _bggService = bggService;
-            _gameSearchCatalogService = gameSearchCatalogService;
-            _mapper = mapper;
-            _logger = logger;
+            _gameRepository =
+                gameRepository ??
+                throw new ArgumentNullException(
+                    nameof(gameRepository));
+
+            _bggService =
+                bggService ??
+                throw new ArgumentNullException(
+                    nameof(bggService));
+
+            _gameSearchCatalogService =
+                gameSearchCatalogService ??
+                throw new ArgumentNullException(
+                    nameof(gameSearchCatalogService));
+
+            _backgroundJobs =
+                backgroundJobs ??
+                throw new ArgumentNullException(
+                    nameof(backgroundJobs));
+
+            _cache =
+                cache ??
+                throw new ArgumentNullException(
+                    nameof(cache));
+
+            _mapper =
+                mapper ??
+                throw new ArgumentNullException(
+                    nameof(mapper));
+
+            _logger =
+                logger ??
+                throw new ArgumentNullException(
+                    nameof(logger));
         }
 
 
@@ -84,9 +123,12 @@ namespace MeepleBoard.Services.Implementations
             game.SetBggId(bggGame.BggId);
             game.ApproveGame();
 
-            game.SetPlayerCount(
+            ApplyBggPlayerCountIfValid(
+                game,
                 bggGame.MinPlayers,
-                bggGame.MaxPlayers);
+                bggGame.MaxPlayers,
+                bggGame.Name,
+                bggId);
 
             game.SetCooperative(
                 bggGame.IsCooperative);
@@ -432,82 +474,21 @@ namespace MeepleBoard.Services.Implementations
             string query,
             int offset = 0,
             int limit = 10,
+            bool? isExpansion = null,
+            int? playerCount = null,
+            double? minBggRating = null,
+            string sort = "relevance",
             CancellationToken ct = default)
         {
-            if (string.IsNullOrWhiteSpace(query))
-            {
-                return new List<GameSuggestionDto>();
-            }
-
-            var normalizedQuery =
-                NormalizeSearchText(query);
-
-            if (string.IsNullOrWhiteSpace(normalizedQuery))
-            {
-                return new List<GameSuggestionDto>();
-            }
-
-            var trimmedQuery =
-                query.Trim();
-
-            var safeOffset =
-                Math.Max(0, offset);
-
-            var safeLimit =
-                Math.Clamp(limit, 1, 50);
-
-            var candidateLimit =
-                Math.Clamp(
-                    Math.Max(
-                        40,
-                        safeOffset + safeLimit + 20),
-                    40,
-                    80);
-
-            // 1) Jogos reais já existentes na MeepleBoard.
-            var localResults =
-                await _gameRepository.SearchByNameAsync(
-                    trimmedQuery,
-                    0,
-                    candidateLimit,
-                    ct);
-
-            var candidates =
-                localResults
-                    .Where(g => g.BGGId.HasValue)
-                    .Select(MapLocalGameToSuggestion)
-                    .ToList();
-
-            // 2) Catálogo persistente completo para pesquisa.
-            var catalogResults =
-                await _gameSearchCatalogService.SearchAsync(
-                    trimmedQuery,
-                    offset: 0,
-                    limit: candidateLimit,
-                    isExpansion: null,
-                    cancellationToken: ct);
-
-            candidates.AddRange(catalogResults);
-
-            // Pesquisa normal nunca chama o BGG em tempo real.
-            var result =
-                RankAndPageSuggestions(
-                    candidates,
-                    normalizedQuery,
-                    safeOffset,
-                    safeLimit,
-                    expansionMode: null);
-
-            _logger.LogInformation(
-                "🔎 SearchSuggestions '{Query}': " +
-                "{LocalCount} locais + {CatalogCount} catálogo -> " +
-                "{ResultCount} resultados.",
+            return await SearchSuggestionsCoreAsync(
                 query,
-                localResults.Count,
-                catalogResults.Count,
-                result.Count);
-
-            return result;
+                offset,
+                limit,
+                isExpansion,
+                playerCount,
+                minBggRating,
+                sort,
+                ct);
         }
 
 
@@ -515,69 +496,20 @@ namespace MeepleBoard.Services.Implementations
             string query,
             int offset = 0,
             int limit = 10,
+            int? playerCount = null,
+            double? minBggRating = null,
+            string sort = "relevance",
             CancellationToken cancellationToken = default)
         {
-            if (string.IsNullOrWhiteSpace(query))
-            {
-                return new List<GameSuggestionDto>();
-            }
-
-            var normalizedQuery =
-                NormalizeSearchText(query);
-
-            if (string.IsNullOrWhiteSpace(normalizedQuery))
-            {
-                return new List<GameSuggestionDto>();
-            }
-
-            var trimmedQuery =
-                query.Trim();
-
-            var safeOffset =
-                Math.Max(0, offset);
-
-            var safeLimit =
-                Math.Clamp(limit, 1, 50);
-
-            var candidateLimit =
-                Math.Clamp(
-                    Math.Max(
-                        40,
-                        safeOffset + safeLimit + 20),
-                    40,
-                    80);
-
-            // 1) Expansões reais já existentes localmente.
-            var localExpansions =
-                await _gameRepository.SearchExpansionsByNameAsync(
-                    trimmedQuery,
-                    0,
-                    candidateLimit,
-                    cancellationToken);
-
-            var candidates =
-                localExpansions
-                    .Where(g => g.BGGId.HasValue)
-                    .Select(MapLocalGameToSuggestion)
-                    .ToList();
-
-            // 2) Expansões do catálogo persistente.
-            var catalogResults =
-                await _gameSearchCatalogService.SearchAsync(
-                    trimmedQuery,
-                    offset: 0,
-                    limit: candidateLimit,
-                    isExpansion: true,
-                    cancellationToken: cancellationToken);
-
-            candidates.AddRange(catalogResults);
-
-            return RankAndPageSuggestions(
-                candidates,
-                normalizedQuery,
-                safeOffset,
-                safeLimit,
-                expansionMode: true);
+            return await SearchSuggestionsCoreAsync(
+                query,
+                offset,
+                limit,
+                isExpansion: true,
+                playerCount,
+                minBggRating,
+                sort,
+                cancellationToken);
         }
 
 
@@ -698,69 +630,20 @@ namespace MeepleBoard.Services.Implementations
             string query,
             int offset = 0,
             int limit = 10,
+            int? playerCount = null,
+            double? minBggRating = null,
+            string sort = "relevance",
             CancellationToken cancellationToken = default)
         {
-            if (string.IsNullOrWhiteSpace(query))
-            {
-                return new List<GameSuggestionDto>();
-            }
-
-            var normalizedQuery =
-                NormalizeSearchText(query);
-
-            if (string.IsNullOrWhiteSpace(normalizedQuery))
-            {
-                return new List<GameSuggestionDto>();
-            }
-
-            var trimmedQuery =
-                query.Trim();
-
-            var safeOffset =
-                Math.Max(0, offset);
-
-            var safeLimit =
-                Math.Clamp(limit, 1, 50);
-
-            var candidateLimit =
-                Math.Clamp(
-                    Math.Max(
-                        40,
-                        safeOffset + safeLimit + 20),
-                    40,
-                    80);
-
-            // 1) Jogos base reais já existentes localmente.
-            var localGames =
-                await _gameRepository.SearchBaseGamesByNameAsync(
-                    trimmedQuery,
-                    0,
-                    candidateLimit,
-                    cancellationToken);
-
-            var candidates =
-                localGames
-                    .Where(g => g.BGGId.HasValue)
-                    .Select(MapLocalGameToSuggestion)
-                    .ToList();
-
-            // 2) Jogos base do catálogo persistente.
-            var catalogResults =
-                await _gameSearchCatalogService.SearchAsync(
-                    trimmedQuery,
-                    offset: 0,
-                    limit: candidateLimit,
-                    isExpansion: false,
-                    cancellationToken: cancellationToken);
-
-            candidates.AddRange(catalogResults);
-
-            return RankAndPageSuggestions(
-                candidates,
-                normalizedQuery,
-                safeOffset,
-                safeLimit,
-                expansionMode: false);
+            return await SearchSuggestionsCoreAsync(
+                query,
+                offset,
+                limit,
+                isExpansion: false,
+                playerCount,
+                minBggRating,
+                sort,
+                cancellationToken);
         }
 
 
@@ -818,42 +701,363 @@ namespace MeepleBoard.Services.Implementations
         }
 
 
-        private static List<GameSuggestionDto> RankAndPageSuggestions(
+        private async Task<List<GameSuggestionDto>> SearchSuggestionsCoreAsync(
+            string query,
+            int offset,
+            int limit,
+            bool? isExpansion,
+            int? playerCount,
+            double? minBggRating,
+            string sort,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                return new List<GameSuggestionDto>();
+            }
+
+            var normalizedQuery =
+                NormalizeSearchText(query);
+
+            if (string.IsNullOrWhiteSpace(normalizedQuery))
+            {
+                return new List<GameSuggestionDto>();
+            }
+
+            var trimmedQuery =
+                query.Trim();
+
+            var safeOffset =
+                Math.Max(
+                    0,
+                    offset);
+
+            var safeLimit =
+                Math.Clamp(
+                    limit,
+                    1,
+                    50);
+
+            var safePlayerCount =
+                NormalizePlayerCountFilter(
+                    playerCount);
+
+            var safeMinBggRating =
+                NormalizeMinimumBggRatingFilter(
+                    minBggRating);
+
+            var normalizedSort =
+                NormalizeSearchSort(
+                    sort);
+
+            /*
+             * Um carácter:
+             *
+             * O catálogo completo não é consultado, por decisão de performance.
+             * Mantemos apenas a pesquisa sobre Games reais locais.
+             *
+             * Como esta tabela é muito menor do que o catálogo BGG, podemos
+             * recolher um conjunto local limitado, aplicar filtros/ordenação
+             * em memória e paginar no fim.
+             */
+            if (normalizedQuery.Length < 2)
+            {
+                var localOnly =
+                    await SearchLocalGamesAsync(
+                        trimmedQuery,
+                        isExpansion,
+                        0,
+                        100,
+                        cancellationToken);
+
+                var localResult =
+                    FilterSortAndPageLocalSuggestions(
+                        localOnly
+                            .Where(g => g.BGGId.HasValue)
+                            .Select(MapLocalGameToSuggestion),
+                        normalizedQuery,
+                        safeOffset,
+                        safeLimit,
+                        isExpansion,
+                        safePlayerCount,
+                        safeMinBggRating,
+                        normalizedSort);
+
+                _logger.LogInformation(
+                    "🔎 SearchSuggestions '{Query}': {LocalCount} locais + 0 catálogo -> {ResultCount} resultados.",
+                    query,
+                    localOnly.Count,
+                    localResult.Count);
+
+                return localResult;
+            }
+
+            /*
+             * Dois ou mais caracteres:
+             *
+             * GameSearchCatalog é a fonte autoritativa para:
+             * - correspondência textual;
+             * - filtros;
+             * - ordenação;
+             * - paginação.
+             *
+             * Isto é essencial para infinite scroll: a página 2/3/4 tem de
+             * continuar a mesma ordenação sobre o conjunto completo, e não
+             * sobre um pequeno pool escolhido pelo GameService.
+             */
+            var catalogResults =
+                await _gameSearchCatalogService.SearchAsync(
+                    trimmedQuery,
+                    offset: safeOffset,
+                    limit: safeLimit,
+                    isExpansion: isExpansion,
+                    playerCount: safePlayerCount,
+                    minBggRating: safeMinBggRating,
+                    sort: normalizedSort,
+                    cancellationToken: cancellationToken);
+
+            if (catalogResults.Count == 0)
+            {
+                _logger.LogInformation(
+                    "🔎 SearchSuggestions '{Query}': 0 resultados no catálogo.",
+                    query);
+
+                return new List<GameSuggestionDto>();
+            }
+
+            /*
+             * ENRIQUECIMENTO LAZY DAS CAPAS
+             *
+             * A resposta da pesquisa continua totalmente baseada em dados locais.
+             * Não aguardamos qualquer chamada ao BGG.
+             *
+             * Se alguns resultados do catálogo ainda não tiverem imagem,
+             * apenas colocamos os respetivos BGG IDs numa tarefa Hangfire.
+             * O job corre depois, na queue bgg-catalog, e atualiza exclusivamente
+             * GameSearchCatalog.
+             *
+             * A cache evita criar jobs repetidos para o mesmo jogo enquanto
+             * o utilizador escreve várias variantes da mesma pesquisa.
+             */
+            ScheduleMissingCatalogEnrichment(
+                catalogResults);
+
+            /*
+             * Tentamos sobrepor a versão local quando ela já existe.
+             *
+             * Isto não altera a ordem nem a paginação calculadas pelo catálogo.
+             * Serve apenas para devolver dados locais mais ricos:
+             * - Id GUID;
+             * - MeepleBoardScore;
+             * - imagem/detalhes já enriquecidos.
+             *
+             * A pesquisa local é apenas uma otimização de enriquecimento.
+             * Se um Game local não aparecer neste pequeno conjunto, o frontend
+             * continua seguro: ao abrir/importar por BGG ID, o backend encontra
+             * a entidade existente em vez de criar um duplicado.
+             */
+            var localOverlayPool =
+                await SearchLocalGamesAsync(
+                    trimmedQuery,
+                    isExpansion,
+                    0,
+                    100,
+                    cancellationToken);
+
+            var localByBggId =
+                localOverlayPool
+                    .Where(g => g.BGGId.HasValue)
+                    .GroupBy(g => g.BGGId!.Value)
+                    .ToDictionary(
+                        group => group.Key,
+                        group => MapLocalGameToSuggestion(
+                            group.First()));
+
+            var result =
+                catalogResults
+                    .Select(catalogGame =>
+                        localByBggId.TryGetValue(
+                            catalogGame.BggId,
+                            out var localGame)
+                            ? localGame
+                            : catalogGame)
+                    .ToList();
+
+            _logger.LogInformation(
+                "🔎 SearchSuggestions '{Query}': catálogo={CatalogCount}, overlays locais={LocalOverlayCount}, resultado={ResultCount}, sort={Sort}, jogadores={PlayerCount}, ratingMin={MinRating}, expansão={IsExpansion}.",
+                query,
+                catalogResults.Count,
+                result.Count(x => HasLocalId(x) == 1),
+                result.Count,
+                normalizedSort,
+                safePlayerCount,
+                safeMinBggRating,
+                isExpansion);
+
+            return result;
+        }
+
+
+        /// <summary>
+        /// Agenda em background o enriquecimento de resultados do catálogo
+        /// que ainda não possuem capa.
+        ///
+        /// Esta operação nunca cria entidades Game reais.
+        ///
+        /// O enqueue do Hangfire é deliberadamente pequeno e não faz qualquer
+        /// chamada ao BoardGameGeek dentro do request de pesquisa.
+        /// </summary>
+        private void ScheduleMissingCatalogEnrichment(
+            IReadOnlyCollection<GameSuggestionDto> catalogResults)
+        {
+            if (catalogResults.Count == 0)
+            {
+                return;
+            }
+
+            var idsToEnrich =
+                new List<int>();
+
+            foreach (var suggestion in catalogResults)
+            {
+                if (suggestion.BggId <= 0 ||
+                    !string.IsNullOrWhiteSpace(
+                        suggestion.ImageUrl))
+                {
+                    continue;
+                }
+
+                var cacheKey =
+                    $"bgg:catalog-lazy-enrichment:{suggestion.BggId}";
+
+                if (_cache.TryGetValue(
+                        cacheKey,
+                        out _))
+                {
+                    continue;
+                }
+
+                /*
+                 * Marcamos antes do enqueue para impedir que requests
+                 * concorrentes criem vários jobs para o mesmo BGG ID.
+                 */
+                _cache.Set(
+                    cacheKey,
+                    true,
+                    LazyEnrichmentThrottle);
+
+                idsToEnrich.Add(
+                    suggestion.BggId);
+            }
+
+            if (idsToEnrich.Count == 0)
+            {
+                return;
+            }
+
+            var ids =
+                idsToEnrich
+                    .Distinct()
+                    .Take(50)
+                    .ToArray();
+
+            try
+            {
+                var jobId =
+                    _backgroundJobs.Enqueue<
+                        MeepleBoard.Services.Job.BggCatalogSearchEnrichmentJob>(
+                        job => job.ExecuteAsync(
+                            ids,
+                            CancellationToken.None));
+
+                _logger.LogDebug(
+                    "Enriquecimento lazy BGG colocado em fila. " +
+                    "Job {JobId}; {Count} jogos.",
+                    jobId,
+                    ids.Length);
+            }
+            catch (Exception ex)
+            {
+                /*
+                 * Se nem sequer conseguirmos criar o job, removemos o throttle
+                 * para permitir nova tentativa numa pesquisa seguinte.
+                 *
+                 * Uma falha de enriquecimento nunca deve impedir a pesquisa.
+                 */
+                foreach (var id in ids)
+                {
+                    _cache.Remove(
+                        $"bgg:catalog-lazy-enrichment:{id}");
+                }
+
+                _logger.LogWarning(
+                    ex,
+                    "Não foi possível colocar o enriquecimento lazy do catálogo BGG em fila.");
+            }
+        }
+
+
+        private async Task<IReadOnlyList<Game>> SearchLocalGamesAsync(
+            string query,
+            bool? isExpansion,
+            int offset,
+            int limit,
+            CancellationToken cancellationToken)
+        {
+            if (isExpansion == true)
+            {
+                return await _gameRepository.SearchExpansionsByNameAsync(
+                    query,
+                    offset,
+                    limit,
+                    cancellationToken);
+            }
+
+            if (isExpansion == false)
+            {
+                return await _gameRepository.SearchBaseGamesByNameAsync(
+                    query,
+                    offset,
+                    limit,
+                    cancellationToken);
+            }
+
+            return await _gameRepository.SearchByNameAsync(
+                query,
+                offset,
+                limit,
+                cancellationToken);
+        }
+
+
+        private static List<GameSuggestionDto> FilterSortAndPageLocalSuggestions(
             IEnumerable<GameSuggestionDto> source,
             string normalizedQuery,
             int offset,
             int limit,
-            bool? expansionMode)
+            bool? isExpansion,
+            int? playerCount,
+            double? minBggRating,
+            string sort)
         {
             var filtered =
                 source
                     .Where(x =>
                         x != null)
                     .Where(x =>
-                        expansionMode == null ||
-                        x.IsExpansion ==
-                        expansionMode.Value)
+                        isExpansion == null ||
+                        x.IsExpansion == isExpansion.Value)
                     .Where(x =>
                         !string.IsNullOrWhiteSpace(
                             x.Name))
-                    .ToList();
-
-            /*
-             * Se o mesmo jogo estiver:
-             *
-             * - em Game
-             * - no GameSearchCatalog
-             * - e no resultado BGG
-             *
-             * fica apenas um.
-             *
-             * A versão local tem prioridade porque contém:
-             *
-             * - Id GUID
-             * - MeepleBoardScore
-             */
-            var deduplicated =
-                filtered
+                    .Where(x =>
+                        MatchesPlayerCount(
+                            x,
+                            playerCount))
+                    .Where(x =>
+                        MatchesMinimumBggRating(
+                            x,
+                            minBggRating))
                     .GroupBy(
                         GetSuggestionDeduplicationKey)
                     .Select(group =>
@@ -865,35 +1069,143 @@ namespace MeepleBoard.Services.Implementations
                             .First())
                     .ToList();
 
-            return deduplicated
-                .Select(game =>
-                    new
-                    {
-                        Game = game,
+            IEnumerable<GameSuggestionDto> ordered =
+                sort switch
+                {
+                    "most_known" =>
+                        filtered
+                            .OrderByDescending(x =>
+                                x.RatingsCount ?? 0)
+                            .ThenBy(x =>
+                                x.Name),
 
-                        Score =
-                            CalculateSearchScore(
-                                game,
-                                normalizedQuery)
-                    })
-                .Where(x =>
-                    x.Score >
-                    double.MinValue)
-                .OrderByDescending(x =>
-                    x.Score)
-                .ThenByDescending(x =>
-                    HasLocalId(x.Game))
-                .ThenByDescending(x =>
-                    x.Game.RatingsCount ?? 0)
-                .ThenBy(x =>
-                    x.Game.IsExpansion)
-                .ThenBy(x =>
-                    x.Game.Name)
+                    "bgg_rating" =>
+                        filtered
+                            .OrderByDescending(x =>
+                                x.AverageRating ?? 0)
+                            .ThenByDescending(x =>
+                                x.RatingsCount ?? 0)
+                            .ThenBy(x =>
+                                x.Name),
+
+                    "year_desc" =>
+                        filtered
+                            .OrderByDescending(x =>
+                                x.YearPublished ?? int.MinValue)
+                            .ThenByDescending(x =>
+                                x.RatingsCount ?? 0)
+                            .ThenBy(x =>
+                                x.Name),
+
+                    "name_asc" =>
+                        filtered
+                            .OrderBy(x =>
+                                x.Name),
+
+                    _ =>
+                        filtered
+                            .Select(game =>
+                                new
+                                {
+                                    Game = game,
+                                    Score =
+                                        CalculateSearchScore(
+                                            game,
+                                            normalizedQuery)
+                                })
+                            .Where(x =>
+                                x.Score > double.MinValue)
+                            .OrderByDescending(x =>
+                                x.Score)
+                            .ThenByDescending(x =>
+                                HasLocalId(x.Game))
+                            .ThenByDescending(x =>
+                                x.Game.RatingsCount ?? 0)
+                            .ThenBy(x =>
+                                x.Game.IsExpansion)
+                            .ThenBy(x =>
+                                x.Game.Name)
+                            .Select(x =>
+                                x.Game)
+                };
+
+            return ordered
                 .Skip(offset)
                 .Take(limit)
-                .Select(x =>
-                    x.Game)
                 .ToList();
+        }
+
+
+        private static bool MatchesPlayerCount(
+            GameSuggestionDto game,
+            int? playerCount)
+        {
+            if (!playerCount.HasValue)
+            {
+                return true;
+            }
+
+            if (!game.MinPlayers.HasValue ||
+                !game.MaxPlayers.HasValue)
+            {
+                return false;
+            }
+
+            if (playerCount.Value == 5)
+            {
+                return game.MaxPlayers.Value >= 5;
+            }
+
+            return game.MinPlayers.Value <= playerCount.Value &&
+                   game.MaxPlayers.Value >= playerCount.Value;
+        }
+
+
+        private static bool MatchesMinimumBggRating(
+            GameSuggestionDto game,
+            double? minBggRating)
+        {
+            if (!minBggRating.HasValue)
+            {
+                return true;
+            }
+
+            return game.AverageRating.HasValue &&
+                   game.AverageRating.Value >= minBggRating.Value;
+        }
+
+
+        private static int? NormalizePlayerCountFilter(
+            int? playerCount)
+        {
+            return playerCount is >= 1 and <= 5
+                ? playerCount
+                : null;
+        }
+
+
+        private static double? NormalizeMinimumBggRatingFilter(
+            double? minBggRating)
+        {
+            return minBggRating is >= 0 and <= 10
+                ? minBggRating
+                : null;
+        }
+
+
+        private static string NormalizeSearchSort(
+            string? sort)
+        {
+            return sort?
+                .Trim()
+                .ToLowerInvariant() switch
+            {
+                "most_known" => "most_known",
+                "bgg_rating" => "bgg_rating",
+                "year_desc" => "year_desc",
+                "name_asc" => "name_asc",
+                _ => "relevance"
+            };
         }
 
 
@@ -1387,9 +1699,12 @@ namespace MeepleBoard.Services.Implementations
             game.SetUsersRatedCount(
                 bgg.UsersRatedCount);
 
-            game.SetPlayerCount(
+            ApplyBggPlayerCountIfValid(
+                game,
                 bgg.MinPlayers,
-                bgg.MaxPlayers);
+                bgg.MaxPlayers,
+                bgg.Name,
+                bgg.BggId);
 
             game.SetCooperative(
                 bgg.IsCooperative);
@@ -1474,6 +1789,62 @@ namespace MeepleBoard.Services.Implementations
         }
 
 
+        /// <summary>
+        /// Aplica os limites de jogadores vindos do BGG apenas quando são coerentes.
+        ///
+        /// Dados externos podem ocasionalmente vir incompletos ou inconsistentes.
+        /// A entidade Game continua a proteger a regra de domínio min <= max;
+        /// aqui apenas impedimos que um valor inválido do BGG interrompa uma
+        /// sincronização inteira.
+        ///
+        /// Regras:
+        /// - valores <= 0 são tratados como desconhecidos (null);
+        /// - se min e max existirem e min > max, os valores são ignorados;
+        /// - em updates, ignorar significa preservar os valores locais existentes;
+        /// - em criações, o Game permanece sem limites de jogadores até existir
+        ///   informação válida.
+        /// </summary>
+        private void ApplyBggPlayerCountIfValid(
+            Game targetGame,
+            int? minPlayers,
+            int? maxPlayers,
+            string? sourceGameName,
+            int? bggId)
+        {
+            var normalizedMin =
+                minPlayers.HasValue &&
+                minPlayers.Value > 0
+                    ? minPlayers
+                    : null;
+
+            var normalizedMax =
+                maxPlayers.HasValue &&
+                maxPlayers.Value > 0
+                    ? maxPlayers
+                    : null;
+
+            if (normalizedMin.HasValue &&
+                normalizedMax.HasValue &&
+                normalizedMin.Value > normalizedMax.Value)
+            {
+                _logger.LogWarning(
+                    "BGG devolveu limites de jogadores inconsistentes para '{Name}' " +
+                    "(BGG ID: {BggId}): MinPlayers={MinPlayers}, MaxPlayers={MaxPlayers}. " +
+                    "Os limites foram ignorados e a sincronização continuará.",
+                    sourceGameName ?? targetGame.Name,
+                    bggId,
+                    minPlayers,
+                    maxPlayers);
+
+                return;
+            }
+
+            targetGame.SetPlayerCount(
+                normalizedMin,
+                normalizedMax);
+        }
+
+
         public async Task<bool> UpdateFromBggAsync(
             GameDto game,
             CancellationToken cancellationToken = default)
@@ -1507,9 +1878,12 @@ namespace MeepleBoard.Services.Implementations
                 game.ImageUrl,
                 game.SupportsSoloMode);
 
-            existingGame.SetPlayerCount(
+            ApplyBggPlayerCountIfValid(
+                existingGame,
                 game.MinPlayers,
-                game.MaxPlayers);
+                game.MaxPlayers,
+                game.Name,
+                game.BggId.Value);
 
             existingGame.SetCooperative(
                 game.IsCooperative);

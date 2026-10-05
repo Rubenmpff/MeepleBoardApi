@@ -1,6 +1,7 @@
 ﻿using MeepleBoard.Domain.Entities;
 using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Infra.Data.Context;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
 namespace MeepleBoard.Infra.Data.Repositories
@@ -70,29 +71,42 @@ namespace MeepleBoard.Infra.Data.Repositories
             /*
              * IMPORTANTE:
              * Esta query serve para obter CANDIDATOS locais.
-             * O ranking final é feito no GameService, juntamente com os resultados do BGG.
+             * O ranking final é feito no GameService, juntamente com os resultados
+             * provenientes do catálogo local de pesquisa.
              *
              * Evitamos OrderBy(Name) puro porque isso fazia resultados pouco relevantes
              * aparecerem antes de jogos muito mais conhecidos.
              *
-             * A ordem local agora favorece:
+             * Evitamos pesquisa contains ("%termo%") nesta tabela.
+             * Para pesquisa por prefixo de palavras internas usamos GameSearchToken
+             * através do catálogo local, que foi criado especificamente para esse caso.
+             *
+             * A ordem local favorece:
              * 1) nome exato
-             * 2) nome começa pelo termo
-             * 3) popularidade (UsersRatedCount)
-             * 4) nome, apenas como desempate previsível
+             * 2) popularidade (UsersRatedCount)
+             * 3) nome, apenas como desempate previsível
              */
-            return await _context.Games
-                .AsNoTracking()
-                .Where(g =>
-                    g.Name.StartsWith(searchTerm) ||
-                    g.Name.Contains(searchTerm))
-                .OrderByDescending(g => g.Name == searchTerm)
-                .ThenByDescending(g => g.Name.StartsWith(searchTerm))
-                .ThenByDescending(g => g.UsersRatedCount ?? 0)
-                .ThenBy(g => g.Name)
-                .Skip(safeOffset)
-                .Take(safeLimit)
-                .ToListAsync(cancellationToken);
+            try
+            {
+                return await _context.Games
+                    .AsNoTracking()
+                    .Where(g =>
+                        g.Name.StartsWith(searchTerm))
+                    .OrderByDescending(g => g.Name == searchTerm)
+                    .ThenByDescending(g => g.UsersRatedCount ?? 0)
+                    .ThenBy(g => g.Name)
+                    .Skip(safeOffset)
+                    .Take(safeLimit)
+                    .ToListAsync(cancellationToken);
+            }
+            catch (SqlException ex)
+                when (IsExpectedSqlCancellation(ex, cancellationToken))
+            {
+                throw new OperationCanceledException(
+                    "A pesquisa local de jogos foi cancelada porque o pedido deixou de ser atual.",
+                    ex,
+                    cancellationToken);
+            }
         }
 
         public async Task<IReadOnlyList<Game>> GetAllAsync(int pageIndex = 0, int pageSize = 10, CancellationToken cancellationToken = default)
@@ -168,20 +182,29 @@ namespace MeepleBoard.Infra.Data.Repositories
             var safeOffset = Math.Max(0, offset);
             var safeLimit = Math.Clamp(limit, 1, 100);
 
-            return await _context.Games
-                .AsNoTracking()
-                .Where(g =>
-                    g.BaseGameId == null &&
-                    g.BaseGameBggId == null &&
-                    (g.Name.StartsWith(searchTerm) ||
-                     g.Name.Contains(searchTerm)))
-                .OrderByDescending(g => g.Name == searchTerm)
-                .ThenByDescending(g => g.Name.StartsWith(searchTerm))
-                .ThenByDescending(g => g.UsersRatedCount ?? 0)
-                .ThenBy(g => g.Name)
-                .Skip(safeOffset)
-                .Take(safeLimit)
-                .ToListAsync(cancellationToken);
+            try
+            {
+                return await _context.Games
+                    .AsNoTracking()
+                    .Where(g =>
+                        g.BaseGameId == null &&
+                        g.BaseGameBggId == null &&
+                        g.Name.StartsWith(searchTerm))
+                    .OrderByDescending(g => g.Name == searchTerm)
+                    .ThenByDescending(g => g.UsersRatedCount ?? 0)
+                    .ThenBy(g => g.Name)
+                    .Skip(safeOffset)
+                    .Take(safeLimit)
+                    .ToListAsync(cancellationToken);
+            }
+            catch (SqlException ex)
+                when (IsExpectedSqlCancellation(ex, cancellationToken))
+            {
+                throw new OperationCanceledException(
+                    "A pesquisa local de jogos base foi cancelada porque o pedido deixou de ser atual.",
+                    ex,
+                    cancellationToken);
+            }
         }
 
         public async Task<List<Game>> SearchExpansionsByNameAsync(
@@ -197,20 +220,29 @@ namespace MeepleBoard.Infra.Data.Repositories
             var safeOffset = Math.Max(0, offset);
             var safeLimit = Math.Clamp(limit, 1, 100);
 
-            return await _context.Games
-                .AsNoTracking()
-                .Where(g =>
-                    (g.BaseGameId != null ||
-                     g.BaseGameBggId != null) &&
-                    (g.Name.StartsWith(searchTerm) ||
-                     g.Name.Contains(searchTerm)))
-                .OrderByDescending(g => g.Name == searchTerm)
-                .ThenByDescending(g => g.Name.StartsWith(searchTerm))
-                .ThenByDescending(g => g.UsersRatedCount ?? 0)
-                .ThenBy(g => g.Name)
-                .Skip(safeOffset)
-                .Take(safeLimit)
-                .ToListAsync(cancellationToken);
+            try
+            {
+                return await _context.Games
+                    .AsNoTracking()
+                    .Where(g =>
+                        (g.BaseGameId != null ||
+                         g.BaseGameBggId != null) &&
+                        g.Name.StartsWith(searchTerm))
+                    .OrderByDescending(g => g.Name == searchTerm)
+                    .ThenByDescending(g => g.UsersRatedCount ?? 0)
+                    .ThenBy(g => g.Name)
+                    .Skip(safeOffset)
+                    .Take(safeLimit)
+                    .ToListAsync(cancellationToken);
+            }
+            catch (SqlException ex)
+                when (IsExpectedSqlCancellation(ex, cancellationToken))
+            {
+                throw new OperationCanceledException(
+                    "A pesquisa local de expansões foi cancelada porque o pedido deixou de ser atual.",
+                    ex,
+                    cancellationToken);
+            }
         }
 
         #endregion Leitura de Dados
@@ -386,5 +418,16 @@ namespace MeepleBoard.Infra.Data.Repositories
         }
 
         #endregion Funções Especiais para Jobs (Ranking, Atualizações, etc.)
+
+        private static bool IsExpectedSqlCancellation(
+            SqlException exception,
+            CancellationToken cancellationToken)
+        {
+            return cancellationToken.IsCancellationRequested &&
+                   exception.Message.Contains(
+                       "Operation cancelled by user",
+                       StringComparison.OrdinalIgnoreCase);
+        }
+
     }
 }

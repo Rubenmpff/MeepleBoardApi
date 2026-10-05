@@ -26,6 +26,9 @@ public class BGGService : IBGGService
 
     private const string CooperativeMechanic = "Cooperative Game";
 
+    // O endpoint /thing da XML API2 aceita no máximo 20 IDs por pedido.
+    private const int MaxThingIdsPerRequest = 20;
+
     // Mecânicas/categoria do BGG que indicam que o jogo é (tipicamente) jogado em campanha
     private static readonly string[] CampaignMechanics = { "Legacy Game", "Campaign / Battle Card Driven" };
     private const string CampaignCategory = "Campaign Games";
@@ -325,34 +328,63 @@ public class BGGService : IBGGService
         {
             var cleanIds = ids
                 .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Select(id => id.Trim())
+                .Where(id => int.TryParse(id, out var parsedId) && parsedId > 0)
                 .Distinct()
                 .ToList();
 
-            if (!cleanIds.Any())
+            if (cleanIds.Count == 0)
                 return new();
 
-            var url =
-                $"thing?id={string.Join(",", cleanIds)}&stats=1&type=boardgame,boardgameexpansion";
+            /*
+             * A XML API2 do BGG aceita no máximo 20 IDs por pedido ao /thing.
+             *
+             * Fazemos o batching aqui, dentro do próprio serviço, para que
+             * qualquer caller fique protegido mesmo que envie 50, 100 ou
+             * mais IDs por engano.
+             */
+            var games = new List<GameDto>();
 
-            var response =
-                await GetWithRetryAsync(url, cancellationToken);
-
-            if (!IsXml(response))
+            for (var i = 0; i < cleanIds.Count; i += MaxThingIdsPerRequest)
             {
-                _logger.LogWarning(
-                    "⚠️ Resposta inesperada do BGG para GetGamesByIds");
+                cancellationToken.ThrowIfCancellationRequested();
 
-                return new();
+                var batch = cleanIds
+                    .Skip(i)
+                    .Take(MaxThingIdsPerRequest)
+                    .ToList();
+
+                var url =
+                    $"thing?id={string.Join(",", batch)}&stats=1&type=boardgame,boardgameexpansion";
+
+                var response =
+                    await GetWithRetryAsync(
+                        url,
+                        cancellationToken);
+
+                if (!IsXml(response))
+                {
+                    _logger.LogWarning(
+                        "⚠️ Resposta inesperada do BGG para GetGamesByIds. Batch iniciado em {BatchStart}.",
+                        i);
+
+                    continue;
+                }
+
+                var xml = XDocument.Parse(response);
+
+                games.AddRange(
+                    xml.Descendants("item")
+                        .Select(item =>
+                            ParseGameItem(
+                                item,
+                                item.Attribute("id")?.Value))
+                        .OfType<GameDto>());
             }
 
-            var xml = XDocument.Parse(response);
-
-            return xml.Descendants("item")
-                .Select(item =>
-                    ParseGameItem(
-                        item,
-                        item.Attribute("id")?.Value))
-                .OfType<GameDto>()
+            return games
+                .GroupBy(game => game.BggId)
+                .Select(group => group.First())
                 .ToList();
         }
         catch (OperationCanceledException)
@@ -1313,11 +1345,12 @@ public class BGGService : IBGGService
                 throw;
             }
             catch (HttpRequestException ex)
-                when (attempt < maxRetries)
+                when (attempt < maxRetries &&
+                      ShouldRetryHttpRequest(ex.StatusCode))
             {
                 _logger.LogWarning(
                     ex,
-                    "⚠️ [Tentativa {Attempt}] Falha ao requisitar {Url}. Repetindo...",
+                    "⚠️ [Tentativa {Attempt}] Falha transitória ao requisitar {Url}. Repetindo...",
                     attempt,
                     url);
 
@@ -1338,6 +1371,22 @@ public class BGGService : IBGGService
 
         throw new HttpRequestException(
             $"❌ Todas as tentativas falharam para: {url}");
+    }
+
+    private static bool ShouldRetryHttpRequest(
+        HttpStatusCode? statusCode)
+    {
+        // Sem status normalmente significa falha de rede/transporte.
+        if (!statusCode.HasValue)
+            return true;
+
+        return statusCode.Value is
+            HttpStatusCode.RequestTimeout or
+            HttpStatusCode.InternalServerError or
+            HttpStatusCode.BadGateway or
+            HttpStatusCode.ServiceUnavailable or
+            HttpStatusCode.GatewayTimeout ||
+            statusCode.Value == (HttpStatusCode)429;
     }
 
     private static bool IsXml(string? s)

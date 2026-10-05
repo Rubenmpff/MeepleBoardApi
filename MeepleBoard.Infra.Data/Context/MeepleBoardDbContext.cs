@@ -23,6 +23,9 @@ namespace MeepleBoard.Infra.Data.Context
         // ── Catálogo leve para pesquisa ──────────────────────────────────────
         public DbSet<GameSearchCatalog> GameSearchCatalog { get; set; }
 
+        // ── Índice auxiliar por palavras para autocomplete ───────────────────
+        public DbSet<GameSearchToken> GameSearchTokens { get; set; }
+
         public DbSet<GameSession> GameSessions { get; set; }
         public DbSet<GameSessionPlayer> GameSessionPlayers { get; set; }
         public DbSet<Match> Matches { get; set; }
@@ -197,6 +200,41 @@ namespace MeepleBoard.Infra.Data.Context
                  */
                 b.HasIndex(x => x.DetailsSyncedAt);
 
+                /*
+                 * Índice específico para o job de enriquecimento do catálogo.
+                 *
+                 * O job procura apenas registos ainda não enriquecidos e
+                 * prioriza os jogos mais conhecidos/relevantes.
+                 *
+                 * O filtro reduz o índice aos registos com:
+                 *
+                 *   DetailsSyncedAt IS NULL
+                 *
+                 * e a ordem das colunas acompanha a prioridade utilizada em
+                 * GetCandidatesForEnrichmentAsync:
+                 *
+                 *   RatingsCount DESC
+                 *   BggRank ASC
+                 *   AverageRating DESC
+                 *   Name ASC
+                 *   BggId ASC
+                 */
+                b.HasIndex(x => new
+                {
+                    x.RatingsCount,
+                    x.BggRank,
+                    x.AverageRating,
+                    x.Name,
+                    x.BggId
+                })
+                .HasFilter("[DetailsSyncedAt] IS NULL")
+                .IsDescending(
+                    true,
+                    false,
+                    true,
+                    false,
+                    false);
+
                 b.Property(x => x.Name)
                     .IsRequired()
                     .HasMaxLength(500);
@@ -223,6 +261,57 @@ namespace MeepleBoard.Infra.Data.Context
                  */
                 b.ToTable("GameSearchCatalog");
             });
+
+            /* =========================================================
+               GAME SEARCH TOKEN
+            ========================================================== */
+
+            modelBuilder.Entity<GameSearchToken>(b =>
+            {
+                /*
+                 * Chave natural e compacta da tabela auxiliar.
+                 *
+                 * Um jogo só pode ter um token por posição lógica.
+                 * Evitamos assim um Guid adicional em centenas de milhares
+                 * de linhas e o índice extra que essa PK implicaria.
+                 */
+                b.HasKey(x => new
+                {
+                    x.BggId,
+                    x.Position
+                });
+
+                /*
+                 * Índice principal para pesquisa por início de palavra.
+                 *
+                 * Exemplo:
+                 * "gal" -> token "galaxy"
+                 *
+                 * BggId vem a seguir para permitir encontrar rapidamente
+                 * os jogos correspondentes aos tokens encontrados.
+                 */
+                b.HasIndex(x => new
+                {
+                    x.Token,
+                    x.BggId
+                });
+
+                /*
+                 * Não é necessário um índice separado em BggId:
+                 * a chave primária começa por BggId e já cobre esse acesso.
+                 */
+
+                b.Property(x => x.Token)
+                    .IsRequired()
+                    .HasMaxLength(100);
+
+                b.Property(x => x.Position)
+                    .IsRequired();
+
+                b.ToTable("GameSearchToken");
+            });
+
+
 
             /* =========================================================
                GAME SESSION

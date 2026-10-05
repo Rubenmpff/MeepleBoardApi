@@ -14,7 +14,7 @@ namespace MeepleBoard.Services.ExternalServices.Implementations
     public class BggGameCatalogImportService
         : IBggGameCatalogImportService
     {
-        private const int ImportBatchSize = 5000;
+        private const int ImportBatchSize = 2000;
 
         private readonly HttpClient _httpClient;
         private readonly IGameSearchCatalogRepository _catalogRepository;
@@ -366,6 +366,28 @@ namespace MeepleBoard.Services.ExternalServices.Implementations
                 "{Processed} jogos processados; {Skipped} linhas ignoradas.",
                 processed,
                 skipped);
+
+            /*
+             * O GameSearchToken é um índice derivado do GameSearchCatalog.
+             *
+             * Reconstruímos apenas uma vez, depois de todos os batches do dump
+             * terem sido importados com sucesso. Fazer isto dentro de cada batch
+             * aumentaria drasticamente o trabalho e o tempo de importação.
+             *
+             * O repositório executa a reconstrução diretamente no SQL Server,
+             * em bloco, sem criar centenas de milhares de entidades EF.
+             */
+            _logger.LogInformation(
+                "A reconstruir índice auxiliar de pesquisa do catálogo BGG.");
+
+            var rebuiltTokens =
+                await _catalogRepository.RebuildSearchTokensAsync(
+                    cancellationToken);
+
+            _logger.LogInformation(
+                "Índice auxiliar de pesquisa reconstruído. " +
+                "{TokenCount} tokens criados.",
+                rebuiltTokens);
 
             return processed;
         }

@@ -1,9 +1,9 @@
-﻿using System.Data;
-using MeepleBoard.Domain.Entities;
+﻿using MeepleBoard.Domain.Entities;
 using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Infra.Data.Context;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 
 namespace MeepleBoard.Infra.Data.Repositories
 {
@@ -11,16 +11,9 @@ namespace MeepleBoard.Infra.Data.Repositories
         : IGameSearchCatalogRepository
     {
         private const int MaxSearchLimit = 100;
-
-        /*
-         * Este limite continua a ser utilizado pelos métodos EF tradicionais.
-         *
-         * A importação massiva passa a utilizar BulkUpsertAsync,
-         * portanto deixa de depender deste valor para os INSERTs.
-         */
         private const int SqlBatchSize = 200;
-
         private const int MaximumNameLength = 500;
+        private const int MaximumTokenLength = 100;
 
         private readonly MeepleBoardDbContext _context;
 
@@ -71,14 +64,6 @@ namespace MeepleBoard.Infra.Data.Repositories
                 new Dictionary<int, GameSearchCatalog>(
                     ids.Length);
 
-            /*
-             * Estes registos ficam tracked de propósito.
-             *
-             * Este método continua disponível para operações normais.
-             *
-             * A importação massiva do catálogo já não depende deste
-             * método depois de passar a utilizar BulkUpsertAsync.
-             */
             foreach (var batch in ids.Chunk(SqlBatchSize))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -105,6 +90,9 @@ namespace MeepleBoard.Infra.Data.Repositories
             int offset = 0,
             int limit = 10,
             bool? isExpansion = null,
+            int? playerCount = null,
+            double? minBggRating = null,
+            string sort = "relevance",
             CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(normalizedQuery))
@@ -112,93 +100,481 @@ namespace MeepleBoard.Infra.Data.Repositories
                 return new List<GameSearchCatalog>();
             }
 
-            var searchTerm =
-                normalizedQuery.Trim();
+            var searchTerm = normalizedQuery.Trim();
 
-            var safeOffset =
-                Math.Max(
-                    0,
-                    offset);
+            if (searchTerm.Length < 2 ||
+                searchTerm.Length > MaximumNameLength)
+            {
+                return new List<GameSearchCatalog>();
+            }
 
+            var safeOffset = Math.Max(0, offset);
+
+            var safeLimit = Math.Clamp(
+                limit,
+                1,
+                MaxSearchLimit);
+
+            var normalizedSort = NormalizeSort(sort);
+
+            /*
+             * Escapamos os caracteres especiais do LIKE para que a pesquisa
+             * trate %, _, [ e \ como texto normal introduzido pelo utilizador.
+             */
+            var titlePrefix = EscapeLikePattern(searchTerm) + "%";
+            var tokenPrefix = EscapeLikePattern(searchTerm) + "%";
+
+            /*
+             * A ordenação é escolhida apenas entre valores internos conhecidos.
+             * Nunca é inserido SQL fornecido pelo utilizador.
+             */
+            var orderBy = normalizedSort switch
+            {
+                "most_known" => """
+                    ISNULL(g.[RatingsCount], 0) DESC,
+                    CASE WHEN g.[NormalizedName] = @searchTerm THEN 1 ELSE 0 END DESC,
+                    m.[MatchType] DESC,
+                    ISNULL(g.[BggRank], 2147483647) ASC,
+                    ISNULL(g.[AverageRating], 0) DESC,
+                    g.[Name] ASC,
+                    g.[BggId] ASC
+                    """,
+
+                "bgg_rating" => """
+                    ISNULL(g.[AverageRating], 0) DESC,
+                    ISNULL(g.[RatingsCount], 0) DESC,
+                    CASE WHEN g.[NormalizedName] = @searchTerm THEN 1 ELSE 0 END DESC,
+                    m.[MatchType] DESC,
+                    ISNULL(g.[BggRank], 2147483647) ASC,
+                    g.[Name] ASC,
+                    g.[BggId] ASC
+                    """,
+
+                "year_desc" => """
+                    ISNULL(g.[YearPublished], -2147483648) DESC,
+                    CASE WHEN g.[NormalizedName] = @searchTerm THEN 1 ELSE 0 END DESC,
+                    m.[MatchType] DESC,
+                    ISNULL(g.[RatingsCount], 0) DESC,
+                    ISNULL(g.[BggRank], 2147483647) ASC,
+                    g.[Name] ASC,
+                    g.[BggId] ASC
+                    """,
+
+                "name_asc" => """
+                    g.[Name] ASC,
+                    CASE WHEN g.[NormalizedName] = @searchTerm THEN 1 ELSE 0 END DESC,
+                    m.[MatchType] DESC,
+                    ISNULL(g.[RatingsCount], 0) DESC,
+                    g.[BggId] ASC
+                    """,
+
+                _ => """
+                    CASE WHEN g.[NormalizedName] = @searchTerm THEN 1 ELSE 0 END DESC,
+                    m.[MatchType] DESC,
+                    ISNULL(g.[RatingsCount], 0) DESC,
+                    ISNULL(g.[BggRank], 2147483647) ASC,
+                    ISNULL(g.[AverageRating], 0) DESC,
+                    g.[Name] ASC,
+                    g.[BggId] ASC
+                    """
+            };
+
+            /*
+             * Materializamos primeiro os candidatos numa tabela temporária.
+             *
+             * Razão:
+             * - os dois ramos (NormalizedName e Token) conseguem usar os seus índices;
+             * - eliminamos duplicados antes do JOIN/ranking;
+             * - o SQL Server obtém estatísticas reais sobre #SearchMatches;
+             * - evitamos o plano instável observado com UNION ALL + GROUP BY + JOIN
+             *   dentro do mesmo CTE;
+             * - título tem prioridade sobre token (MatchType 2 > 1).
+             */
+            var sql = $"""
+                SET NOCOUNT ON;
+
+                CREATE TABLE #SearchMatches
+                (
+                    [BggId] INT NOT NULL PRIMARY KEY,
+                    [MatchType] TINYINT NOT NULL
+                );
+
+                INSERT INTO #SearchMatches
+                (
+                    [BggId],
+                    [MatchType]
+                )
+                SELECT
+                    c.[BggId],
+                    CAST(2 AS tinyint)
+                FROM [dbo].[GameSearchCatalog] AS c
+                WHERE c.[NormalizedName] LIKE @titlePrefix ESCAPE '\';
+
+                INSERT INTO #SearchMatches
+                (
+                    [BggId],
+                    [MatchType]
+                )
+                SELECT DISTINCT
+                    t.[BggId],
+                    CAST(1 AS tinyint)
+                FROM [dbo].[GameSearchToken] AS t
+                WHERE t.[Token] LIKE @tokenPrefix ESCAPE '\'
+                  AND NOT EXISTS
+                  (
+                      SELECT 1
+                      FROM #SearchMatches AS existing
+                      WHERE existing.[BggId] = t.[BggId]
+                  );
+
+                SELECT
+                    g.[Id],
+                    g.[AverageRating],
+                    g.[BggId],
+                    g.[BggRank],
+                    g.[CreatedAt],
+                    g.[DetailsSyncedAt],
+                    g.[IsCooperative],
+                    g.[IsExpansion],
+                    g.[LastSyncedAt],
+                    g.[MaxPlayers],
+                    g.[MinPlayers],
+                    g.[Name],
+                    g.[NormalizedName],
+                    g.[RatingsCount],
+                    g.[SupportsCampaign],
+                    g.[ThumbnailUrl],
+                    g.[YearPublished]
+                FROM #SearchMatches AS m
+                INNER JOIN [dbo].[GameSearchCatalog] AS g
+                    ON g.[BggId] = m.[BggId]
+                WHERE
+                    (
+                        @isExpansion IS NULL
+                        OR g.[IsExpansion] = @isExpansion
+                    )
+                    AND
+                    (
+                        @playerCount IS NULL
+                        OR @playerCount <= 0
+                        OR
+                        (
+                            @playerCount = 5
+                            AND g.[MinPlayers] IS NOT NULL
+                            AND g.[MaxPlayers] IS NOT NULL
+                            AND g.[MaxPlayers] >= 5
+                        )
+                        OR
+                        (
+                            @playerCount <> 5
+                            AND @playerCount > 0
+                            AND g.[MinPlayers] IS NOT NULL
+                            AND g.[MaxPlayers] IS NOT NULL
+                            AND g.[MinPlayers] <= @playerCount
+                            AND g.[MaxPlayers] >= @playerCount
+                        )
+                    )
+                    AND
+                    (
+                        @minBggRating IS NULL
+                        OR
+                        (
+                            g.[AverageRating] IS NOT NULL
+                            AND g.[AverageRating] >= @minBggRating
+                        )
+                    )
+                ORDER BY
+                    {orderBy}
+                OFFSET @offset ROWS
+                FETCH NEXT @limit ROWS ONLY
+                OPTION (RECOMPILE);
+                """;
+
+            var parameters = new[]
+            {
+                new SqlParameter(
+                    "@titlePrefix",
+                    SqlDbType.NVarChar,
+                    MaximumNameLength + 1)
+                {
+                    Value = titlePrefix
+                },
+
+                new SqlParameter(
+                    "@tokenPrefix",
+                    SqlDbType.NVarChar,
+                    MaximumTokenLength + 1)
+                {
+                    Value = tokenPrefix
+                },
+
+                new SqlParameter(
+                    "@searchTerm",
+                    SqlDbType.NVarChar,
+                    MaximumNameLength)
+                {
+                    Value = searchTerm
+                },
+
+                new SqlParameter(
+                    "@isExpansion",
+                    SqlDbType.Bit)
+                {
+                    Value = isExpansion.HasValue
+                        ? isExpansion.Value
+                        : DBNull.Value
+                },
+
+                new SqlParameter(
+                    "@playerCount",
+                    SqlDbType.Int)
+                {
+                    Value = playerCount.HasValue
+                        ? playerCount.Value
+                        : DBNull.Value
+                },
+
+                new SqlParameter(
+                    "@minBggRating",
+                    SqlDbType.Float)
+                {
+                    Value = minBggRating.HasValue
+                        ? minBggRating.Value
+                        : DBNull.Value
+                },
+
+                new SqlParameter(
+                    "@offset",
+                    SqlDbType.Int)
+                {
+                    Value = safeOffset
+                },
+
+                new SqlParameter(
+                    "@limit",
+                    SqlDbType.Int)
+                {
+                    Value = safeLimit
+                }
+            };
+
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                await LogSearchDiagnosticsAsync(
+                    titlePrefix,
+                    tokenPrefix,
+                    cancellationToken);
+
+                Console.WriteLine(
+                    $"[SEARCH] Repository START | query={searchTerm} | offset={safeOffset} | limit={safeLimit} | sort={normalizedSort}");
+
+                Console.WriteLine(
+                    $"[SEARCH] SQL START | query={searchTerm}");
+
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+                var results = await _context.GameSearchCatalog
+                    .FromSqlRaw(
+                        sql,
+                        parameters)
+                    .AsNoTracking()
+                    .ToListAsync(
+                        cancellationToken);
+
+                stopwatch.Stop();
+
+                Console.WriteLine(
+                    $"[SEARCH] SQL END | query={searchTerm} | {stopwatch.ElapsedMilliseconds}ms | count={results.Count}");
+
+                Console.WriteLine(
+                    $"[SEARCH] Repository END | query={searchTerm} | offset={safeOffset} | count={results.Count}");
+
+                return results;
+            }
+            catch (SqlException ex)
+                when (
+                    cancellationToken.IsCancellationRequested &&
+                    ex.Message.Contains(
+                        "Operation cancelled by user",
+                        StringComparison.OrdinalIgnoreCase))
+            {
+                throw new OperationCanceledException(
+                    "A pesquisa foi cancelada porque o pedido deixou de ser atual.",
+                    ex,
+                    cancellationToken);
+            }
+        }
+
+
+        private async Task LogSearchDiagnosticsAsync(
+            string titlePrefix,
+            string tokenPrefix,
+            CancellationToken cancellationToken)
+        {
+            var connection =
+                _context.Database.GetDbConnection();
+
+            var openedHere = false;
+
+            try
+            {
+                if (connection.State != ConnectionState.Open)
+                {
+                    var openWatch =
+                        System.Diagnostics.Stopwatch.StartNew();
+
+                    await connection.OpenAsync(
+                        cancellationToken);
+
+                    openWatch.Stop();
+
+                    openedHere = true;
+
+                    Console.WriteLine(
+                        $"[SEARCH-DIAG] CONNECTION OPEN | {openWatch.ElapsedMilliseconds}ms");
+                }
+                else
+                {
+                    Console.WriteLine(
+                        "[SEARCH-DIAG] CONNECTION ALREADY OPEN");
+                }
+
+                await using (
+                    var titleCommand =
+                        connection.CreateCommand())
+                {
+                    titleCommand.CommandText =
+                        """
+                        SELECT COUNT_BIG(*)
+                        FROM [dbo].[GameSearchCatalog] AS c
+                        WHERE c.[NormalizedName] LIKE @titlePrefix ESCAPE '\';
+                        """;
+
+                    var parameter =
+                        titleCommand.CreateParameter();
+
+                    parameter.ParameterName =
+                        "@titlePrefix";
+
+                    parameter.DbType =
+                        DbType.String;
+
+                    parameter.Size =
+                        MaximumNameLength + 1;
+
+                    parameter.Value =
+                        titlePrefix;
+
+                    titleCommand.Parameters.Add(
+                        parameter);
+
+                    var watch =
+                        System.Diagnostics.Stopwatch.StartNew();
+
+                    var count =
+                        Convert.ToInt64(
+                            await titleCommand.ExecuteScalarAsync(
+                                cancellationToken));
+
+                    watch.Stop();
+
+                    Console.WriteLine(
+                        $"[SEARCH-DIAG] TITLE PREFIX | {watch.ElapsedMilliseconds}ms | count={count}");
+                }
+
+                await using (
+                    var tokenCommand =
+                        connection.CreateCommand())
+                {
+                    tokenCommand.CommandText =
+                        """
+                        SELECT COUNT_BIG(*)
+                        FROM [dbo].[GameSearchToken] AS t
+                        WHERE t.[Token] LIKE @tokenPrefix ESCAPE '\';
+                        """;
+
+                    var parameter =
+                        tokenCommand.CreateParameter();
+
+                    parameter.ParameterName =
+                        "@tokenPrefix";
+
+                    parameter.DbType =
+                        DbType.String;
+
+                    parameter.Size =
+                        MaximumTokenLength + 1;
+
+                    parameter.Value =
+                        tokenPrefix;
+
+                    tokenCommand.Parameters.Add(
+                        parameter);
+
+                    var watch =
+                        System.Diagnostics.Stopwatch.StartNew();
+
+                    var count =
+                        Convert.ToInt64(
+                            await tokenCommand.ExecuteScalarAsync(
+                                cancellationToken));
+
+                    watch.Stop();
+
+                    Console.WriteLine(
+                        $"[SEARCH-DIAG] TOKEN PREFIX | {watch.ElapsedMilliseconds}ms | count={count}");
+                }
+            }
+            catch (Exception ex)
+                when (
+                    ex is not OperationCanceledException)
+            {
+                /*
+                 * Diagnóstico nunca deve impedir a pesquisa real.
+                 */
+                Console.WriteLine(
+                    $"[SEARCH-DIAG] FAILED | {ex.GetType().Name}: {ex.Message}");
+            }
+            finally
+            {
+                if (openedHere &&
+                    connection.State ==
+                    ConnectionState.Open)
+                {
+                    await connection.CloseAsync();
+                }
+            }
+        }
+
+        public async Task<List<GameSearchCatalog>> GetCandidatesForEnrichmentAsync(
+            int limit,
+            CancellationToken cancellationToken = default)
+        {
             var safeLimit =
                 Math.Clamp(
                     limit,
                     1,
-                    MaxSearchLimit);
+                    10_000);
 
-            /*
-             * Primeiro procuramos nomes que começam pelo termo.
-             *
-             * Esta é a pesquisa principal do autocomplete
-             * e permite aproveitar melhor o índice de NormalizedName.
-             */
-            var prefixQuery =
-                BuildBaseSearchQuery(
-                    isExpansion)
-                    .Where(x =>
-                        x.NormalizedName.StartsWith(
-                            searchTerm));
-
-            var prefixResults =
-                await prefixQuery
-                    .OrderByDescending(x =>
-                        x.NormalizedName == searchTerm)
-                    .ThenByDescending(x =>
-                        x.RatingsCount ?? 0)
-                    .ThenBy(x =>
-                        x.BggRank ?? int.MaxValue)
-                    .ThenByDescending(x =>
-                        x.AverageRating ?? 0)
-                    .ThenBy(x =>
-                        x.Name)
-                    .Skip(safeOffset)
-                    .Take(safeLimit)
-                    .ToListAsync(
-                        cancellationToken);
-
-            /*
-             * Se já temos resultados suficientes de prefixo,
-             * não executamos a pesquisa mais pesada por Contains.
-             */
-            if (prefixResults.Count >= safeLimit)
-            {
-                return prefixResults;
-            }
-
-            var remaining =
-                safeLimit - prefixResults.Count;
-
-            /*
-             * Contains é apenas fallback.
-             *
-             * Evitamos executar "%texto%" quando uma pesquisa
-             * simples por prefixo já é suficiente.
-             */
-            var containsQuery =
-                BuildBaseSearchQuery(
-                    isExpansion)
-                    .Where(x =>
-                        x.NormalizedName.Contains(searchTerm) &&
-                        !x.NormalizedName.StartsWith(searchTerm));
-
-            var containsResults =
-                await containsQuery
-                    .OrderByDescending(x =>
-                        x.RatingsCount ?? 0)
-                    .ThenBy(x =>
-                        x.BggRank ?? int.MaxValue)
-                    .ThenByDescending(x =>
-                        x.AverageRating ?? 0)
-                    .ThenBy(x =>
-                        x.Name)
-                    .Take(remaining)
-                    .ToListAsync(
-                        cancellationToken);
-
-            prefixResults.AddRange(
-                containsResults);
-
-            return prefixResults;
+            return await _context.GameSearchCatalog
+                .AsNoTracking()
+                .Where(game =>
+                    game.DetailsSyncedAt == null)
+                .OrderByDescending(game =>
+                    game.RatingsCount ?? 0)
+                .ThenBy(game =>
+                    game.BggRank ?? int.MaxValue)
+                .ThenByDescending(game =>
+                    game.AverageRating ?? 0)
+                .ThenBy(game =>
+                    game.Name)
+                .ThenBy(game =>
+                    game.BggId)
+                .Take(safeLimit)
+                .ToListAsync(
+                    cancellationToken);
         }
 
         public async Task AddAsync(
@@ -245,19 +621,6 @@ namespace MeepleBoard.Infra.Data.Repositories
                     cancellationToken);
         }
 
-        /// <summary>
-        /// Insere ou atualiza em bloco os registos do catálogo.
-        ///
-        /// Utiliza:
-        /// - tabela temporária SQL;
-        /// - SqlBulkCopy;
-        /// - UPDATE em bloco;
-        /// - INSERT em bloco.
-        ///
-        /// Desta forma a importação massiva não passa pelo
-        /// ChangeTracker nem gera centenas de INSERTs individuais
-        /// através do Entity Framework.
-        /// </summary>
         public async Task<int> BulkUpsertAsync(
             IReadOnlyCollection<GameSearchCatalog> games,
             CancellationToken cancellationToken = default)
@@ -271,9 +634,6 @@ namespace MeepleBoard.Infra.Data.Repositories
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            /*
-             * Proteção adicional contra BGG IDs duplicados no mesmo lote.
-             */
             var uniqueGames =
                 games
                     .Where(x => x.BggId > 0)
@@ -291,11 +651,6 @@ namespace MeepleBoard.Infra.Data.Repositories
                 ValidateBulkGame(game);
             }
 
-            /*
-             * Usamos diretamente a ligação SQL gerida pelo DbContext,
-             * sem criar uma nova connection string nem duplicar
-             * configuração da base de dados.
-             */
             var dbConnection =
                 _context.Database.GetDbConnection();
 
@@ -345,7 +700,7 @@ namespace MeepleBoard.Infra.Data.Repositories
                             sqlConnection,
                             transaction))
                 {
-                    createCommand.CommandTimeout = 120;
+                    createCommand.CommandTimeout = 300;
 
                     await createCommand.ExecuteNonQueryAsync(
                         cancellationToken);
@@ -365,18 +720,8 @@ namespace MeepleBoard.Infra.Data.Repositories
                     bulkCopy.DestinationTableName =
                         "#GameSearchCatalogImport";
 
-                    /*
-                     * O bulk copy tem timeout próprio.
-                     *
-                     * 120 segundos é suficientemente superior ao esperado
-                     * para um lote e evita operações infinitamente presas.
-                     */
-                    bulkCopy.BulkCopyTimeout = 120;
+                    bulkCopy.BulkCopyTimeout = 300;
 
-                    /*
-                     * Permite que o SqlBulkCopy envie internamente os dados
-                     * em grupos eficientes sem gerar INSERTs individuais.
-                     */
                     bulkCopy.BatchSize =
                         uniqueGames.Count;
 
@@ -417,38 +762,43 @@ namespace MeepleBoard.Infra.Data.Repositories
                         cancellationToken);
                 }
 
-                /*
-                 * Primeiro atualizamos apenas registos que realmente mudaram.
-                 *
-                 * YearPublished mantém o valor existente quando o dump
-                 * não possui ano, reproduzindo o comportamento que já
-                 * existia no importador EF:
-                 *
-                 * row.YearPublished ?? existing.YearPublished
-                 *
-                 * LastSyncedAt só muda se algum dado básico mudou.
-                 */
                 const string updateSql =
                     """
                     UPDATE target
                     SET
                         target.[Name] = source.[Name],
                         target.[NormalizedName] = source.[NormalizedName],
+
                         target.[YearPublished] =
                             COALESCE(
                                 source.[YearPublished],
                                 target.[YearPublished]),
-                        target.[IsExpansion] = source.[IsExpansion],
-                        target.[AverageRating] = source.[AverageRating],
-                        target.[RatingsCount] = source.[RatingsCount],
-                        target.[BggRank] = source.[BggRank],
-                        target.[LastSyncedAt] = SYSUTCDATETIME()
+
+                        target.[IsExpansion] =
+                            source.[IsExpansion],
+
+                        target.[AverageRating] =
+                            source.[AverageRating],
+
+                        target.[RatingsCount] =
+                            source.[RatingsCount],
+
+                        target.[BggRank] =
+                            source.[BggRank],
+
+                        target.[LastSyncedAt] =
+                            SYSUTCDATETIME()
+
                     FROM [dbo].[GameSearchCatalog] AS target
+
                     INNER JOIN #GameSearchCatalogImport AS source
                         ON source.[BggId] = target.[BggId]
+
                     WHERE
                         target.[Name] <> source.[Name]
-                        OR target.[NormalizedName] <> source.[NormalizedName]
+
+                        OR target.[NormalizedName] <>
+                           source.[NormalizedName]
 
                         OR
                         (
@@ -456,20 +806,26 @@ namespace MeepleBoard.Infra.Data.Repositories
                             AND
                             (
                                 target.[YearPublished] IS NULL
-                                OR target.[YearPublished] <> source.[YearPublished]
+                                OR
+                                target.[YearPublished] <>
+                                source.[YearPublished]
                             )
                         )
 
-                        OR target.[IsExpansion] <> source.[IsExpansion]
+                        OR target.[IsExpansion] <>
+                           source.[IsExpansion]
 
                         OR
                         (
-                            target.[AverageRating] <> source.[AverageRating]
+                            target.[AverageRating] <>
+                            source.[AverageRating]
+
                             OR
                             (
                                 target.[AverageRating] IS NULL
                                 AND source.[AverageRating] IS NOT NULL
                             )
+
                             OR
                             (
                                 target.[AverageRating] IS NOT NULL
@@ -479,12 +835,15 @@ namespace MeepleBoard.Infra.Data.Repositories
 
                         OR
                         (
-                            target.[RatingsCount] <> source.[RatingsCount]
+                            target.[RatingsCount] <>
+                            source.[RatingsCount]
+
                             OR
                             (
                                 target.[RatingsCount] IS NULL
                                 AND source.[RatingsCount] IS NOT NULL
                             )
+
                             OR
                             (
                                 target.[RatingsCount] IS NOT NULL
@@ -494,12 +853,15 @@ namespace MeepleBoard.Infra.Data.Repositories
 
                         OR
                         (
-                            target.[BggRank] <> source.[BggRank]
+                            target.[BggRank] <>
+                            source.[BggRank]
+
                             OR
                             (
                                 target.[BggRank] IS NULL
                                 AND source.[BggRank] IS NOT NULL
                             )
+
                             OR
                             (
                                 target.[BggRank] IS NOT NULL
@@ -515,19 +877,12 @@ namespace MeepleBoard.Infra.Data.Repositories
                             sqlConnection,
                             transaction))
                 {
-                    updateCommand.CommandTimeout = 120;
+                    updateCommand.CommandTimeout = 300;
 
                     await updateCommand.ExecuteNonQueryAsync(
                         cancellationToken);
                 }
 
-                /*
-                 * Depois inserimos apenas os BGG IDs que ainda não existem.
-                 *
-                 * Os campos que só são obtidos através do /thing ficam
-                 * inicialmente vazios/nulos, tal como acontecia quando
-                 * construíamos GameSearchCatalog através do EF.
-                 */
                 const string insertSql =
                     """
                     INSERT INTO [dbo].[GameSearchCatalog]
@@ -550,6 +905,7 @@ namespace MeepleBoard.Infra.Data.Repositories
                         [LastSyncedAt],
                         [DetailsSyncedAt]
                     )
+
                     SELECT
                         NEWID(),
                         source.[BggId],
@@ -568,12 +924,17 @@ namespace MeepleBoard.Infra.Data.Repositories
                         SYSUTCDATETIME(),
                         SYSUTCDATETIME(),
                         NULL
+
                     FROM #GameSearchCatalogImport AS source
+
                     WHERE NOT EXISTS
                     (
                         SELECT 1
+
                         FROM [dbo].[GameSearchCatalog] AS target
-                        WHERE target.[BggId] = source.[BggId]
+
+                        WHERE target.[BggId] =
+                              source.[BggId]
                     );
                     """;
 
@@ -584,7 +945,7 @@ namespace MeepleBoard.Infra.Data.Repositories
                             sqlConnection,
                             transaction))
                 {
-                    insertCommand.CommandTimeout = 120;
+                    insertCommand.CommandTimeout = 300;
 
                     await insertCommand.ExecuteNonQueryAsync(
                         cancellationToken);
@@ -606,12 +967,7 @@ namespace MeepleBoard.Infra.Data.Repositories
                     }
                     catch
                     {
-                        /*
-                         * Preservamos a exceção original.
-                         *
-                         * Se a própria ligação tiver falhado, o rollback
-                         * também pode deixar de ser possível.
-                         */
+                        // Ignorar erro durante rollback.
                     }
                 }
 
@@ -625,11 +981,235 @@ namespace MeepleBoard.Infra.Data.Repositories
                 }
 
                 if (shouldCloseConnection &&
-                    sqlConnection.State != ConnectionState.Closed)
+                    sqlConnection.State !=
+                    ConnectionState.Closed)
                 {
                     await sqlConnection.CloseAsync();
                 }
             }
+        }
+
+        public async Task<int> RebuildSearchTokensAsync(
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var dbConnection =
+                _context.Database.GetDbConnection();
+
+            if (dbConnection is not SqlConnection sqlConnection)
+            {
+                throw new InvalidOperationException(
+                    "RebuildSearchTokensAsync requer Microsoft SQL Server.");
+            }
+
+            var shouldCloseConnection =
+                sqlConnection.State != ConnectionState.Open;
+
+            if (shouldCloseConnection)
+            {
+                await sqlConnection.OpenAsync(
+                    cancellationToken);
+            }
+
+            try
+            {
+                await using (
+                    var truncateCommand =
+                        new SqlCommand(
+                            "TRUNCATE TABLE [dbo].[GameSearchToken];",
+                            sqlConnection))
+                {
+                    truncateCommand.CommandTimeout = 60;
+
+                    await truncateCommand.ExecuteNonQueryAsync(
+                        cancellationToken);
+                }
+
+                const int catalogBatchSize = 2_000;
+                const int tokenBatchSize = 2_000;
+
+                var tokenTable =
+                    CreateSearchTokenDataTable();
+
+                var insertedTokens = 0;
+                var lastBggId = 0;
+
+                using var bulkCopy =
+                    new SqlBulkCopy(
+                        sqlConnection,
+                        SqlBulkCopyOptions.TableLock |
+                        SqlBulkCopyOptions.UseInternalTransaction,
+                        externalTransaction: null);
+
+                bulkCopy.DestinationTableName =
+                    "[dbo].[GameSearchToken]";
+
+                bulkCopy.BulkCopyTimeout = 60;
+                bulkCopy.BatchSize = tokenBatchSize;
+                bulkCopy.EnableStreaming = true;
+
+                bulkCopy.ColumnMappings.Add(
+                    "BggId",
+                    "BggId");
+
+                bulkCopy.ColumnMappings.Add(
+                    "Token",
+                    "Token");
+
+                bulkCopy.ColumnMappings.Add(
+                    "Position",
+                    "Position");
+
+                while (true)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var catalogRows =
+                        await _context.GameSearchCatalog
+                            .AsNoTracking()
+                            .Where(x =>
+                                x.BggId > lastBggId)
+                            .OrderBy(x =>
+                                x.BggId)
+                            .Select(x => new
+                            {
+                                x.BggId,
+                                x.NormalizedName
+                            })
+                            .Take(catalogBatchSize)
+                            .ToListAsync(
+                                cancellationToken);
+
+                    if (catalogRows.Count == 0)
+                    {
+                        break;
+                    }
+
+                    foreach (var catalogRow in catalogRows)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        if (catalogRow.BggId <= 0 ||
+                            string.IsNullOrWhiteSpace(
+                                catalogRow.NormalizedName))
+                        {
+                            continue;
+                        }
+
+                        var words =
+                            catalogRow.NormalizedName.Split(
+                                ' ',
+                                StringSplitOptions.RemoveEmptyEntries |
+                                StringSplitOptions.TrimEntries);
+
+                        /*
+                         * Começamos no índice 1 porque a primeira
+                         * palavra já é coberta pelo NormalizedName.
+                         */
+                        for (
+                            var index = 1;
+                            index < words.Length;
+                            index++)
+                        {
+                            var token =
+                                words[index];
+
+                            if (token.Length < 2 ||
+                                token.Length > MaximumTokenLength)
+                            {
+                                continue;
+                            }
+
+                            var row =
+                                tokenTable.NewRow();
+
+                            row["BggId"] =
+                                catalogRow.BggId;
+
+                            row["Token"] =
+                                token;
+
+                            row["Position"] =
+                                checked((short)index);
+
+                            tokenTable.Rows.Add(
+                                row);
+
+                            if (tokenTable.Rows.Count <
+                                tokenBatchSize)
+                            {
+                                continue;
+                            }
+
+                            await bulkCopy.WriteToServerAsync(
+                                tokenTable,
+                                cancellationToken);
+
+                            insertedTokens +=
+                                tokenTable.Rows.Count;
+
+                            tokenTable.Clear();
+
+                            await Task.Yield();
+                        }
+                    }
+
+                    lastBggId =
+                        catalogRows[^1].BggId;
+
+                    if (catalogRows.Count <
+                        catalogBatchSize)
+                    {
+                        break;
+                    }
+
+                    await Task.Yield();
+                }
+
+                if (tokenTable.Rows.Count > 0)
+                {
+                    await bulkCopy.WriteToServerAsync(
+                        tokenTable,
+                        cancellationToken);
+
+                    insertedTokens +=
+                        tokenTable.Rows.Count;
+
+                    tokenTable.Clear();
+                }
+
+                return insertedTokens;
+            }
+            finally
+            {
+                if (shouldCloseConnection &&
+                    sqlConnection.State !=
+                    ConnectionState.Closed)
+                {
+                    await sqlConnection.CloseAsync();
+                }
+            }
+        }
+
+        private static DataTable CreateSearchTokenDataTable()
+        {
+            var table =
+                new DataTable();
+
+            table.Columns.Add(
+                "BggId",
+                typeof(int));
+
+            table.Columns.Add(
+                "Token",
+                typeof(string));
+
+            table.Columns.Add(
+                "Position",
+                typeof(short));
+
+            return table;
         }
 
         public void ClearTracking()
@@ -637,30 +1217,33 @@ namespace MeepleBoard.Infra.Data.Repositories
             _context.ChangeTracker.Clear();
         }
 
-        private IQueryable<GameSearchCatalog> BuildBaseSearchQuery(
-            bool? isExpansion)
+        private static string EscapeLikePattern(
+            string value)
         {
-            IQueryable<GameSearchCatalog> query =
-                _context.GameSearchCatalog
-                    .AsNoTracking();
+            ArgumentNullException.ThrowIfNull(value);
 
-            if (isExpansion.HasValue)
-            {
-                query =
-                    query.Where(x =>
-                        x.IsExpansion ==
-                        isExpansion.Value);
-            }
-
-            return query;
+            return value
+                .Replace(@"\", @"\\")
+                .Replace("%", @"\%")
+                .Replace("_", @"\_")
+                .Replace("[", @"\[");
         }
 
-        /// <summary>
-        /// Constrói a tabela em memória enviada ao SqlBulkCopy.
-        ///
-        /// Contém apenas os dados básicos existentes no dump oficial
-        /// do BGG.
-        /// </summary>
+        private static string NormalizeSort(
+            string? sort)
+        {
+            return sort?
+                .Trim()
+                .ToLowerInvariant() switch
+            {
+                "most_known" => "most_known",
+                "bgg_rating" => "bgg_rating",
+                "year_desc" => "year_desc",
+                "name_asc" => "name_asc",
+                _ => "relevance"
+            };
+        }
+
         private static DataTable CreateBulkDataTable(
             IReadOnlyCollection<GameSearchCatalog> games)
         {
@@ -753,19 +1336,22 @@ namespace MeepleBoard.Infra.Data.Repositories
                     "O catálogo contém um BGG ID inválido.");
             }
 
-            if (string.IsNullOrWhiteSpace(game.Name))
+            if (string.IsNullOrWhiteSpace(
+                    game.Name))
             {
                 throw new InvalidOperationException(
                     $"O jogo BGG {game.BggId} não possui nome.");
             }
 
-            if (string.IsNullOrWhiteSpace(game.NormalizedName))
+            if (string.IsNullOrWhiteSpace(
+                    game.NormalizedName))
             {
                 throw new InvalidOperationException(
                     $"O jogo BGG {game.BggId} não possui nome normalizado.");
             }
 
-            if (game.Name.Length > MaximumNameLength)
+            if (game.Name.Length >
+                MaximumNameLength)
             {
                 throw new InvalidOperationException(
                     $"O nome do jogo BGG {game.BggId} possui " +
@@ -773,7 +1359,8 @@ namespace MeepleBoard.Infra.Data.Repositories
                     $"{MaximumNameLength}.");
             }
 
-            if (game.NormalizedName.Length > MaximumNameLength)
+            if (game.NormalizedName.Length >
+                MaximumNameLength)
             {
                 throw new InvalidOperationException(
                     $"O nome normalizado do jogo BGG {game.BggId} possui " +

@@ -1,29 +1,66 @@
-﻿using System.Globalization;
+﻿using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text;
 using MeepleBoard.Domain.Entities;
 using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Services.Interfaces;
 using MeepleBoard.Services.Mapping.Dtos;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace MeepleBoard.Services.Implementations
 {
     /// <summary>
-    /// Serviço responsável pela pesquisa no catálogo leve de jogos.
+    /// Serviço responsável pela pesquisa e enriquecimento do catálogo leve de jogos.
     ///
     /// A pesquisa é feita exclusivamente sobre GameSearchCatalog.
     /// Esta operação não cria entidades Game e não altera a base
     /// de dados principal de jogos utilizados pelos utilizadores.
+    ///
+    /// O enriquecimento através do BGG /thing também atualiza apenas
+    /// GameSearchCatalog e nunca cria entidades Game reais.
     /// </summary>
     public class GameSearchCatalogService : IGameSearchCatalogService
     {
-        private const int MaximumCandidatePool = 100;
+        private static readonly TimeSpan SearchCacheDuration =
+            TimeSpan.FromMinutes(5);
+
+        /*
+         * Single-flight global por chave de pesquisa.
+         *
+         * Se dois requests iguais chegarem antes de a cache ser preenchida,
+         * apenas o primeiro executa SQL. Os restantes aguardam a mesma Task.
+         *
+         * Lazy + ExecutionAndPublication garante que a factory é executada
+         * uma única vez mesmo sob concorrência real.
+         */
+        private static readonly ConcurrentDictionary<
+            string,
+            Lazy<Task<List<GameSuggestionDto>>>> InFlightSearches =
+            new();
 
         private readonly IGameSearchCatalogRepository _catalogRepository;
+        private readonly IBGGService _bggService;
+        private readonly IMemoryCache _cache;
 
         public GameSearchCatalogService(
-            IGameSearchCatalogRepository catalogRepository)
+            IGameSearchCatalogRepository catalogRepository,
+            IBGGService bggService,
+            IMemoryCache cache)
         {
-            _catalogRepository = catalogRepository;
+            _catalogRepository =
+                catalogRepository ??
+                throw new ArgumentNullException(
+                    nameof(catalogRepository));
+
+            _bggService =
+                bggService ??
+                throw new ArgumentNullException(
+                    nameof(bggService));
+
+            _cache =
+                cache ??
+                throw new ArgumentNullException(
+                    nameof(cache));
         }
 
         /// <summary>
@@ -31,16 +68,22 @@ namespace MeepleBoard.Services.Implementations
         ///
         /// Fluxo:
         /// 1. Normaliza o texto introduzido pelo utilizador.
-        /// 2. Obtém um conjunto de candidatos da base de dados.
-        /// 3. Aplica ranking final em memória.
-        /// 4. Aplica paginação.
-        /// 5. Converte para GameSuggestionDto.
+        /// 2. Obtém os resultados já ordenados/paginados pelo repositório.
+        /// 3. Converte para GameSuggestionDto.
+        ///
+        /// IMPORTANTE:
+        /// A pesquisa não chama o BGG /thing.
+        /// O autocomplete deve continuar rápido e independente da disponibilidade
+        /// momentânea do BoardGameGeek.
         /// </summary>
         public async Task<List<GameSuggestionDto>> SearchAsync(
             string query,
             int offset = 0,
             int limit = 10,
             bool? isExpansion = null,
+            int? playerCount = null,
+            double? minBggRating = null,
+            string sort = "relevance",
             CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(query))
@@ -48,244 +91,398 @@ namespace MeepleBoard.Services.Implementations
                 return new List<GameSuggestionDto>();
             }
 
-            var normalizedQuery = NormalizeSearchText(query);
+            var normalizedQuery =
+                NormalizeSearchText(query);
 
             if (string.IsNullOrWhiteSpace(normalizedQuery))
             {
                 return new List<GameSuggestionDto>();
             }
 
-            var safeOffset = Math.Max(0, offset);
-            var safeLimit = Math.Clamp(limit, 1, 50);
-
-            /*
-             * Não pedimos apenas 10 resultados ao SQL.
-             *
-             * Primeiro recolhemos um conjunto maior de candidatos
-             * para podermos aplicar um ranking final mais inteligente.
-             *
-             * Exemplo:
-             *
-             * "ro"
-             *
-             * queremos conseguir comparar:
-             *
-             * Root
-             * Robinson Crusoe
-             * Roll for the Galaxy
-             * Roll Player
-             * Rococo
-             * RoboRally
-             *
-             * em vez de simplesmente aceitar a ordem em que aparecem
-             * na pesquisa externa ou alfabeticamente.
-             */
-            var requiredCandidates =
+            var safeOffset =
                 Math.Max(
-                    50,
-                    (safeOffset + safeLimit) * 5);
+                    0,
+                    offset);
 
-            var candidateLimit =
-                Math.Min(
-                    requiredCandidates,
-                    MaximumCandidatePool);
+            var safeLimit =
+                Math.Clamp(
+                    limit,
+                    1,
+                    50);
 
-            var candidates =
-                await _catalogRepository.SearchAsync(
-                    normalizedQuery,
-                    offset: 0,
-                    limit: candidateLimit,
-                    isExpansion: isExpansion,
-                    cancellationToken: cancellationToken);
+            var normalizedSort =
+                NormalizeSort(sort);
 
-            if (candidates.Count == 0)
+            var normalizedPlayerCount =
+                NormalizePlayerCount(playerCount);
+
+            var normalizedMinimumRating =
+                NormalizeMinimumRating(minBggRating);
+
+            var cacheKey = BuildSearchCacheKey(
+                normalizedQuery,
+                safeOffset,
+                safeLimit,
+                isExpansion,
+                normalizedPlayerCount,
+                normalizedMinimumRating,
+                normalizedSort);
+
+            Console.WriteLine(
+                $"[SEARCH] Service START | query={normalizedQuery} | offset={safeOffset} | limit={safeLimit} | sort={normalizedSort}");
+
+            if (_cache.TryGetValue(
+                    cacheKey,
+                    out List<GameSuggestionDto>? cachedResults) &&
+                cachedResults != null)
             {
-                return new List<GameSuggestionDto>();
+                Console.WriteLine(
+                    $"[SEARCH] Service CACHE HIT | query={normalizedQuery} | offset={safeOffset} | count={cachedResults.Count}");
+
+                return cachedResults.ToList();
             }
 
             /*
-             * O ranking é deliberadamente baseado em níveis de
-             * relevância textual, em vez de um score gigante difícil
-             * de compreender e manter.
-             *
-             * Dentro do mesmo nível textual, damos prioridade:
-             *
-             * 1. Jogos base
-             * 2. Popularidade
-             * 3. Ranking BGG
-             * 4. Rating
-             *
-             * Isto torna os resultados mais previsvisíveis.
+             * O trabalho partilhado não usa o CancellationToken de um request
+             * individual. Se o iPhone abandonar um request aos 15 s, não queremos
+             * cancelar a pesquisa para outro caller que esteja a aguardar a mesma
+             * chave. Cada caller pode, no entanto, deixar de aguardar via WaitAsync.
              */
-            var rankedCandidates = candidates
-                .Select(game => new
+            var lazySearch =
+                InFlightSearches.GetOrAdd(
+                    cacheKey,
+                    _ =>
+                    {
+                        Console.WriteLine(
+                            $"[SEARCH] SINGLE-FLIGHT OWNER | query={normalizedQuery} | offset={safeOffset}");
+
+                        return new Lazy<Task<List<GameSuggestionDto>>>(
+                            () => ExecuteSearchAndCacheAsync(
+                                cacheKey,
+                                normalizedQuery,
+                                safeOffset,
+                                safeLimit,
+                                isExpansion,
+                                normalizedPlayerCount,
+                                normalizedMinimumRating,
+                                normalizedSort),
+                            LazyThreadSafetyMode.ExecutionAndPublication);
+                    });
+
+            if (lazySearch.IsValueCreated)
+            {
+                Console.WriteLine(
+                    $"[SEARCH] SINGLE-FLIGHT JOIN | query={normalizedQuery} | offset={safeOffset}");
+            }
+
+            try
+            {
+                return await lazySearch
+                    .Value
+                    .WaitAsync(cancellationToken);
+            }
+            finally
+            {
+                /*
+                 * Só o owner concluído remove a entrada correspondente.
+                 * TryRemove com KeyValuePair evita remover uma entrada nova
+                 * que, por acaso, tenha sido criada para a mesma chave.
+                 */
+                if (lazySearch.IsValueCreated &&
+                    lazySearch.Value.IsCompleted)
                 {
-                    Game = game,
+                    InFlightSearches.TryRemove(
+                        new KeyValuePair<
+                            string,
+                            Lazy<Task<List<GameSuggestionDto>>>>(
+                            cacheKey,
+                            lazySearch));
+                }
+            }
+        }
 
-                    TextTier = GetTextMatchTier(
-                        game.NormalizedName,
-                        normalizedQuery)
-                })
-                .Where(x => x.TextTier > 0)
-                .OrderByDescending(x => x.TextTier)
+        private async Task<List<GameSuggestionDto>> ExecuteSearchAndCacheAsync(
+            string cacheKey,
+            string normalizedQuery,
+            int safeOffset,
+            int safeLimit,
+            bool? isExpansion,
+            int? normalizedPlayerCount,
+            double? normalizedMinimumRating,
+            string normalizedSort)
+        {
+            Console.WriteLine(
+                $"[SEARCH] Service CACHE MISS | query={normalizedQuery} | offset={safeOffset}");
 
+            try
+            {
+                var results =
+                    await _catalogRepository.SearchAsync(
+                        normalizedQuery,
+                        offset: safeOffset,
+                        limit: safeLimit,
+                        isExpansion: isExpansion,
+                        playerCount: normalizedPlayerCount,
+                        minBggRating: normalizedMinimumRating,
+                        sort: normalizedSort,
+                        cancellationToken: CancellationToken.None);
+
+                var suggestions =
+                    results
+                        .Select(MapToSuggestion)
+                        .ToList();
+
+                _cache.Set(
+                    cacheKey,
+                    suggestions,
+                    new MemoryCacheEntryOptions
+                    {
+                        AbsoluteExpirationRelativeToNow =
+                            SearchCacheDuration,
+                        Priority = CacheItemPriority.Normal
+                    });
+
+                Console.WriteLine(
+                    $"[SEARCH] Service END | query={normalizedQuery} | offset={safeOffset} | count={suggestions.Count}");
+
+                return suggestions;
+            }
+            finally
+            {
                 /*
-                 * Quando estamos a pesquisar jogos e expansões
-                 * simultaneamente, jogos base recebem prioridade.
-                 *
-                 * Se isExpansion == true, esta ordenação não interfere,
-                 * porque todos os candidatos já são expansões.
+                 * A remoção definitiva também é feita no finally de SearchAsync.
+                 * Este bloco existe apenas para deixar claro que nenhuma exceção
+                 * é convertida em resultado/cache.
                  */
-                .ThenBy(x => x.Game.IsExpansion)
-
-                /*
-                 * UsersRated/RatingsCount é utilizado como principal
-                 * indicador de popularidade.
-                 *
-                 * Para autocomplete isto é mais útil do que simplesmente
-                 * ordenar pela nota média.
-                 */
-                .ThenByDescending(
-                    x => x.Game.RatingsCount ?? 0)
-
-                /*
-                 * Se dois jogos tiverem popularidade semelhante,
-                 * usamos o ranking geral BGG como desempate.
-                 *
-                 * Jogos sem ranking vão para o fim.
-                 */
-                .ThenBy(
-                    x => x.Game.BggRank ?? int.MaxValue)
-
-                /*
-                 * Rating é apenas um critério secundário.
-                 *
-                 * Um jogo com 9.0 e 20 avaliações não deve normalmente
-                 * aparecer antes de um jogo conhecido com milhares
-                 * de avaliações.
-                 */
-                .ThenByDescending(
-                    x => x.Game.AverageRating ?? 0)
-
-                /*
-                 * Desempates finais para manter resultados estáveis.
-                 */
-                .ThenBy(x => x.Game.Name.Length)
-                .ThenBy(x => x.Game.Name)
-                .Select(x => x.Game)
-                .Skip(safeOffset)
-                .Take(safeLimit)
-                .ToList();
-
-            return rankedCandidates
-                .Select(MapToSuggestion)
-                .ToList();
+            }
         }
 
         /// <summary>
-        /// Define o nível de correspondência textual.
+        /// Enriquece registos já existentes no GameSearchCatalog através
+        /// do endpoint /thing do BoardGameGeek.
         ///
-        /// Quanto maior o valor, melhor o resultado.
+        /// Esta operação:
+        /// - nunca cria entidades Game;
+        /// - não adiciona jogos novos ao catálogo;
+        /// - apenas atualiza registos que já existem no GameSearchCatalog;
+        /// - delega no IBGGService o batching do /thing (máximo 20 IDs/pedido);
+        /// - grava todos os enriquecimentos válidos num único CommitAsync.
         /// </summary>
-        private static int GetTextMatchTier(
-            string normalizedName,
-            string normalizedQuery)
+        public async Task<int> EnrichDetailsAsync(
+            IReadOnlyCollection<int> bggIds,
+            CancellationToken cancellationToken = default)
         {
-            if (string.IsNullOrWhiteSpace(normalizedName) ||
-                string.IsNullOrWhiteSpace(normalizedQuery))
+            ArgumentNullException.ThrowIfNull(
+                bggIds);
+
+            var cleanIds =
+                bggIds
+                    .Where(id => id > 0)
+                    .Distinct()
+                    .ToArray();
+
+            if (cleanIds.Length == 0)
+            {
+                return 0;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            /*
+             * GetByBggIdsAsync devolve entidades tracked de propósito.
+             *
+             * Assim podemos aplicar UpdateFromBgg diretamente e efetuar
+             * apenas um SaveChanges no fim.
+             */
+            var catalogGames =
+                await _catalogRepository.GetByBggIdsAsync(
+                    cleanIds,
+                    cancellationToken);
+
+            if (catalogGames.Count == 0)
             {
                 return 0;
             }
 
             /*
-             * Tier 4:
+             * Pedimos detalhes apenas para IDs que realmente existem
+             * no nosso catálogo.
              *
-             * Pesquisa exata.
-             *
-             * "root" -> "root"
+             * Isto impede que esta operação seja utilizada, mesmo por engano,
+             * para transformar um ID externo num novo registo local.
              */
-            if (string.Equals(
-                normalizedName,
-                normalizedQuery,
-                StringComparison.Ordinal))
+            var idsToFetch =
+                catalogGames.Keys
+                    .Select(id =>
+                        id.ToString(
+                            CultureInfo.InvariantCulture))
+                    .ToList();
+
+            var bggGames =
+                await _bggService.GetGamesByIdsAsync(
+                    idsToFetch,
+                    cancellationToken);
+
+            if (bggGames.Count == 0)
             {
-                return 4;
+                return 0;
             }
 
-            /*
-             * Tier 3:
-             *
-             * O nome começa pela pesquisa.
-             *
-             * "ro" -> "robinson crusoe"
-             * "ro" -> "roll player"
-             * "ro" -> "rococo"
-             */
-            if (normalizedName.StartsWith(
-                normalizedQuery,
-                StringComparison.Ordinal))
+            var enrichedCount = 0;
+
+            foreach (var bggGame in bggGames)
             {
-                return 3;
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (!bggGame.BggId.HasValue ||
+                    !catalogGames.TryGetValue(
+                        bggGame.BggId.Value,
+                        out var catalogGame))
+                {
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(
+                        bggGame.Name))
+                {
+                    continue;
+                }
+
+                var normalizedName =
+                    NormalizeSearchText(
+                        bggGame.Name);
+
+                if (string.IsNullOrWhiteSpace(
+                        normalizedName))
+                {
+                    continue;
+                }
+
+                /*
+                 * Preservamos os dados básicos já conhecidos quando o /thing
+                 * não devolver determinado valor.
+                 *
+                 * O dump oficial é especialmente útil para rating/popularidade,
+                 * portanto uma resposta parcial do /thing não deve apagar esses
+                 * dados do catálogo.
+                 */
+                var yearPublished =
+                    bggGame.YearPublished ??
+                    catalogGame.YearPublished;
+
+                var imageUrl =
+                    !string.IsNullOrWhiteSpace(
+                        bggGame.ImageUrl)
+                        ? bggGame.ImageUrl
+                        : catalogGame.ThumbnailUrl;
+
+                var averageRating =
+                    bggGame.AverageRating ??
+                    catalogGame.AverageRating;
+
+                var ratingsCount =
+                    bggGame.UsersRatedCount ??
+                    catalogGame.RatingsCount;
+
+                var bggRank =
+                    bggGame.BggRanking ??
+                    catalogGame.BggRank;
+
+                catalogGame.UpdateFromBgg(
+                    name: bggGame.Name,
+                    normalizedName: normalizedName,
+                    yearPublished: yearPublished,
+                    thumbnailUrl: imageUrl,
+                    isExpansion: bggGame.IsExpansion,
+                    minPlayers:
+                        bggGame.MinPlayers ??
+                        catalogGame.MinPlayers,
+                    maxPlayers:
+                        bggGame.MaxPlayers ??
+                        catalogGame.MaxPlayers,
+                    isCooperative:
+                        bggGame.IsCooperative,
+                    supportsCampaign:
+                        bggGame.SupportsCampaign,
+                    averageRating: averageRating,
+                    ratingsCount: ratingsCount,
+                    bggRank: bggRank);
+
+                enrichedCount++;
             }
 
-            /*
-             * Tier 2:
-             *
-             * Uma palavra posterior começa pela pesquisa.
-             *
-             * Exemplo:
-             *
-             * pesquisa "gal"
-             * "roll for the galaxy"
-             *
-             * pesquisa "cru"
-             * "robinson crusoe"
-             */
-            if (ContainsWordStartingWith(
-                normalizedName,
-                normalizedQuery))
+            if (enrichedCount == 0)
             {
-                return 2;
+                return 0;
             }
 
-            /*
-             * Tier 1:
-             *
-             * Correspondência parcial algures no nome.
-             */
-            if (normalizedName.Contains(
-                normalizedQuery,
-                StringComparison.Ordinal))
-            {
-                return 1;
-            }
+            await _catalogRepository.CommitAsync(
+                cancellationToken);
 
-            return 0;
+            return enrichedCount;
         }
 
-        /// <summary>
-        /// Verifica se alguma palavra do nome começa pelo termo pesquisado.
-        /// </summary>
-        private static bool ContainsWordStartingWith(
-            string normalizedName,
-            string normalizedQuery)
+        private static string BuildSearchCacheKey(
+            string normalizedQuery,
+            int offset,
+            int limit,
+            bool? isExpansion,
+            int? playerCount,
+            double? minBggRating,
+            string sort)
         {
-            var words = normalizedName.Split(
-                ' ',
-                StringSplitOptions.RemoveEmptyEntries |
-                StringSplitOptions.TrimEntries);
+            return string.Join(
+                ":",
+                "game-search",
+                normalizedQuery,
+                offset,
+                limit,
+                isExpansion?.ToString() ?? "all",
+                playerCount?.ToString(CultureInfo.InvariantCulture) ?? "all",
+                minBggRating?.ToString(CultureInfo.InvariantCulture) ?? "all",
+                sort);
+        }
 
-            foreach (var word in words)
+
+        private static int? NormalizePlayerCount(
+            int? playerCount)
+        {
+            if (!playerCount.HasValue)
             {
-                if (word.StartsWith(
-                    normalizedQuery,
-                    StringComparison.Ordinal))
-                {
-                    return true;
-                }
+                return null;
             }
 
-            return false;
+            return playerCount.Value is >= 1 and <= 5
+                ? playerCount.Value
+                : null;
+        }
+
+        private static double? NormalizeMinimumRating(
+            double? minBggRating)
+        {
+            if (!minBggRating.HasValue)
+            {
+                return null;
+            }
+
+            return minBggRating.Value is >= 0 and <= 10
+                ? minBggRating.Value
+                : null;
+        }
+
+        private static string NormalizeSort(
+            string? sort)
+        {
+            return sort?
+                .Trim()
+                .ToLowerInvariant() switch
+            {
+                "most_known" => "most_known",
+                "bgg_rating" => "bgg_rating",
+                "year_desc" => "year_desc",
+                "name_asc" => "name_asc",
+                _ => "relevance"
+            };
         }
 
         /// <summary>
@@ -354,7 +551,8 @@ namespace MeepleBoard.Services.Implementations
         /// - acentos;
         /// - espaços repetidos.
         /// </summary>
-        private static string NormalizeSearchText(string value)
+        private static string NormalizeSearchText(
+            string value)
         {
             if (string.IsNullOrWhiteSpace(value))
             {
@@ -365,17 +563,20 @@ namespace MeepleBoard.Services.Implementations
                 value
                     .Trim()
                     .ToLowerInvariant()
-                    .Normalize(NormalizationForm.FormD);
+                    .Normalize(
+                        NormalizationForm.FormD);
 
             var builder =
-                new StringBuilder(normalized.Length);
+                new StringBuilder(
+                    normalized.Length);
 
             var previousWasSpace = false;
 
             foreach (var character in normalized)
             {
                 var category =
-                    CharUnicodeInfo.GetUnicodeCategory(character);
+                    CharUnicodeInfo.GetUnicodeCategory(
+                        character);
 
                 /*
                  * Ignora marcas utilizadas nos acentos.
@@ -410,7 +611,8 @@ namespace MeepleBoard.Services.Implementations
             return builder
                 .ToString()
                 .Trim()
-                .Normalize(NormalizationForm.FormC);
+                .Normalize(
+                    NormalizationForm.FormC);
         }
     }
 }

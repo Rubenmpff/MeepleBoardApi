@@ -1,6 +1,7 @@
 ﻿using MeepleBoard.Domain.Entities;
 using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Infra.Data.Context;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
 namespace MeepleBoard.Infra.Data.Repositories
@@ -21,7 +22,10 @@ namespace MeepleBoard.Infra.Data.Repositories
 
             return await _context.Users
                 .AsNoTracking()
-                .AnyAsync(u => u.Email != null && u.Email.ToLower().Trim() == email.ToLower().Trim(), cancellationToken);
+                .AnyAsync(
+                    u => u.Email != null &&
+                         u.Email.ToLower().Trim() == email.ToLower().Trim(),
+                    cancellationToken);
         }
 
         // 🔹 Verifica se um nome de usuário já está em uso
@@ -31,7 +35,10 @@ namespace MeepleBoard.Infra.Data.Repositories
 
             return await _context.Users
                 .AsNoTracking()
-                .AnyAsync(u => u.UserName != null && u.UserName.ToLower().Trim() == username.ToLower().Trim(), cancellationToken);
+                .AnyAsync(
+                    u => u.UserName != null &&
+                         u.UserName.ToLower().Trim() == username.ToLower().Trim(),
+                    cancellationToken);
         }
 
         // 🔹 Obtém um usuário pelo ID (inclui partidas do usuário)
@@ -39,30 +46,36 @@ namespace MeepleBoard.Infra.Data.Repositories
         {
             return await _context.Users
                 .Include(u => u.Matches)
-                    .ThenInclude(m => m.Match) // 🔹 Carrega os detalhes das partidas
+                    .ThenInclude(m => m.Match)
                 .AsSplitQuery()
                 .AsNoTracking()
                 .FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
         }
 
-        // 🔹 Obtém um usuário pelo e-mail (Case-insensitive corrigido)
+        // 🔹 Obtém um usuário pelo e-mail
         public async Task<User?> GetByEmailAsync(string email, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(email)) return null;
 
             return await _context.Users
                 .AsNoTracking()
-                .FirstOrDefaultAsync(user => user.Email != null && user.Email.ToLower().Trim() == email.ToLower().Trim(), cancellationToken);
+                .FirstOrDefaultAsync(
+                    user => user.Email != null &&
+                            user.Email.ToLower().Trim() == email.ToLower().Trim(),
+                    cancellationToken);
         }
 
-        // 🔹 Obtém um usuário pelo nome de usuário (Case-insensitive corrigido)
+        // 🔹 Obtém um usuário pelo nome de usuário
         public async Task<User?> GetByUsernameAsync(string username, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(username)) return null;
 
             return await _context.Users
                 .AsNoTracking()
-                .FirstOrDefaultAsync(u => u.UserName != null && u.UserName.ToLower().Trim() == username.ToLower().Trim(), cancellationToken);
+                .FirstOrDefaultAsync(
+                    u => u.UserName != null &&
+                         u.UserName.ToLower().Trim() == username.ToLower().Trim(),
+                    cancellationToken);
         }
 
         // 🔹 Retorna todos os usuários registrados
@@ -74,17 +87,34 @@ namespace MeepleBoard.Infra.Data.Repositories
         }
 
         // 🔹 Retorna os usuários com mais vitórias
-        public async Task<IReadOnlyList<User>> GetUsersWithMostWinsAsync(int count, DateTime? startDate = null, CancellationToken cancellationToken = default)
+        public async Task<IReadOnlyList<User>> GetUsersWithMostWinsAsync(
+            int count,
+            DateTime? startDate = null,
+            CancellationToken cancellationToken = default)
         {
             var query = _context.MatchPlayers
-                .Where(mp => mp.IsWinner && (!startDate.HasValue || mp.Match!.MatchDate >= startDate.Value))
+                .Where(mp =>
+                    mp.IsWinner &&
+                    (!startDate.HasValue || mp.Match!.MatchDate >= startDate.Value))
                 .GroupBy(mp => mp.UserId)
-                .Select(g => new { UserId = g.Key, TotalWins = g.Count() })
+                .Select(g => new
+                {
+                    UserId = g.Key,
+                    TotalWins = g.Count()
+                })
                 .OrderByDescending(u => u.TotalWins)
                 .Take(count)
-                .Join(_context.Users, stat => stat.UserId, u => u.Id, (stat, u) => new { u, stat.TotalWins })
+                .Join(
+                    _context.Users,
+                    stat => stat.UserId,
+                    u => u.Id,
+                    (stat, u) => new
+                    {
+                        u,
+                        stat.TotalWins
+                    })
                 .OrderByDescending(u => u.TotalWins)
-                .Select(u => u.u) // 🔹 Retorna apenas o usuário
+                .Select(u => u.u)
                 .AsNoTracking();
 
             return await query.ToListAsync(cancellationToken);
@@ -96,23 +126,35 @@ namespace MeepleBoard.Infra.Data.Repositories
             await _context.Users.AddAsync(user, cancellationToken);
         }
 
-        // 🔹 Atualiza os dados de um usuário (agora retorna número de registros afetados)
+        // 🔹 Atualiza os dados de um usuário
         public async Task<int> UpdateAsync(User user, CancellationToken cancellationToken = default)
         {
-            var existingUser = await _context.Users.FindAsync(new object[] { user.Id }, cancellationToken);
+            var existingUser =
+                await _context.Users.FindAsync(
+                    new object[] { user.Id },
+                    cancellationToken);
+
             if (existingUser == null) return 0;
 
-            _context.Entry(existingUser).CurrentValues.SetValues(user);
+            _context.Entry(existingUser)
+                .CurrentValues
+                .SetValues(user);
+
             return await _context.SaveChangesAsync(cancellationToken);
         }
 
-        // 🔹 Remove um usuário pelo ID (agora retorna número de registros afetados)
+        // 🔹 Remove um usuário pelo ID
         public async Task<int> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
         {
-            var user = await _context.Users.FindAsync(new object[] { id }, cancellationToken);
+            var user =
+                await _context.Users.FindAsync(
+                    new object[] { id },
+                    cancellationToken);
+
             if (user == null) return 0;
 
             _context.Users.Remove(user);
+
             return await _context.SaveChangesAsync(cancellationToken);
         }
 
@@ -123,17 +165,48 @@ namespace MeepleBoard.Infra.Data.Repositories
         }
 
         // 🔹 Atualiza a última atividade do utilizador (indicador "online" nos Amigos).
-        // Usa ExecuteUpdateAsync para não ter de carregar a entidade inteira, e só
-        // escreve quando o valor já está desatualizado (>1 min) — evita um UPDATE
-        // em todos os pedidos autenticados, que na app acontecem constantemente.
-        public async Task TouchLastActiveAsync(Guid userId, CancellationToken cancellationToken = default)
+        //
+        // Usa ExecuteUpdateAsync para não carregar a entidade inteira e só altera
+        // LastActiveAt quando o valor está desatualizado há mais de 1 minuto.
+        //
+        // Quando o request HTTP é abortado, o SqlClient pode devolver o cancelamento
+        // como SqlException ("Operation cancelled by user") em vez de
+        // OperationCanceledException. Nessa situação convertemos para
+        // OperationCanceledException para que o middleware trate corretamente o
+        // cancelamento como comportamento normal e não o registe como warning.
+        public async Task TouchLastActiveAsync(
+            Guid userId,
+            CancellationToken cancellationToken = default)
         {
             var now = DateTime.UtcNow;
             var staleThreshold = now.AddMinutes(-1);
 
-            await _context.Users
-                .Where(u => u.Id == userId && (u.LastActiveAt == null || u.LastActiveAt < staleThreshold))
-                .ExecuteUpdateAsync(setters => setters.SetProperty(u => u.LastActiveAt, now), cancellationToken);
+            try
+            {
+                await _context.Users
+                    .Where(u =>
+                        u.Id == userId &&
+                        (u.LastActiveAt == null ||
+                         u.LastActiveAt < staleThreshold))
+                    .ExecuteUpdateAsync(
+                        setters =>
+                            setters.SetProperty(
+                                u => u.LastActiveAt,
+                                now),
+                        cancellationToken);
+            }
+            catch (SqlException ex)
+                when (
+                    cancellationToken.IsCancellationRequested &&
+                    ex.Message.Contains(
+                        "Operation cancelled by user",
+                        StringComparison.OrdinalIgnoreCase))
+            {
+                throw new OperationCanceledException(
+                    "A atualização de LastActiveAt foi cancelada porque o pedido HTTP deixou de ser atual.",
+                    ex,
+                    cancellationToken);
+            }
         }
     }
 }

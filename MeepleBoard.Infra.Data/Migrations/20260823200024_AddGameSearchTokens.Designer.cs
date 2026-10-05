@@ -4,6 +4,7 @@ using MeepleBoard.Infra.Data.Context;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace MeepleBoard.Infra.Data.Migrations
 {
     [DbContext(typeof(MeepleBoardDbContext))]
-    partial class MeepleBoardDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260823200024_AddGameSearchTokens")]
+    partial class AddGameSearchTokens
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -358,6 +361,10 @@ namespace MeepleBoard.Infra.Data.Migrations
 
             modelBuilder.Entity("MeepleBoard.Domain.Entities.GameSearchToken", b =>
                 {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int>("BggId")
                         .HasColumnType("int");
 
@@ -366,10 +373,15 @@ namespace MeepleBoard.Infra.Data.Migrations
 
                     b.Property<string>("Token")
                         .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
-                    b.HasKey("BggId", "Position");
+                    b.HasKey("Id");
+
+                    b.HasIndex("BggId");
+
+                    b.HasIndex("BggId", "Position")
+                        .IsUnique();
 
                     b.HasIndex("Token", "BggId");
 

@@ -1,4 +1,5 @@
-﻿using AspNetCoreRateLimit;
+﻿
+using AspNetCoreRateLimit;
 using Hangfire;
 using Hangfire.Dashboard;
 using MeepleBoard.CrossCutting.IoC;
@@ -242,35 +243,43 @@ builder.Services.AddHangfire(config =>
 
 // Mantém o processamento dos jobs ativo.
 //
-// Separamos os jobs normais da importação pesada do catálogo BGG.
-// Desta forma, o catálogo nunca ocupa os workers utilizados pelos
-// cleanups e pelos restantes jobs da aplicação.
+// Separamos:
+// - jobs normais da aplicação -> queue "default";
+// - operações pesadas BGG -> queues "bgg-rebuild" e "bgg-catalog".
 //
-// Os valores podem ser sobrescritos por configuração, por exemplo:
+// As duas queues pesadas são processadas pelo MESMO Hangfire Server
+// com apenas 1 worker. Assim nunca executamos, nesta instância,
+// um rebuild de tokens e uma importação pesada do catálogo ao mesmo tempo.
+//
+// Os valores podem ser sobrescritos por configuração:
 // Hangfire:DefaultWorkerCount
-// Hangfire:BggCatalogWorkerCount
+// Hangfire:BggHeavyWorkerCount
+// Hangfire:EnableBggHeavyJobs
 //
-// Os defaults mantêm um total máximo de 4 workers neste ambiente:
-// 3 para a fila normal + 1 dedicado ao catálogo BGG.
-var defaultHangfireWorkerCount =
+// Defaults conservadores:
+// - Development: 1 worker para jobs normais;
+// - QA/Production: 3 workers para jobs normais;
+// - 1 worker para operações pesadas BGG;
+// - operações pesadas BGG desligadas por defeito em Development.
+var defaultWorkerCount =
     Math.Max(
         1,
         configuration.GetValue<int?>(
             "Hangfire:DefaultWorkerCount")
-        ?? 3);
+        ?? (isDevelopment ? 1 : 3));
 
-var bggCatalogWorkerCount =
+var bggHeavyWorkerCount =
     Math.Max(
         1,
         configuration.GetValue<int?>(
-            "Hangfire:BggCatalogWorkerCount")
+            "Hangfire:BggHeavyWorkerCount")
         ?? 1);
 
 // Jobs normais da aplicação.
 builder.Services.AddHangfireServer(options =>
 {
     options.WorkerCount =
-        defaultHangfireWorkerCount;
+        defaultWorkerCount;
 
     options.Queues =
     [
@@ -278,27 +287,39 @@ builder.Services.AddHangfireServer(options =>
     ];
 });
 
-// Importação pesada do catálogo BGG.
+// Operações pesadas BGG.
 //
-// A queue tem, por defeito, apenas um worker.
-// Em conjunto com DisableConcurrentExecution no job,
-// isto dá-nos duas camadas de proteção contra concorrência.
-builder.Services.AddHangfireServer(options =>
+// Em Development ficam desligadas por defeito para evitar que imports/rebuilds
+// pesados concorram com os primeiros pedidos da app e com o SQL Server local.
+//
+// Para ativar localmente:
+// Hangfire:EnableBggHeavyJobs = true
+//
+// Em QA/Production ficam ativas por defeito.
+var enableBggHeavyJobs =
+    configuration.GetValue<bool?>(
+        "Hangfire:EnableBggHeavyJobs")
+    ?? !isDevelopment;
+
+if (enableBggHeavyJobs)
 {
-    options.WorkerCount =
-        bggCatalogWorkerCount;
+    builder.Services.AddHangfireServer(options =>
+    {
+        options.WorkerCount =
+            bggHeavyWorkerCount;
 
-    options.Queues =
-    [
-        "bgg-catalog"
-    ];
-});
-
-builder.Services.AddScoped<UserCleanupJob>();
-builder.Services.AddScoped<SessionCleanupJob>();
-builder.Services.AddScoped<MatchCleanupJob>();
-builder.Services.AddScoped<BGGSyncJob>();
-builder.Services.AddScoped<BggGameCatalogImportJob>();
+        options.Queues =
+        [
+            "bgg-rebuild",
+            "bgg-catalog"
+        ];
+    });
+}
+else if (isDevelopment)
+{
+    Console.WriteLine(
+        "Hangfire BGG heavy workers desativados em Development.");
+}
 
 // ======================================================
 // CREDENCIAIS DO DASHBOARD DO HANGFIRE
@@ -406,7 +427,7 @@ else if (isProduction)
 // Antes de Production devemos rever a configuração
 // e voltar a ativar o rate limiting.
 //
-// app.UseIpRateLimiting();
+app.UseIpRateLimiting();
 
 // ======================================================
 // AUTENTICAÇÃO E AUTORIZAÇÃO
@@ -561,47 +582,44 @@ app.MapGet(
 // JOBS RECORRENTES
 // ======================================================
 //
-// Estes jobs são registados em TODOS os ambientes:
+// Os recurring jobs são registados em todos os ambientes.
 //
-// Development ✅
-// QA          ✅
-// Production  ✅
+// Nota:
+// BggSearchTokenRebuildJob NÃO é recorrente.
+// O rebuild completo dos tokens deve ser disparado manualmente
+// ou através de uma operação administrativa controlada.
 
-using (var scope = app.Services.CreateScope())
-{
-    var recurringJobManager =
-        scope.ServiceProvider
-            .GetRequiredService<IRecurringJobManager>();
+RecurringJob.AddOrUpdate<UserCleanupJob>(
+    "user-cleanup",
+    job => job.ExecuteAsync(),
+    Cron.Daily());
 
-    recurringJobManager.AddOrUpdate<UserCleanupJob>(
-        "cleanup-unconfirmed-users",
-        job => job.ExecuteAsync(),
-        Cron.Daily);
+RecurringJob.AddOrUpdate<SessionCleanupJob>(
+    "session-cleanup",
+    job => job.ExecuteAsync(
+        CancellationToken.None),
+    Cron.Hourly());
 
-    recurringJobManager.AddOrUpdate<SessionCleanupJob>(
-        "session-cleanup",
-        job => job.ExecuteAsync(
-            CancellationToken.None),
-        Cron.Hourly);
+RecurringJob.AddOrUpdate<MatchCleanupJob>(
+    "match-cleanup",
+    job => job.ExecuteAsync(
+        CancellationToken.None),
+    Cron.Hourly());
 
-    recurringJobManager.AddOrUpdate<MatchCleanupJob>(
-        "match-cleanup",
-        job => job.ExecuteAsync(
-            CancellationToken.None),
-        Cron.Hourly);
+RecurringJob.AddOrUpdate<BGGSyncJob>(
+    "bgg-sync",
+    job => job.ExecuteAsync(
+        CancellationToken.None),
+    Cron.Daily());
 
-    recurringJobManager.AddOrUpdate<BGGSyncJob>(
-        "bgg-sync",
-        job => job.ExecuteAsync(
-            CancellationToken.None),
-        Cron.Daily);
-
-    recurringJobManager.AddOrUpdate<BggGameCatalogImportJob>(
-        "bgg-game-catalog-import",
-        job => job.ExecuteAsync(
-            CancellationToken.None),
-        Cron.Daily);
-}
+// A importação completa do catálogo BGG não é recorrente.
+// Será disparada apenas quando um administrador disponibilizar
+// um novo dump/ficheiro BGG.
+//
+// Remove também uma eventual configuração antiga ainda guardada
+// no storage do Hangfire, para impedir execuções automáticas futuras.
+RecurringJob.RemoveIfExists(
+    "bgg-game-catalog-import");
 
 // ======================================================
 // SEED DA BASE DE DADOS

@@ -1,4 +1,5 @@
-﻿using AspNetCoreRateLimit;
+﻿
+using AspNetCoreRateLimit;
 using FluentValidation;
 using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Infra.Data.Context;
@@ -241,6 +242,8 @@ namespace MeepleBoard.CrossCutting.IoC
             services.AddScoped<BGGSyncJob>();
 
             services.AddScoped<BggGameCatalogImportJob>();
+
+            services.AddScoped<BggSearchTokenRebuildJob>();
 
             return services;
         }
