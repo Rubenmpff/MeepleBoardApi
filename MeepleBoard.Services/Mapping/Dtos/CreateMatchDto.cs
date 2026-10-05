@@ -34,6 +34,9 @@ namespace MeepleBoard.Services.Mapping.Dtos
         [MinLength(1, ErrorMessage = "A partida deve ter pelo menos um jogador.")]
         public List<Guid> PlayerIds { get; init; } = new();
 
+        /// <summary>Pontuações opcionais dos participantes; pedidos antigos podem omitir.</summary>
+        public List<CreateMatchPlayerScoreDto>? PlayerScores { get; init; }
+
         // ── Diário de partida ────────────────────────────────────────────────
 
         /// <summary>
@@ -60,5 +63,11 @@ namespace MeepleBoard.Services.Mapping.Dtos
         /// </summary>
         [MaxLength(500)]
         public string? UnofficialModeJustification { get; init; }
+    }
+
+    public class CreateMatchPlayerScoreDto
+    {
+        public Guid UserId { get; init; }
+        public int? Score { get; init; }
     }
 }

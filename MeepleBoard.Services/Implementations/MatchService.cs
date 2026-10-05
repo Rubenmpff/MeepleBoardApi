@@ -210,6 +210,20 @@ namespace MeepleBoard.Services.Implementations
             if (authenticatedUserId == Guid.Empty)
                 throw new ArgumentException("Utilizador autenticado inválido.");
 
+            // Validate before game lookup/import or any repository write.
+            // Keep legacy PlayerIds normalization; score entries must be unambiguous.
+            var scores = new Dictionary<Guid, int?>();
+            foreach (var entry in dto.PlayerScores ?? new List<CreateMatchPlayerScoreDto>())
+            {
+                if (entry == null || entry.UserId == Guid.Empty ||
+                    dto.PlayerIds == null || !dto.PlayerIds.Contains(entry.UserId))
+                    throw new ArgumentException("A pontuação deve pertencer a um participante indicado em PlayerIds.");
+                if (entry.Score is < 0)
+                    throw new ArgumentException("O modelo atual não aceita pontuações negativas.");
+                if (!scores.TryAdd(entry.UserId, entry.Score))
+                    throw new ArgumentException("Não pode existir mais de uma pontuação para o mesmo participante.");
+            }
+
             var game = await ValidateOrFetchGameAsync(dto.GameId, dto.GameName, cancellationToken);
 
             var playerIds = (dto.PlayerIds ?? new List<Guid>())
@@ -294,6 +308,8 @@ namespace MeepleBoard.Services.Implementations
             foreach (var userId in playerIds)
             {
                 var mp = new MatchPlayer(match.Id, userId);
+                if (scores.TryGetValue(userId, out var playerScore))
+                    mp.UpdateScore(playerScore);
                 if (dto.WinnerId.HasValue && dto.WinnerId.Value == userId)
                     mp.SetWinner(true);
                 await _matchPlayerRepository.AddAsync(mp, cancellationToken);
