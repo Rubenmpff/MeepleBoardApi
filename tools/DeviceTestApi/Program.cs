@@ -119,6 +119,15 @@ public static class DeviceDatabase {
             Set(catalog, "DetailsSyncedAt", DateTime.UtcNow);
             db.GameSearchCatalog.Add(catalog);
         }
+        // Repair search word tokens for fixtures created by earlier test-host versions.
+        // Only the three synthetic catalog IDs are touched; existing tokens are preserved.
+        foreach (var catalog in await db.GameSearchCatalog.Where(g => g.BggId >= 990001 && g.BggId <= 990003).ToListAsync()) {
+            var words = catalog.NormalizedName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            for (short position = 1; position < words.Length; position++) {
+                if (!await db.GameSearchTokens.AnyAsync(t => t.BggId == catalog.BggId && t.Position == position))
+                    db.GameSearchTokens.Add(new GameSearchToken(catalog.BggId, words[position], position));
+            }
+        }
         foreach (var other in accounts.Skip(1)) {
             var author = accounts[0].Id; var a = author.CompareTo(other.Id) < 0 ? author : other.Id; var b = a == author ? other.Id : author;
             if (!await db.Friendships.AnyAsync(f => f.UserAId == a && f.UserBId == b)) db.Friendships.Add(new Friendship { Id = Guid.NewGuid(), UserAId = a, UserBId = b, InitiatorId = author, Status = FriendshipStatus.Accepted });
