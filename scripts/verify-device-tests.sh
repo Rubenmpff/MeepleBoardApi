@@ -14,3 +14,5 @@ for mode in writes dates rule invites; do
   "$root/scripts/start-device-test-api.sh" "--verify-sql=$mode"
 done
 node tools/DeviceTestApi/verify-session-campaign-reading.cjs
+
+node tools/DeviceTestApi/verify-session-match-details.cjs

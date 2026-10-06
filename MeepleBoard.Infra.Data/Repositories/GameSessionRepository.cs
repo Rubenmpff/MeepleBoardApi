@@ -38,8 +38,10 @@ namespace MeepleBoard.Infra.Data.Repositories
                 .Include(s => s.Organizer)
                 .Include(s => s.Players)
                     .ThenInclude(p => p.User)
-                .Include(s => s.Matches).ThenInclude(m => m.MatchPlayers)
-                // se precisares depois: .ThenInclude(m => m.MatchPlayers).ThenInclude(mp => mp.User)
+                .Include(s => s.Matches).ThenInclude(m => m.Game)
+                .Include(s => s.Matches).ThenInclude(m => m.Winner)
+                .Include(s => s.Matches).ThenInclude(m => m.MatchPlayers).ThenInclude(mp => mp.User)
+                .AsSplitQuery()
                 .FirstOrDefaultAsync(s => s.Id == id, ct);
         }
 
