@@ -71,13 +71,13 @@ public static class SqlHttpChecks {
                 await Send(HttpMethod.Delete, detail, id, status);
             });
         }
-        await Check("peer writes denied; creator update persists despite known erroneous 404", async () => {
+        await Check("peer writes denied; creator update returns 204 and persists", async () => {
             var body = new { id = matchId, gameId, gameName = "Meeple Teste Competitivo", players = new[] { new { userId = author, userName = "Teste autor" } }, matchDate = DateTime.UtcNow.AddMinutes(-5), isSoloGame = true, scoreSummary = "Atualizado SQL" };
             await Send(HttpMethod.Put, detail, peer, HttpStatusCode.Forbidden, body); await Send(HttpMethod.Delete, detail, peer, HttpStatusCode.Forbidden);
-            await Send(HttpMethod.Put, detail, author, HttpStatusCode.NotFound, body);
+            await Send(HttpMethod.Put, detail, author, HttpStatusCode.NoContent, body);
             using var scope = services.CreateScope();
             Assert((await scope.ServiceProvider.GetRequiredService<MeepleBoardDbContext>().Matches.AsNoTracking().SingleAsync(m => m.Id == matchId)).ScoreSummary == "Atualizado SQL");
-            Console.WriteLine("KNOWN FUNCTIONAL ISSUE: creator update saves successfully but double SaveChanges returns 404.");
+            await Send(HttpMethod.Get, detail, author, HttpStatusCode.OK);
         });
         await Check("session/campaign membership does not leak matches or notes", async () => {
             foreach (var path in new[] { $"/MeepleBoard/session/{sessionId}", $"/MeepleBoard/campaigns/{campaignId}" }) {
@@ -106,18 +106,19 @@ public static class SqlHttpChecks {
             using var scope = services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<MeepleBoardDbContext>();
             Assert(await db.Games.AnyAsync(g => g.Id == gameId) && await db.Matches.AnyAsync(m => m.Id == matchId) && await db.MatchPlayers.AnyAsync(p => p.MatchId == matchId && p.UserId == peer && p.Score == 0));
         });
-        await Check("own note persists and peer is preserved despite known post-save tracking failure", async () => {
-            await Send(HttpMethod.Put, journal, author, HttpStatusCode.InternalServerError, new { personalRating = 8, notes = (string?)null, tags = "teste" });
+        await Check("own note edit succeeds and peer is preserved", async () => {
+            await Send(HttpMethod.Put, journal, author, HttpStatusCode.OK, new { personalRating = 8, notes = (string?)null, tags = "teste" });
             using var scope = services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<MeepleBoardDbContext>();
             Assert((await db.MatchJournalEntries.SingleAsync(e => e.MatchId == matchId && e.UserId == author)).Notes == null);
             Assert((await db.MatchJournalEntries.SingleAsync(e => e.MatchId == matchId && e.UserId == peer)).Notes == "PRIVATE_SQL_PEER");
-            Console.WriteLine("KNOWN FUNCTIONAL ISSUE: journal edit persists but rating recalculation hits duplicate tracked entry and returns 500.");
+            var response = await Send(HttpMethod.Get, journal, author, HttpStatusCode.OK);
+            Assert(!response.Contains("PRIVATE_SQL_PEER"));
         });
         await Check("creator deletes a separate SQL match", async () => {
             var text = await Send(HttpMethod.Post, "/MeepleBoard/matches", author, HttpStatusCode.Created, new { gameId, gameName = "Meeple Teste Competitivo", matchDate = DateTime.UtcNow.AddMinutes(-1), isSoloGame = true, playerIds = new[] { author } });
             using var json = JsonDocument.Parse(text); var id = json.RootElement.GetProperty("id").GetGuid(); await Send(HttpMethod.Delete, $"/MeepleBoard/matches/{id}", author, HttpStatusCode.NoContent);
             using var scope = services.CreateScope(); Assert(!await scope.ServiceProvider.GetRequiredService<MeepleBoardDbContext>().Matches.AnyAsync(m => m.Id == id));
         });
-        Console.WriteLine($"{passed} real SQL/HTTP scenarios verified; two known functional HTTP failures remain explicitly reproduced. Synthetic data only in MeepleBoard_DeviceTests.");
+        Console.WriteLine($"{passed} real SQL/HTTP scenarios passed. Synthetic data only in MeepleBoard_DeviceTests.");
     }
 }

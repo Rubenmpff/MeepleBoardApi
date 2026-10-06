@@ -337,7 +337,7 @@ namespace MeepleBoard.Services.Implementations
                 var avgRating = await _gameRepository.GetAveragePersonalRatingAsync(match.GameId, ct);
                 var score = avgRating.HasValue ? (int?)Math.Round(avgRating.Value * 10) : null;
                 match.Game.SetMeepleBoardScore(score);
-                await _gameRepository.UpdateAsync(match.Game, ct);
+                await _gameRepository.UpdateMeepleBoardScoreAsync(match.GameId, score, ct);
             }
 
             // ── Notificar outros jogadores da partida ──────────────────────
@@ -370,6 +370,11 @@ namespace MeepleBoard.Services.Implementations
                 }
 
                 // Verifica se todos avaliaram e fecha o diário se sim
+                // The detached match still contains pre-edit diary objects. Replace its
+                // entries with the tracked current ones before checking/closing the diary.
+                foreach (var old in match.JournalEntries.Where(e => e.UserId == userId).ToList())
+                    match.JournalEntries.Remove(old);
+                match.JournalEntries.Add(existing);
                 match.TryAutoCloseIfAllEvaluated();
                 if (match.JournalStatus == MatchJournalStatus.Closed)
                     await _matchRepository.UpdateAsync(match, ct);

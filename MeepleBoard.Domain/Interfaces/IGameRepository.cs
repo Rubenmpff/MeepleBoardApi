@@ -12,6 +12,7 @@ namespace MeepleBoard.Domain.Interfaces
         Task<IReadOnlyList<Game>> GetAllAsync(int pageIndex = 0, int pageSize = 10, CancellationToken cancellationToken = default);
         Task AddAsync(Game game, CancellationToken cancellationToken = default);
         Task UpdateAsync(Game game, CancellationToken cancellationToken = default);
+        Task UpdateMeepleBoardScoreAsync(Guid gameId, int? score, CancellationToken cancellationToken = default);
         Task DeleteAsync(Game game, CancellationToken cancellationToken = default);
         Task<int> CommitAsync(CancellationToken cancellationToken = default);
 

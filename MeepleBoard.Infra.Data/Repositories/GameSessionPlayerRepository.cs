@@ -42,7 +42,8 @@ namespace MeepleBoard.Infra.Data.Repositories
         public async Task<GameSessionPlayer?> GetBySessionAndUserAsync(Guid sessionId, Guid userId)
         {
             return await _context.GameSessionPlayers
-                .AsNoTracking()
+                // This link is also edited by RespondInviteAsync before SaveChanges.
+                .AsTracking()
                 .Include(p => p.User)
                 .FirstOrDefaultAsync(p => p.SessionId == sessionId && p.UserId == userId);
         }

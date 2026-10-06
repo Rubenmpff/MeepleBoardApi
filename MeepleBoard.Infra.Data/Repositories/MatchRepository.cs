@@ -249,10 +249,13 @@ namespace MeepleBoard.Infra.Data.Repositories
         public async Task AddAsync(Match match, CancellationToken cancellationToken = default)
             => await _context.Matches.AddAsync(match, cancellationToken);
 
-        public async Task UpdateAsync(Match match, CancellationToken cancellationToken = default)
+        public Task UpdateAsync(Match match, CancellationToken cancellationToken = default)
         {
-            _context.Matches.Update(match);
-            await SaveChangesAsync(cancellationToken);
+            // Callers update match fields only. Do not attach its read-only related
+            // users, scores and journal objects into an already tracked context.
+            _context.Entry(match).State = EntityState.Modified;
+            // The service/job owns SaveChanges; saving here makes its row count zero.
+            return Task.CompletedTask;
         }
 
         public async Task DeleteAsync(

@@ -272,6 +272,14 @@ namespace MeepleBoard.Infra.Data.Repositories
             await _context.SaveChangesAsync(cancellationToken);
         }
 
+        public async Task UpdateMeepleBoardScoreAsync(Guid gameId, int? score, CancellationToken cancellationToken = default)
+        {
+            // Update only the aggregate: never attach the detached match/journal graph.
+            var affected = await _context.Games.Where(g => g.Id == gameId)
+                .ExecuteUpdateAsync(s => s.SetProperty(g => g.MeepleBoardScore, score), cancellationToken);
+            if (affected == 0) throw new KeyNotFoundException("Jogo não encontrado.");
+        }
+
         public async Task DeleteAsync(Game game, CancellationToken cancellationToken = default)
         {
             _context.Games.Remove(game);
