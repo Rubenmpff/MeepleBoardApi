@@ -71,3 +71,4 @@ Thumbs.db
 # =========================
 MeepleBoardApi/Data/Bgg/*.zip
 MeepleBoardApi/Data/Bgg/*.csv
+/.device-tests/

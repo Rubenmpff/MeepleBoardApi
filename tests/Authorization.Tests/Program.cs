@@ -207,9 +207,10 @@ await Check("prepared creator migration is additive; SQL generated only, no data
     var differences = context.GetService<IMigrationsModelDiffer>().GetDifferences(initialized.GetRelationalModel(), context.GetService<IDesignTimeModel>().Model.GetRelationalModel());
     foreach (var operation in differences) Console.WriteLine("MODEL REVIEW: " + operation.GetType().Name + " " + (operation.GetType().GetProperty("Name")?.GetValue(operation) ?? ""));
     Assert(!differences.Any(operation => Equals(operation.GetType().GetProperty("Name")?.GetValue(operation), "CreatorId")));
-    Assert(differences.All(operation => operation is Microsoft.EntityFrameworkCore.Migrations.Operations.CreateIndexOperation index && index.Name == "IX_GameSearchCatalog_RatingsCount_BggRank_AverageRating_Name_BggId"), "Unexpected model drift beyond the existing catalog index");
+    Assert(differences.Count == 0, "Model and snapshot must match, including the catalog index");
     var ids = context.GetService<IMigrationsAssembly>().Migrations.Keys.Order().ToList();
-    var script = context.GetService<IMigrator>().GenerateScript(ids[^2], ids[^1]);
+    var creator = ids.IndexOf("20261006120000_AddMatchCreator");
+    var script = context.GetService<IMigrator>().GenerateScript(ids[creator - 1], ids[creator]);
     Assert(script.Contains("ADD [CreatorId] uniqueidentifier NULL"));
     Assert(!script.Contains("DELETE FROM [Matches]") && !script.Contains("UPDATE [Matches]"));
     return Task.CompletedTask;
