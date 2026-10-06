@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using MeepleBoard.Application.DTOs;
 using MeepleBoard.Domain.Entities;
 using MeepleBoard.Domain.Interfaces;
@@ -12,17 +12,19 @@ namespace MeepleBoard.Services.Implementations
         private readonly IGameSessionPlayerRepository _sessionPlayerRepository;
         private readonly IUserRepository _userRepository;
         private readonly IMapper _mapper;
+        private readonly IFriendshipRepository _friendships;
 
         public GameSessionService(
             IGameSessionRepository sessionRepository,
             IGameSessionPlayerRepository sessionPlayerRepository,
             IUserRepository userRepository,
-            IMapper mapper)
+            IMapper mapper, IFriendshipRepository friendships)
         {
             _sessionRepository = sessionRepository;
             _sessionPlayerRepository = sessionPlayerRepository;
             _userRepository = userRepository;
             _mapper = mapper;
+            _friendships = friendships;
         }
 
         /* ── Leitura ─────────────────────────────────────────────────────────── */
@@ -68,6 +70,16 @@ namespace MeepleBoard.Services.Implementations
             if (dto == null) throw new ArgumentNullException(nameof(dto));
             if (organizerId == Guid.Empty) throw new ArgumentException("Organizer inválido.");
 
+            var invitees = (dto.PlayerIds ?? new List<Guid>())
+                .Where(id => id != Guid.Empty && id != organizerId).Distinct().ToList();
+            if (invitees.Count == 0)
+                throw new ArgumentException("Seleciona pelo menos um amigo para criar a sessão");
+            // Validate the complete invitation list before tracking any new session or player.
+            foreach (var invitee in invitees)
+                if (!await _friendships.ExistsAcceptedAsync(organizerId, invitee)
+                    || await _userRepository.GetByIdAsync(invitee) == null)
+                    throw new ArgumentException("Só podes convidar amigos disponíveis para criar a sessão.");
+
             var organizer = await _userRepository.GetByIdAsync(organizerId);
             if (organizer == null) throw new KeyNotFoundException("Organizer não encontrado.");
 
@@ -88,26 +100,9 @@ namespace MeepleBoard.Services.Implementations
             var organizerLink = new GameSessionPlayer(session.Id, organizerId, isOrganizer: true);
             await _sessionPlayerRepository.AddAsync(organizerLink);
 
-            // Convites iniciais → Pending
-            if (dto.PlayerIds != null && dto.PlayerIds.Count > 0)
-            {
-                var unique = dto.PlayerIds
-                    .Where(id => id != Guid.Empty && id != organizerId)
-                    .Distinct()
-                    .ToList();
-
-                foreach (var playerId in unique)
-                {
-                    var user = await _userRepository.GetByIdAsync(playerId);
-                    if (user == null) continue;
-
-                    var existing = await _sessionPlayerRepository.GetBySessionAndUserAsync(session.Id, playerId);
-                    if (existing != null) continue;
-
-                    var invite = new GameSessionPlayer(session.Id, playerId, isOrganizer: false);
-                    await _sessionPlayerRepository.AddAsync(invite);
-                }
-            }
+            // Accepted friendship is required; the session invitation itself starts Pending.
+            foreach (var playerId in invitees)
+                await _sessionPlayerRepository.AddAsync(new GameSessionPlayer(session.Id, playerId, isOrganizer: false));
 
             await _sessionRepository.SaveChangesAsync();
 

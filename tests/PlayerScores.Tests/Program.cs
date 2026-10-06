@@ -92,6 +92,70 @@ foreach (var customDeadline in new[] { false, true }) {
 }
 
 
+var ruleOwner = Guid.NewGuid();
+var ruleFriend = Guid.NewGuid();
+(GameSessionService Service, List<GameSession> Sessions, List<GameSessionPlayer> Links) SessionRules(bool acceptedFriend = true) {
+    var sessions = new List<GameSession>();
+    var links = new List<GameSessionPlayer>();
+    var sessionRepo = Stub.Create<IGameSessionRepository>((method, args) => method.Name switch {
+        "AddAsync" => AddSession((GameSession)args![0]!),
+        "SaveChangesAsync" => Task.CompletedTask,
+        "GetByIdWithDetailsAsync" => Task.FromResult<GameSession?>(sessions.Single()),
+        _ => throw new Exception("Unexpected session dependency: " + method.Name)
+    });
+    Task AddSession(GameSession value) { sessions.Add(value); return Task.CompletedTask; }
+    var players = Stub.Create<IGameSessionPlayerRepository>((method, args) => {
+        if (method.Name != "AddAsync") throw new Exception("Unexpected player dependency");
+        var link = (GameSessionPlayer)args![0]!; links.Add(link); sessions.Single().Players.Add(link);
+        return Task.CompletedTask;
+    });
+    var users = Stub.Create<IUserRepository>((method, args) => {
+        if (method.Name != "GetByIdAsync") throw new Exception("Unexpected user dependency");
+        return Task.FromResult<User?>(new User("Test", "test@example.test", "Local") { Id = (Guid)args![0]! });
+    });
+    var friends = Stub.Create<IFriendshipRepository>((method, args) => {
+        if (method.Name != "ExistsAcceptedAsync") throw new Exception("Unexpected friend dependency");
+        return Task.FromResult(acceptedFriend);
+    });
+    var mapper = new MapperConfiguration(c => c.AddProfile<MappingEntityToDto>()).CreateMapper();
+    return (new GameSessionService(sessionRepo, players, users, mapper, friends), sessions, links);
+}
+foreach (var ids in new List<Guid>?[] { null, new(), new() { ruleOwner }, new() { Guid.Empty, ruleOwner } }) {
+    await Check("session without a distinct friend rejected before tracking writes", async () => {
+        var f = SessionRules();
+        try {
+            await f.Service.CreateAsync(new MeepleBoard.Application.DTOs.CreateGameSessionDto { Name = "Test session", PlayerIds = ids! }, ruleOwner);
+            throw new Exception("Expected missing friend rejection");
+        } catch (ArgumentException ex) {
+            Assert(ex.Message == "Seleciona pelo menos um amigo para criar a sessão");
+            Assert(f.Sessions.Count == 0 && f.Links.Count == 0);
+        }
+    });
+}
+await Check("nonfriend session invite rejected before writes", async () => {
+    var f = SessionRules(false);
+    try {
+        await f.Service.CreateAsync(new MeepleBoard.Application.DTOs.CreateGameSessionDto { Name = "Test session", PlayerIds = new() { ruleFriend } }, ruleOwner);
+        throw new Exception("Expected nonfriend rejection");
+    } catch (ArgumentException) { Assert(f.Sessions.Count == 0 && f.Links.Count == 0); }
+});
+await Check("friendship allows creation with pending invitation and deduplicates without counting organizer", async () => {
+    var f = SessionRules();
+    var dto = await f.Service.CreateAsync(new MeepleBoard.Application.DTOs.CreateGameSessionDto {
+        Name = "Test session", ScheduledStartDate = DateTime.UtcNow.AddDays(1), PlayerIds = new() { ruleOwner, ruleFriend, ruleFriend }
+    }, ruleOwner);
+    Assert(f.Sessions.Count == 1 && f.Links.Count == 2);
+    Assert(dto.Players.Single(p => p.UserId == ruleFriend).Status == MeepleBoard.Domain.Enums.GameSessionInviteStatus.Pending);
+    Assert(dto.Players.Single(p => p.UserId == ruleOwner).IsOrganizer);
+});
+await Check("existing organizer-only session remains readable", async () => {
+    var f = SessionRules();
+    f.Sessions.Add(new GameSession("Legacy session", ruleOwner));
+    var dto = await f.Service.GetByIdAsync(f.Sessions.Single().Id, ruleOwner);
+    Assert(dto != null && dto.Name == "Legacy session");
+});
+
+
 Console.WriteLine($"{passed} focused service/contract tests passed.");
 
 class Fixture {
