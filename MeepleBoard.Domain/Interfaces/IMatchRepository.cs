@@ -7,6 +7,7 @@ namespace MeepleBoard.Domain.Interfaces
         Task<bool> ExistsAsync(Guid id, CancellationToken cancellationToken = default);
         ValueTask<Match?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
         Task<IReadOnlyList<Match>> GetAllAsync(int pageIndex = 0, int pageSize = 10, CancellationToken cancellationToken = default);
+        Task<IReadOnlyList<Match>> GetPageForUserAsync(Guid userId, int pageIndex, int pageSize, CancellationToken cancellationToken = default);
         Task<IReadOnlyList<Match>> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default);
         Task<IReadOnlyList<Match>> GetByGameIdAsync(Guid gameId, CancellationToken cancellationToken = default);
         Task<IReadOnlyList<Match>> GetMatchesByPeriodAsync(DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default);

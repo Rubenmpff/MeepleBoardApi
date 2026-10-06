@@ -9,6 +9,7 @@ namespace MeepleBoardApi.Controllers
 {
     [Route("MeepleBoard/matches")]
     [ApiController]
+    [Authorize]
     public class MatchController : ControllerBase
     {
         private readonly IMatchService _matchService;
@@ -25,7 +26,7 @@ namespace MeepleBoardApi.Controllers
             if (pageIndex < 0 || pageSize <= 0)
                 return BadRequest("Os parâmetros de paginação devem ser positivos.");
 
-            var matches = await _matchService.GetAllAsync(pageIndex, pageSize, cancellationToken);
+            var matches = await _matchService.GetAllAsync(User.GetUserId(), pageIndex, pageSize, cancellationToken);
             if (matches == null || !matches.Any()) return NoContent();
             return Ok(matches);
         }
@@ -34,9 +35,13 @@ namespace MeepleBoardApi.Controllers
         public async Task<ActionResult<MatchDto>> GetById(Guid id, CancellationToken cancellationToken)
         {
             if (id == Guid.Empty) return BadRequest("O ID da partida não pode ser vazio.");
-            var match = await _matchService.GetByIdAsync(id, cancellationToken);
-            if (match == null) return NotFound("Partida não encontrada.");
-            return Ok(match);
+            try
+            {
+                var match = await _matchService.GetByIdAsync(id, User.GetUserId(), cancellationToken);
+                if (match == null) return NotFound("Partida não encontrada.");
+                return Ok(match);
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
         }
 
         [HttpGet("last")]
@@ -160,12 +165,16 @@ namespace MeepleBoardApi.Controllers
             if (id != matchDto.Id) return BadRequest("O ID na URL não corresponde ao ID do corpo.");
             if (!ModelState.IsValid) return BadRequest(ModelState);
 
-            var existingMatch = await _matchService.GetByIdAsync(id, cancellationToken);
-            if (existingMatch == null) return NotFound("Partida não encontrada.");
+            try
+            {
+                var existingMatch = await _matchService.GetByIdAsync(id, User.GetUserId(), cancellationToken);
+                if (existingMatch == null) return NotFound("Partida não encontrada.");
 
-            var rowsAffected = await _matchService.UpdateAsync(matchDto, cancellationToken);
-            if (rowsAffected == 0) return NotFound("Nenhuma partida foi atualizada.");
-            return NoContent();
+                var rowsAffected = await _matchService.UpdateAsync(matchDto, User.GetUserId(), cancellationToken);
+                if (rowsAffected == 0) return NotFound("Nenhuma partida foi atualizada.");
+                return NoContent();
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
         }
 
         [HttpDelete("{id:guid}")]
@@ -173,9 +182,13 @@ namespace MeepleBoardApi.Controllers
         public async Task<ActionResult> Delete(Guid id, CancellationToken cancellationToken)
         {
             if (id == Guid.Empty) return BadRequest("O ID da partida não pode ser vazio.");
-            var success = await _matchService.DeleteAsync(id, cancellationToken);
-            if (!success) return NotFound("Partida não encontrada.");
-            return NoContent();
+            try
+            {
+                var success = await _matchService.DeleteAsync(id, User.GetUserId(), cancellationToken);
+                if (!success) return NotFound("Partida não encontrada.");
+                return NoContent();
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
         }
     }
 }

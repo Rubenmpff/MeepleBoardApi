@@ -25,7 +25,7 @@ namespace MeepleBoardApi.Services.Mapping.AutoMapper
                 .ForMember(d => d.Players, o => o.MapFrom(s => s.MatchPlayers))
                 // ── Diário de partida ────────────────────────────────────────
                 .ForMember(d => d.PersonalRating, o => o.MapFrom(s => s.PersonalRating))
-                .ForMember(d => d.Notes, o => o.MapFrom(s => s.Notes))
+                .ForMember(d => d.Notes, o => o.Ignore())
                 .ForMember(d => d.Tags, o => o.MapFrom(s => s.Tags))
                 // ── Estado do diário ─────────────────────────────────────────
                 .ForMember(d => d.JournalStatus, o => o.MapFrom(s => s.JournalStatus.ToString()))

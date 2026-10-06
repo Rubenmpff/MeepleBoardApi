@@ -28,7 +28,7 @@ await Check("zero and positive scores reach entities and the read DTO", async ()
     Assert(f.Saved == 1);
     Assert(f.Match!.MatchPlayers.Single(p => p.UserId == f.UserId).Score == 0);
     Assert(response.Players.Single(p => p.UserId == other).Score == 42);
-    var read = await f.Service.GetByIdAsync(f.Match.Id);
+    var read = await f.Service.GetByIdAsync(f.Match.Id, f.UserId);
     Assert(read!.Players.Single(p => p.UserId == f.UserId).Score == 0);
 });
 await Check("empty score list and explicit null preserve optional scores", async () => {

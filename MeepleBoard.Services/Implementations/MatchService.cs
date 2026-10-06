@@ -50,10 +50,11 @@ namespace MeepleBoard.Services.Implementations
         /* ── Leitura ─────────────────────────────────────────────────────────── */
 
         public async Task<IEnumerable<MatchDto>> GetAllAsync(
-            int pageIndex = 0, int pageSize = 10,
+            Guid viewerId, int pageIndex = 0, int pageSize = 10,
             CancellationToken cancellationToken = default)
         {
-            var matches = await _matchRepository.GetAllAsync(pageIndex, pageSize, cancellationToken);
+            if (viewerId == Guid.Empty) throw new UnauthorizedAccessException();
+            var matches = await _matchRepository.GetPageForUserAsync(viewerId, pageIndex, pageSize, cancellationToken);
             return _mapper.Map<IEnumerable<MatchDto>>(matches);
         }
 
@@ -110,10 +111,12 @@ namespace MeepleBoard.Services.Implementations
         }
 
         public async Task<MatchDto?> GetByIdAsync(
-            Guid id, CancellationToken cancellationToken = default)
+            Guid id, Guid viewerId, CancellationToken cancellationToken = default)
         {
             var match = await _matchRepository.GetByIdAsync(id, cancellationToken);
-            return match is null ? null : _mapper.Map<MatchDto>(match);
+            if (match == null) return null;
+            RequireParticipant(match, viewerId);
+            return _mapper.Map<MatchDto>(match);
         }
 
         public async Task<IEnumerable<MatchDto>> GetByUserIdAsync(
@@ -139,7 +142,13 @@ namespace MeepleBoard.Services.Implementations
             if (gameId == Guid.Empty) throw new ArgumentException("ID do jogo inválido.");
             if (userId == Guid.Empty) throw new ArgumentException("ID do utilizador inválido.");
             var matches = await _matchRepository.GetMatchHistoryByGameForUserAsync(gameId, userId, cancellationToken);
-            return _mapper.Map<IEnumerable<MatchDto>>(matches);
+            var result = _mapper.Map<List<MatchDto>>(matches);
+            foreach (var item in result)
+            {
+                var ownEntry = await _campaignRepository.GetJournalEntryAsync(item.Id, userId, cancellationToken);
+                item.PersonalNotes = ownEntry?.Notes;
+            }
+            return result;
         }
 
         // ✅ Usa projecção directa — só busca ratings na BD, calcula média no serviço
@@ -172,8 +181,7 @@ namespace MeepleBoard.Services.Implementations
             var match = await _matchRepository.GetByIdAsync(matchId, cancellationToken);
             if (match == null) throw new KeyNotFoundException("Partida não encontrada.");
 
-            if (!match.MatchPlayers.Any(p => p.UserId == userId))
-                throw new UnauthorizedAccessException("Não és jogador desta partida.");
+            RequireCreator(match, userId);
 
             match.CloseJournal();
             await _matchRepository.UpdateAsync(match, cancellationToken);
@@ -289,6 +297,7 @@ namespace MeepleBoard.Services.Implementations
             }
 
             var match = new Match(game.Id, dto.MatchDate, dto.GameSessionId);
+            match.SetCreator(authenticatedUserId);
             match.UpdateMatchDetails(dto.Location, dto.ScoreSummary, dto.DurationInMinutes);
             match.SetSoloGame(dto.IsSoloGame);
 
@@ -298,7 +307,7 @@ namespace MeepleBoard.Services.Implementations
             if (dto.PersonalRating.HasValue ||
                 !string.IsNullOrWhiteSpace(dto.Notes) ||
                 !string.IsNullOrWhiteSpace(dto.Tags))
-                match.SetJournalData(dto.PersonalRating, dto.Notes, dto.Tags);
+                match.SetJournalData(dto.PersonalRating, null, dto.Tags);
 
             if (!string.IsNullOrWhiteSpace(dto.UnofficialModeJustification))
                 match.SetOfficialMode(false, dto.UnofficialModeJustification);
@@ -318,7 +327,8 @@ namespace MeepleBoard.Services.Implementations
             await _matchRepository.SaveChangesAsync(cancellationToken);
 
             // ── Espelhar a avaliação do criador para o diário (MatchJournalEntry) ──
-            // Match.PersonalRating/Notes/Tags (SetJournalData acima) é só uma cópia
+            // Match.PersonalRating/Tags remain legacy convenience copies; personal notes are never copied.
+            // The previous Match.PersonalRating/Notes/Tags convenience copy
             // de conveniência no próprio registo da partida. A fonte de verdade para
             // "o que os outros jogadores acharam" e para o MeepleBoardScore do jogo
             // é sempre o MatchJournalEntry — sem isto, a avaliação dada aqui no
@@ -382,10 +392,11 @@ namespace MeepleBoard.Services.Implementations
         }
 
         public async Task<int> UpdateAsync(
-            MatchDto matchDto, CancellationToken cancellationToken = default)
+            MatchDto matchDto, Guid userId, CancellationToken cancellationToken = default)
         {
             var match = await _matchRepository.GetByIdAsync(matchDto.Id, cancellationToken);
             if (match == null) throw new KeyNotFoundException("Partida não encontrada.");
+            RequireCreator(match, userId);
             match.SetGameId(matchDto.GameId);
             match.SetMatchDate(matchDto.MatchDate);
             match.UpdateMatchDetails(matchDto.Location, matchDto.ScoreSummary, matchDto.DurationInMinutes);
@@ -396,13 +407,26 @@ namespace MeepleBoard.Services.Implementations
         }
 
         public async Task<bool> DeleteAsync(
-            Guid id, CancellationToken cancellationToken = default)
+            Guid id, Guid userId, CancellationToken cancellationToken = default)
         {
             var match = await _matchRepository.GetByIdAsync(id, cancellationToken);
             if (match == null) return false;
+            RequireCreator(match, userId);
             await _matchRepository.DeleteAsync(id, cancellationToken: cancellationToken);
             await _matchRepository.SaveChangesAsync(cancellationToken);
             return true;
+        }
+
+        public static void RequireParticipant(Match match, Guid viewerId)
+        {
+            if (viewerId == Guid.Empty || !match.MatchPlayers.Any(p => p.UserId == viewerId))
+                throw new UnauthorizedAccessException("Não participaste nesta partida.");
+        }
+
+        public static void RequireCreator(Match match, Guid userId)
+        {
+            if (userId == Guid.Empty || match.CreatorId != userId)
+                throw new UnauthorizedAccessException("Só o criador pode alterar ou eliminar a partida; autoria desconhecida nas partidas antigas.");
         }
 
         /* ── Helpers privados ───────────────────────────────────────────────── */

@@ -232,7 +232,7 @@ namespace MeepleBoardApi.Controllers
 
         /// <summary>
         /// Cria ou atualiza a entrada de diário do utilizador autenticado para uma partida.
-        /// Qualquer membro da campanha pode escrever a sua perspetiva.
+        /// Só participantes da partida podem escrever a sua própria contribuição.
         /// </summary>
         [HttpPut("matches/{matchId:guid}/journal")]
         public async Task<ActionResult<JournalEntryDto>> UpsertJournalEntry(
@@ -255,8 +255,13 @@ namespace MeepleBoardApi.Controllers
         public async Task<ActionResult<IEnumerable<JournalEntryDto>>> GetJournalEntries(
             Guid matchId, CancellationToken ct)
         {
-            var entries = await _campaignService.GetJournalEntriesAsync(matchId, ct);
-            return Ok(entries);
+            try
+            {
+                var entries = await _campaignService.GetJournalEntriesAsync(matchId, User.GetUserId(), ct);
+                return Ok(entries);
+            }
+            catch (KeyNotFoundException) { return NotFound(); }
+            catch (UnauthorizedAccessException) { return Forbid(); }
         }
 
         /// <summary>

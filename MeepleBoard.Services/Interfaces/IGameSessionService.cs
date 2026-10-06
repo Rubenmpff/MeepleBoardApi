@@ -4,8 +4,8 @@ namespace MeepleBoard.Services.Interfaces
 {
     public interface IGameSessionService
     {
-        Task<IEnumerable<GameSessionDto>> GetAllAsync(bool includeRelations = false);
-        Task<GameSessionDto?> GetByIdAsync(Guid id, bool includeRelations = true);
+        Task<IEnumerable<GameSessionDto>> GetAllAsync(Guid userId, bool includeRelations = false);
+        Task<GameSessionDto?> GetByIdAsync(Guid id, Guid userId, bool includeRelations = true);
         Task<IEnumerable<GameSessionDto>> GetMineAsync(Guid userId);
         Task<GameSessionDto> CreateAsync(CreateGameSessionDto dto, Guid organizerId);
 

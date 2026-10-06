@@ -51,6 +51,15 @@ namespace MeepleBoard.Domain.Entities
         [Key]
         public Guid Id { get; private set; }
 
+        /// <summary>Authenticated creator of new matches; unknown for legacy matches.</summary>
+        public Guid? CreatorId { get; private set; }
+
+        public void SetCreator(Guid userId)
+        {
+            if (userId == Guid.Empty || CreatorId.HasValue) throw new InvalidOperationException("Invalid or already assigned creator.");
+            CreatorId = userId;
+        }
+
         [Required]
         public DateTime MatchDate { get; private set; }
 

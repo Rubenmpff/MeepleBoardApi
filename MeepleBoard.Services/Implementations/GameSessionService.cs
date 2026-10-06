@@ -27,10 +27,9 @@ namespace MeepleBoard.Services.Implementations
 
         /* ── Leitura ─────────────────────────────────────────────────────────── */
 
-        public async Task<IEnumerable<GameSessionDto>> GetAllAsync(bool includeRelations = false)
+        public async Task<IEnumerable<GameSessionDto>> GetAllAsync(Guid userId, bool includeRelations = false)
         {
-            var sessions = await _sessionRepository.GetListAsync();
-            return _mapper.Map<IEnumerable<GameSessionDto>>(sessions);
+            return await GetMineAsync(userId);
         }
 
         public async Task<IEnumerable<GameSessionDto>> GetMineAsync(Guid userId)
@@ -49,13 +48,17 @@ namespace MeepleBoard.Services.Implementations
             return _mapper.Map<IEnumerable<GameSessionDto>>(mine);
         }
 
-        public async Task<GameSessionDto?> GetByIdAsync(Guid id, bool includeRelations = true)
+        public async Task<GameSessionDto?> GetByIdAsync(Guid id, Guid userId, bool includeRelations = true)
         {
             if (id == Guid.Empty)
                 throw new ArgumentException("ID da sessão inválido.");
 
             var session = await _sessionRepository.GetByIdWithDetailsAsync(id);
-            return session is null ? null : _mapper.Map<GameSessionDto>(session);
+            if (session == null) return null;
+            if (session.OrganizerId != userId && !session.Players.Any(p => p.UserId == userId)) throw new UnauthorizedAccessException("Não pertences a esta sessão.");
+            var dto = _mapper.Map<GameSessionDto>(session);
+            dto.Matches = session.Matches.Where(m => m.MatchPlayers.Any(p => p.UserId == userId)).Select(m => _mapper.Map<MeepleBoard.Services.DTOs.MatchDto>(m)).ToList();
+            return dto;
         }
 
         /* ── Criação ─────────────────────────────────────────────────────────── */

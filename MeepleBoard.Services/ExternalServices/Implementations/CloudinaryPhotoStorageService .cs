@@ -70,6 +70,7 @@ namespace MeepleBoard.Services.ExternalServices.Implementations
             {
                 File = new FileDescription(fileName, fileStream),
                 Folder = Folder,
+                Type = "authenticated",
                 // Comprime e limita o tamanho — evita fotos gigantes da câmara do telemóvel
                 Transformation = new Transformation()
                     .Width(1600).Height(1600).Crop("limit")
@@ -94,6 +95,23 @@ namespace MeepleBoard.Services.ExternalServices.Implementations
             return url;
         }
 
+        public async Task<(byte[] Content, string ContentType)> ReadProtectedAsync(string photoUrl, CancellationToken ct = default)
+        {
+            if (!MeepleBoard.Services.Implementations.JournalPhotoReference.IsProtected(photoUrl))
+                throw new UnauthorizedAccessException("Legacy public photos are quarantined pending storage remediation.");
+            var publicId = ExtractPublicId(photoUrl) ?? throw new ArgumentException("Invalid photo reference.");
+            // Signed provider URL is used server-side only, never returned to a client.
+            var signedUrl = _cloudinaryLazy.Value.Api.UrlImgUp.Secure(true).Type("authenticated").Signed(true).BuildUrl(publicId + ".jpg");
+            using var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
+            using var response = await client.GetAsync(signedUrl, HttpCompletionOption.ResponseHeadersRead, ct);
+            response.EnsureSuccessStatusCode();
+            var type = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
+            if (!type.StartsWith("image/", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Invalid image content type.");
+            var content = await response.Content.ReadAsByteArrayAsync(ct);
+            if (content.Length > 8 * 1024 * 1024) throw new InvalidOperationException("Image exceeds limit.");
+            return (content, type);
+        }
+
         public async Task DeleteAsync(string photoUrl, CancellationToken ct = default)
         {
             var publicId = ExtractPublicId(photoUrl);
@@ -103,7 +121,7 @@ namespace MeepleBoard.Services.ExternalServices.Implementations
                 return;
             }
 
-            var deleteParams = new DeletionParams(publicId);
+            var deleteParams = new DeletionParams(publicId) { Type = photoUrl.Contains("/image/authenticated/") ? "authenticated" : "upload", Invalidate = true };
             var result = await _cloudinaryLazy.Value.DestroyAsync(deleteParams);
 
             if (result.Result != "ok" && result.Result != "not found")
@@ -122,12 +140,12 @@ namespace MeepleBoard.Services.ExternalServices.Implementations
                 var uri = new Uri(url);
                 var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
-                var uploadIndex = Array.IndexOf(segments, "upload");
+                var uploadIndex = Array.FindIndex(segments, s => s == "upload" || s == "authenticated");
                 if (uploadIndex < 0 || uploadIndex == segments.Length - 1) return null;
 
                 var rest = segments.Skip(uploadIndex + 1)
                     // salta o segmento de versão "v1234567", se existir
-                    .SkipWhile(s => s.Length > 1 && s[0] == 'v' && s[1..].All(char.IsDigit))
+                    .SkipWhile(s => s.StartsWith("s--", StringComparison.Ordinal) || (s.Length > 1 && s[0] == 'v' && s[1..].All(char.IsDigit)))
                     .ToArray();
 
                 if (rest.Length == 0) return null;

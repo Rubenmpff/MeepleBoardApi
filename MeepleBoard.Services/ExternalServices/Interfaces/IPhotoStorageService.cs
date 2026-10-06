@@ -7,7 +7,7 @@
     public interface IPhotoStorageService
     {
         /// <summary>
-        /// Envia uma imagem para o armazenamento e devolve o URL público (HTTPS).
+        /// Envia uma imagem para armazenamento autenticado e devolve uma referência interna HTTPS, nunca um URL público para o cliente.
         /// </summary>
         Task<string> UploadAsync(Stream fileStream, string fileName, CancellationToken ct = default);
 
@@ -17,5 +17,7 @@
         /// deve tratar erros aqui como não-críticos (a imagem fica órfã no storage).
         /// </summary>
         Task DeleteAsync(string photoUrl, CancellationToken ct = default);
+
+        Task<(byte[] Content, string ContentType)> ReadProtectedAsync(string photoUrl, CancellationToken ct = default);
     }
 }

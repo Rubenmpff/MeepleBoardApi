@@ -68,7 +68,7 @@ namespace MeepleBoard.Services.Implementations
             if (!isMember)
                 throw new UnauthorizedAccessException("Não tens acesso a esta campanha.");
 
-            return MapToDtoWithDetails(campaign);
+            return MapToDtoWithDetails(campaign, userId);
         }
 
         public async Task<CampaignDto> CreateAsync(
@@ -94,7 +94,7 @@ namespace MeepleBoard.Services.Implementations
                 "✅ Campanha criada: {Name} (Id: {Id}) por {UserId}", campaign.Name, campaign.Id, userId);
 
             var created = await _campaignRepository.GetByIdWithDetailsAsync(campaign.Id, ct);
-            return MapToDtoWithDetails(created!);
+            return MapToDtoWithDetails(created!, userId);
         }
 
         public async Task UpdateAsync(
@@ -280,6 +280,7 @@ namespace MeepleBoard.Services.Implementations
             if (existing != null)
                 throw new InvalidOperationException("Esta partida já está associada a esta campanha.");
 
+            MatchService.RequireParticipant(match, userId);
             var campaignMatch = new CampaignMatch(campaignId, dto.MatchId, dto.SessionNumber, dto.SessionTitle);
             await _campaignRepository.AddCampaignMatchAsync(campaignMatch, ct);
             await _campaignRepository.SaveChangesAsync(ct);
@@ -376,14 +377,16 @@ namespace MeepleBoard.Services.Implementations
                 await _matchRepository.SaveChangesAsync(ct);
             }
 
-            return MapJournalEntryToDto(existing);
+            return MapJournalEntryToDto(existing, userId);
         }
 
         public async Task<IEnumerable<JournalEntryDto>> GetJournalEntriesAsync(
-            Guid matchId, CancellationToken ct = default)
+            Guid matchId, Guid userId, CancellationToken ct = default)
         {
+            var match = await _matchRepository.GetByIdAsync(matchId, ct) ?? throw new KeyNotFoundException("Partida não encontrada.");
+            MatchService.RequireParticipant(match, userId);
             var entries = await _campaignRepository.GetJournalEntriesForMatchAsync(matchId, ct);
-            return entries.Select(MapJournalEntryToDto);
+            return entries.Select(e => MapJournalEntryToDto(e, userId));
         }
 
         public async Task<JournalEntryDto> AddJournalPhotoAsync(
@@ -408,6 +411,7 @@ namespace MeepleBoard.Services.Implementations
 
             // Upload primeiro — só grava a entrada se a foto for enviada com sucesso
             var url = await _photoStorageService.UploadAsync(fileStream, fileName, ct);
+            if (!JournalPhotoReference.IsProtected(url)) throw new InvalidOperationException("O armazenamento não devolveu uma fotografia protegida.");
             entry.AddPhotoUrl(url);
 
             if (isNew)
@@ -417,7 +421,7 @@ namespace MeepleBoard.Services.Implementations
 
             await _campaignRepository.SaveChangesAsync(ct);
 
-            return MapJournalEntryToDto(entry);
+            return MapJournalEntryToDto(entry, userId);
         }
 
         public async Task<JournalEntryDto> RemoveJournalPhotoAsync(
@@ -430,6 +434,11 @@ namespace MeepleBoard.Services.Implementations
             if (entry == null)
                 throw new KeyNotFoundException("Ainda não tens uma entrada de diário nesta partida.");
 
+            var match = await _matchRepository.GetByIdAsync(matchId, ct) ?? throw new KeyNotFoundException("Partida não encontrada.");
+            MatchService.RequireParticipant(match, userId);
+            var storedUrl = entry.PhotoUrls.FirstOrDefault(url => url == photoUrl || JournalPhotoReference.Path(matchId, entry.Id, url) == photoUrl);
+            if (storedUrl == null) throw new UnauthorizedAccessException("Esta fotografia não pertence à tua entrada.");
+            photoUrl = storedUrl;
             entry.RemovePhotoUrl(photoUrl);
             await _campaignRepository.UpdateJournalEntryAsync(entry, ct);
             await _campaignRepository.SaveChangesAsync(ct);
@@ -445,7 +454,7 @@ namespace MeepleBoard.Services.Implementations
                 _logger.LogWarning(ex, "Falha ao apagar foto {PhotoUrl} do storage.", photoUrl);
             }
 
-            return MapJournalEntryToDto(entry);
+            return MapJournalEntryToDto(entry, userId);
         }
 
         /* ── Helpers de mapeamento ────────────────────────────────────────── */
@@ -467,7 +476,7 @@ namespace MeepleBoard.Services.Implementations
             CompletedAt = c.CompletedAt,
         };
 
-        private static CampaignDto MapToDtoWithDetails(Campaign c)
+        private static CampaignDto MapToDtoWithDetails(Campaign c, Guid viewerId)
         {
             var dto = MapToDto(c);
 
@@ -485,6 +494,7 @@ namespace MeepleBoard.Services.Implementations
             {
                 Id = cm.Id,
                 MatchId = cm.MatchId,
+                CanReadJournal = cm.Match?.MatchPlayers.Any(p => p.UserId == viewerId) ?? false,
                 GameName = cm.Match?.Game?.Name,
                 MatchDate = cm.Match?.MatchDate ?? DateTime.MinValue,
                 SessionNumber = cm.SessionNumber,
@@ -524,15 +534,16 @@ namespace MeepleBoard.Services.Implementations
             return dto;
         }
 
-        private static JournalEntryDto MapJournalEntryToDto(MatchJournalEntry e) => new()
+        private static JournalEntryDto MapJournalEntryToDto(MatchJournalEntry e, Guid viewerId) => new()
         {
             Id = e.Id,
             UserId = e.UserId,
             UserName = e.User?.UserName ?? "Desconhecido",
             PersonalRating = e.PersonalRating,
-            Notes = e.Notes,
+            Notes = e.UserId == viewerId ? e.Notes : null,
             Tags = e.Tags,
-            PhotoUrls = e.PhotoUrls,
+            UnavailablePhotoCount = e.PhotoUrls.Count(url => !JournalPhotoReference.IsProtected(url)),
+            PhotoUrls = e.PhotoUrls.Where(JournalPhotoReference.IsProtected).Select(url => JournalPhotoReference.Path(e.MatchId, e.Id, url)).ToList(),
             CreatedAt = e.CreatedAt,
             UpdatedAt = e.UpdatedAt,
         };

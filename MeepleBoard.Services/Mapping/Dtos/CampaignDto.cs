@@ -66,6 +66,7 @@ namespace MeepleBoard.Services.DTOs.Campaign
     {
         public Guid Id { get; set; }
         public Guid MatchId { get; set; }
+        public bool CanReadJournal { get; set; }
         public string? GameName { get; set; }
         public DateTime MatchDate { get; set; }
         public int? SessionNumber { get; set; }

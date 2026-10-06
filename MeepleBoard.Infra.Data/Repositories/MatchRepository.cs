@@ -158,6 +158,18 @@ namespace MeepleBoard.Infra.Data.Repositories
                 .ToListAsync(cancellationToken);
         }
 
+        public async Task<IReadOnlyList<Match>> GetPageForUserAsync(Guid userId, int pageIndex, int pageSize, CancellationToken cancellationToken = default)
+        {
+            return await _context.Matches
+                .Where(m => m.MatchPlayers.Any(p => p.UserId == userId))
+                .Include(m => m.Game)
+                .Include(m => m.MatchPlayers).ThenInclude(p => p.User)
+                .AsSplitQuery().AsNoTrackingWithIdentityResolution()
+                .OrderByDescending(m => m.MatchDate)
+                .Skip(pageIndex * pageSize).Take(pageSize)
+                .ToListAsync(cancellationToken);
+        }
+
         public async Task<IReadOnlyList<Match>> GetByUserIdAsync(
             Guid userId, CancellationToken cancellationToken = default)
         {

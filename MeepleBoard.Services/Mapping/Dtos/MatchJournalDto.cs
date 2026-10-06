@@ -16,9 +16,11 @@ namespace MeepleBoard.Services.DTOs.MatchJournal
         public Guid UserId { get; set; }
         public string UserName { get; set; } = string.Empty;
         public int? PersonalRating { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? Notes { get; set; }
         public string? Tags { get; set; }
         public List<string> PhotoUrls { get; set; } = new();
+        public int UnavailablePhotoCount { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
     }

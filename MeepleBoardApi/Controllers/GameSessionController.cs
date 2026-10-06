@@ -65,7 +65,7 @@ namespace MeepleBoardApi.Controllers
         [ProducesResponseType(typeof(IEnumerable<GameSessionDto>), 200)]
         public async Task<IActionResult> GetAll()
         {
-            var sessions = await _sessionService.GetAllAsync();
+            var sessions = await _sessionService.GetAllAsync(GetAuthUserId());
             return Ok(sessions);
         }
 
@@ -77,11 +77,13 @@ namespace MeepleBoardApi.Controllers
         [ProducesResponseType(404)]
         public async Task<IActionResult> GetById(Guid id)
         {
-            var session = await _sessionService.GetByIdAsync(id);
-            if (session == null)
-                return NotFound(new { message = "Sessão não encontrada." });
-
-            return Ok(session);
+            try
+            {
+                var session = await _sessionService.GetByIdAsync(id, GetAuthUserId());
+                if (session == null) return NotFound();
+                return Ok(session);
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
         }
 
         /// <summary>

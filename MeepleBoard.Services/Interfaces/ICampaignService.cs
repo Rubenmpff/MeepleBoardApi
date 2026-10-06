@@ -27,7 +27,7 @@ namespace MeepleBoard.Services.Interfaces
 
         // ── Diário ─────────────────────────────────────────────────────────────
         Task<JournalEntryDto> UpsertJournalEntryAsync(Guid matchId, UpsertJournalEntryDto dto, Guid userId, CancellationToken ct = default);
-        Task<IEnumerable<JournalEntryDto>> GetJournalEntriesAsync(Guid matchId, CancellationToken ct = default);
+        Task<IEnumerable<JournalEntryDto>> GetJournalEntriesAsync(Guid matchId, Guid userId, CancellationToken ct = default);
 
         /// <summary>Adiciona uma foto à entrada de diário do utilizador para esta partida (cria a entrada se ainda não existir).</summary>
         Task<JournalEntryDto> AddJournalPhotoAsync(Guid matchId, Guid userId, Stream fileStream, string fileName, CancellationToken ct = default);

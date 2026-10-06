@@ -5,6 +5,7 @@ namespace MeepleBoard.Services.DTOs
     public class MatchDto
     {
         public Guid Id { get; init; } = Guid.NewGuid();
+        public Guid? CreatorId { get; init; }
 
         [Required(ErrorMessage = "A data da partida é obrigatória.")]
         [DataType(DataType.DateTime)]
@@ -49,7 +50,11 @@ namespace MeepleBoard.Services.DTOs
         public double? PersonalRating { get; init; }
 
         [MaxLength(2000)]
+        [System.Text.Json.Serialization.JsonIgnore]
         public string? Notes { get; init; }
+
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? PersonalNotes { get; set; }
 
         [MaxLength(500)]
         public string? Tags { get; init; }
