@@ -21,3 +21,5 @@ Aplicada **apenas a MeepleBoard_DeviceTests**, contentor `meepleboard-device-tes
 - RESULT01 continua pendente. O contrato ainda só distingue `IsSoloGame`, sem modo cooperativo/empate explícito; a contagem mínima aplica-se a pedidos não Solo. Não mudaram interpretação de resultados, escolha manual do vencedor nem leitura de registos antigos.
 
 Ver [formulário e percurso no iPhone](../../MeepleBoardApp/docs/formulario-registo-partidas.md). API 5099 e Expo 8082 continuam exclusivos de testes; reiniciar a API exige novo login.
+
+Continuação: o utilizador reconheceu melhoria do formulário. Avaliação zero foi novamente gravada/relida em DeviceTests; estrelas douradas e rótulo de zero corrigidos no frontend. Discussão das regras seguintes em [proposta de resultados e estatísticas](proposta-resultados-estatisticas.md), ainda sem implementação.
