@@ -26,7 +26,10 @@ var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../
 var dataPath = args.FirstOrDefault(a => a.StartsWith("--data="))?[7..] ?? Path.Combine(repository, ".device-tests");
 dataPath = Path.GetFullPath(dataPath);
 Directory.CreateDirectory(dataPath);
-const string connection = "Server=(localdb)\\MeepleBoardDeviceTests;Database=MeepleBoard_DeviceTests;Integrated Security=True;TrustServerCertificate=True";
+var connection = DeviceTestSql.Resolve(args.Contains("--audit-only"));
+if (args.Contains("--sql-probe")) { await DeviceTestSql.Probe(connection); return; }
+var sqlCheck = args.FirstOrDefault(a => a.StartsWith("--verify-sql="));
+if (sqlCheck != null) { await DeviceSqlChecks.Run(connection, dataPath, sqlCheck[13..]); return; }
 var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> {
     ["ConnectionStrings:DefaultConnection"] = connection,
     ["JWT_KEY"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64)),
@@ -48,7 +51,7 @@ builder.Services.AddSingleton<Hangfire.IBackgroundJobClient, DisabledBackgroundJ
 await using var app = builder.Build();
 app.UseCors(); app.UseAuthentication(); app.UseAuthorization(); app.MapControllers();
 app.MapGet("/device-test/health", () => new { environment = "DeviceTests", database = "MeepleBoard_DeviceTests", externalDelivery = false });
-await DeviceDatabase.Prepare(app.Services, dataPath);
+await DeviceDatabase.Prepare(app.Services, dataPath, connection);
 if (args.Contains("--audit-only")) return;
 Console.WriteLine("DeviceTests ready on port 5099; synthetic accounts: " + Path.Combine(dataPath, "accounts.json"));
 if (args.Contains("--verify")) {
@@ -58,7 +61,7 @@ if (args.Contains("--verify")) {
 } else await app.RunAsync();
 
 public static class DeviceDatabase {
-    public static async Task Prepare(IServiceProvider services, string dataPath) {
+    public static async Task Prepare(IServiceProvider services, string dataPath, string connection) {
         using (var reviewScope = services.CreateScope()) {
             var review = reviewScope.ServiceProvider.GetRequiredService<MeepleBoardDbContext>();
             if (review.Database.HasPendingModelChanges()) throw new InvalidOperationException("Model drift: no SQL operation permitted.");
@@ -73,14 +76,14 @@ public static class DeviceDatabase {
             Console.WriteLine("Migration audit passed: model matches snapshot; nullable CreatorId and one filtered index only.");
             if (Environment.GetCommandLineArgs().Contains("--audit-only")) return;
         }
-        // SQL access is hard-coded to a dedicated LocalDB instance and exact database name.
-        await using var master = new SqlConnection("Server=(localdb)\\MeepleBoardDeviceTests;Database=master;Integrated Security=True;TrustServerCertificate=True");
+        // All SQL access derives from the same validated exclusive test connection.
+        await using var master = new SqlConnection(DeviceTestSql.Master(connection));
         await master.OpenAsync();
         await using var check = master.CreateCommand();
         check.CommandText = "SELECT DB_ID(N'MeepleBoard_DeviceTests')";
         var exists = await check.ExecuteScalarAsync() is not DBNull;
         if (!exists) { await using var create = master.CreateCommand(); create.CommandText = "CREATE DATABASE [MeepleBoard_DeviceTests]"; await create.ExecuteNonQueryAsync(); }
-        await using var dbConnection = new SqlConnection("Server=(localdb)\\MeepleBoardDeviceTests;Database=MeepleBoard_DeviceTests;Integrated Security=True;TrustServerCertificate=True");
+        await using var dbConnection = new SqlConnection(connection);
         await dbConnection.OpenAsync();
         await using var marker = dbConnection.CreateCommand();
         marker.CommandText = "SELECT CAST(value AS nvarchar(100)) FROM sys.extended_properties WHERE class = 0 AND name = N'MeepleBoardDeviceTestsOwner'";

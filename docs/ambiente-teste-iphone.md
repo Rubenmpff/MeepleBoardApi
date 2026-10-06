@@ -1,5 +1,7 @@
 # Ambiente descartável para testar no iPhone
 
+**Atualização macOS:** SQL Server local por emulação no M2 e scripts shell foram validados; ver [ambiente macOS](testes-macos-docker.md). Os comandos Windows abaixo permanecem como referência desse ambiente. UPD01/JRN01 foram corrigidas em etapas posteriores, descritas em `estabilizacao-escrita-sessoes.md`.
+
 ## Isolamento e esquema
 
 A API de testes usa exclusivamente a instância LocalDB `MeepleBoardDeviceTests` e a base `MeepleBoard_DeviceTests`. A ligação é fixa no anfitrião de testes; este não lê a configuração, segredos ou ligação da API habitual. Uma marca de propriedade impede aplicar migrações a uma base preexistente desconhecida. Não foi consultada nem alterada a base habitual.

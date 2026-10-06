@@ -11,7 +11,7 @@ if (-not $Verify -and -not $AuditOnly) {
         }
     } catch { }
 }
-if (-not $AuditOnly) {
+if (-not $AuditOnly -and -not $env:MEEPLE_DEVICE_TEST_SQL_FILE) {
     $instances = & SqlLocalDB.exe info
     if ($instances -notcontains 'MeepleBoardDeviceTests') { & SqlLocalDB.exe create MeepleBoardDeviceTests -s }
     else { & SqlLocalDB.exe start MeepleBoardDeviceTests }
@@ -20,7 +20,7 @@ if (-not $AuditOnly) {
 $runArgs = @('run', '--project', (Join-Path $projectRoot 'tools/DeviceTestApi/DeviceTestApi.csproj'), '--configuration', 'DeviceTests', '--no-launch-profile', '--', "--data=$(Join-Path $projectRoot '.device-tests')")
 if ($Verify) { $runArgs += '--verify' }
 if ($AuditOnly) { $runArgs += '--audit-only' }
-Write-Host 'Ambiente isolado: LocalDB MeepleBoardDeviceTests / MeepleBoard_DeviceTests; API porta 5099.'
+Write-Host 'Ambiente isolado: MeepleBoard_DeviceTests; API porta 5099; SQL externo quando explicitamente configurado, LocalDB por predefinicao Windows.'
 Push-Location $projectRoot
 try { & dotnet @runArgs; if ($LASTEXITCODE -ne 0) { throw 'A API/verificacao de testes terminou com erro.' } }
 finally { Pop-Location }
