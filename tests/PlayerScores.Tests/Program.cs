@@ -101,10 +101,12 @@ var ruleFriend = Guid.NewGuid();
         "AddAsync" => AddSession((GameSession)args![0]!),
         "SaveChangesAsync" => Task.CompletedTask,
         "GetByIdWithDetailsAsync" => Task.FromResult<GameSession?>(sessions.Single()),
+        "GetByIdForUpdateAsync" => Task.FromResult<GameSession?>(sessions.Single()),
         _ => throw new Exception("Unexpected session dependency: " + method.Name)
     });
     Task AddSession(GameSession value) { sessions.Add(value); return Task.CompletedTask; }
     var players = Stub.Create<IGameSessionPlayerRepository>((method, args) => {
+        if (method.Name == "GetBySessionAndUserAsync") return Task.FromResult<GameSessionPlayer?>(links.FirstOrDefault(p => p.SessionId == (Guid)args![0]! && p.UserId == (Guid)args[1]!));
         if (method.Name != "AddAsync") throw new Exception("Unexpected player dependency");
         var link = (GameSessionPlayer)args![0]!; links.Add(link); sessions.Single().Players.Add(link);
         return Task.CompletedTask;
@@ -153,6 +155,33 @@ await Check("existing organizer-only session remains readable", async () => {
     f.Sessions.Add(new GameSession("Legacy session", ruleOwner));
     var dto = await f.Service.GetByIdAsync(f.Sessions.Single().Id, ruleOwner);
     Assert(dto != null && dto.Name == "Legacy session");
+});
+
+
+await Check("later invitation requires accepted friendship before tracking writes", async () => {
+    var f = SessionRules(false);
+    f.Sessions.Add(new GameSession("Session friend rule", ruleOwner));
+    try { await f.Service.InvitePlayerAsync(f.Sessions.Single().Id, ruleOwner, ruleFriend); throw new Exception("Expected rejection"); }
+    catch (ArgumentException) { Assert(f.Links.Count == 0); }
+});
+await Check("later accepted friend invitation starts pending", async () => {
+    var f = SessionRules(); f.Sessions.Add(new GameSession("Session friend rule", ruleOwner));
+    await f.Service.InvitePlayerAsync(f.Sessions.Single().Id, ruleOwner, ruleFriend);
+    Assert(f.Links.Count == 1 && f.Links.Single().Status == MeepleBoard.Domain.Enums.GameSessionInviteStatus.Pending);
+});
+foreach (var declined in new[] { false, true }) {
+    await Check($"later duplicate {(declined ? "declined" : "pending")} invitation is not resent", async () => {
+        var f = SessionRules(false); f.Sessions.Add(new GameSession("Session duplicate rule", ruleOwner));
+        var existing = new GameSessionPlayer(f.Sessions.Single().Id, ruleFriend);
+        if (declined) existing.Decline(); f.Links.Add(existing);
+        try { await f.Service.InvitePlayerAsync(f.Sessions.Single().Id, ruleOwner, ruleFriend); throw new Exception("Expected duplicate rejection"); }
+        catch (InvalidOperationException) { Assert(f.Links.Count == 1); }
+    });
+}
+await Check("later invitation still requires the organizer", async () => {
+    var f = SessionRules(); f.Sessions.Add(new GameSession("Session organizer rule", ruleOwner));
+    try { await f.Service.InvitePlayerAsync(f.Sessions.Single().Id, Guid.NewGuid(), ruleFriend); throw new Exception("Expected organizer rejection"); }
+    catch (InvalidOperationException) { Assert(f.Links.Count == 0); }
 });
 
 

@@ -134,6 +134,9 @@ namespace MeepleBoard.Services.Implementations
             if (existing != null)
                 throw new InvalidOperationException("Este utilizador já foi convidado ou já pertence à sessão.");
 
+            if (!await _friendships.ExistsAcceptedAsync(organizerId, targetUserId))
+                throw new ArgumentException("Só podes convidar amigos com amizade aceite.");
+
             var invite = new GameSessionPlayer(sessionId, targetUserId, isOrganizer: false);
             await _sessionPlayerRepository.AddAsync(invite);
 
