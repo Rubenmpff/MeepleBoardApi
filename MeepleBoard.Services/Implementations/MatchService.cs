@@ -226,13 +226,9 @@ namespace MeepleBoard.Services.Implementations
                 if (entry == null || entry.UserId == Guid.Empty ||
                     dto.PlayerIds == null || !dto.PlayerIds.Contains(entry.UserId))
                     throw new ArgumentException("A pontuação deve pertencer a um participante indicado em PlayerIds.");
-                if (entry.Score is < 0)
-                    throw new ArgumentException("O modelo atual não aceita pontuações negativas.");
                 if (!scores.TryAdd(entry.UserId, entry.Score))
                     throw new ArgumentException("Não pode existir mais de uma pontuação para o mesmo participante.");
             }
-
-            var game = await ValidateOrFetchGameAsync(dto.GameId, dto.GameName, cancellationToken);
 
             var playerIds = (dto.PlayerIds ?? new List<Guid>())
                 .Where(x => x != Guid.Empty)
@@ -242,12 +238,19 @@ namespace MeepleBoard.Services.Implementations
             if (playerIds.Count == 0)
                 throw new ArgumentException("A partida deve ter pelo menos um jogador.");
 
-            if (dto.GameSessionId is null)
-            {
-                if (!playerIds.Contains(authenticatedUserId))
-                    playerIds.Add(authenticatedUserId);
-            }
-            else
+            // Quick registration includes the authenticated actor; session registration must select them.
+            if (dto.GameSessionId is null && !playerIds.Contains(authenticatedUserId))
+                playerIds.Add(authenticatedUserId);
+
+            var scoresEnabled = dto.ScoresEnabled ?? scores.Values.Any(score => score.HasValue);
+            if (dto.ScoresEnabled == false && scores.Count > 0)
+                throw new ArgumentException("Uma partida sem pontuação não pode enviar valores.");
+            if (scoresEnabled && playerIds.Any(id => !scores.TryGetValue(id, out var score) || !score.HasValue))
+                throw new ArgumentException("Indica uma pontuação válida para todos os jogadores.");
+
+            var game = await ValidateOrFetchGameAsync(dto.GameId, dto.GameName, cancellationToken);
+
+            if (dto.GameSessionId is not null)
             {
                 var sessionId = dto.GameSessionId.Value;
                 var session = await _gameSessionRepository.GetByIdWithDetailsAsync(sessionId, cancellationToken);

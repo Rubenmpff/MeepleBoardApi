@@ -21,6 +21,10 @@ As três ligações do anfitrião derivam da mesma configuração validada: EF, 
 
 Windows sem configuração externa mantém a ligação LocalDB original. O launcher PowerShell só chama SqlLocalDB quando não há configuração externa explícita. Este percurso foi preservado por revisão de código, mas não foi executado no PC Windows nesta sessão. No Mac sem configuração externa, o arranque é recusado; `--audit-only` pode correr sem SQL.
 
+## Continuação — formulário e pontuações com sinal
+
+Validada a nova criação com pontuação completa, zero e negativos, revisão partilhada e leitura de registos antigos incompletos. Ver [contrato e evidência](pontuacoes-inteiros-com-sinal.md) e [formulário no frontend](../../MeepleBoardApp/docs/formulario-registo-partidas.md). Solo, cooperativo e empate permanecem pendentes para a próxima correção funcional. O ambiente voltou a ficar ativo em API 5099/Expo 8082; voltar a iniciar sessão após reiniciar a API.
+
 ## Comandos para reutilizar
 
 No backend, com o Docker Desktop aberto e os ficheiros locais já preparados:

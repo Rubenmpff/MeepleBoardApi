@@ -187,7 +187,7 @@ await Check("a misconfigured public upload is rejected before journal persistenc
 await Check("creation persists authenticated creator and journal notes without match copy", async () => {
     var text = await Expect(HttpMethod.Post, "/MeepleBoard/matches", f.Author, HttpStatusCode.Created, new {
         gameId = f.Game.Id, gameName = f.Game.Name, matchDate = DateTime.UtcNow.AddMinutes(-1), isSoloGame = true,
-        playerIds = new[] { f.Author, f.Peer }, playerScores = new[] { new { userId = f.Peer, score = 0 } },
+        playerIds = new[] { f.Author, f.Peer }, scoresEnabled = true, playerScores = new[] { new { userId = f.Author, score = -17 }, new { userId = f.Peer, score = 0 } },
         personalRating = 8, notes = "PRIVATE_NEW", tags = "shared-tag", scoreSummary = "shared new summary"
     });
     using var json = JsonDocument.Parse(text); var id = json.RootElement.GetProperty("id").GetGuid();

@@ -57,9 +57,6 @@ namespace MeepleBoard.Domain.Entities
             get => _score;
             private set
             {
-                if (value.HasValue && value < 0)
-                    throw new ArgumentException("A pontuação do jogador não pode ser negativa.");
-
                 if (_score != value)
                 {
                     _score = value;

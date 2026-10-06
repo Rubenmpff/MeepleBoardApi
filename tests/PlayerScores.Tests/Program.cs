@@ -37,12 +37,11 @@ await Check("empty score list and explicit null preserve optional scores", async
     f = new Fixture(); await f.Service.CreateAsync(f.Request(new() { new() { UserId = f.UserId } }), f.UserId);
     Assert(f.Match!.MatchPlayers.Single().Score == null);
 });
-foreach (var kind in new[] { "outsider", "duplicate", "negative", "empty id", "null entry" }) {
+foreach (var kind in new[] { "outsider", "duplicate", "empty id", "null entry" }) {
     await Check($"{kind} rejected before any dependency call", async () => {
         var f = new Fixture(); var entries = new List<CreateMatchPlayerScoreDto>();
         entries.Add(kind switch {
             "outsider" => new() { UserId = Guid.NewGuid(), Score = 1 },
-            "negative" => new() { UserId = f.UserId, Score = -1 },
             "empty id" => new() { UserId = Guid.Empty, Score = 0 },
             "null entry" => null!,
             _ => new() { UserId = f.UserId, Score = 0 }
@@ -55,12 +54,50 @@ foreach (var kind in new[] { "outsider", "duplicate", "negative", "empty id", "n
 await Check("legacy JSON remains compatible; decimal and overflow are rejected by int?", () => {
     var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
     Assert(JsonSerializer.Deserialize<CreateMatchDto>("{\"playerIds\":[]}", options)!.PlayerScores == null);
-    foreach (var value in new[] { "1.5", "2147483648" }) {
+    foreach (var value in new[] { "1.5", "2147483648", "-2147483649" }) {
         try { JsonSerializer.Deserialize<CreateMatchDto>($"{{\"playerScores\":[{{\"score\":{value}}}]}}", options); throw new Exception("Expected rejection"); }
         catch (JsonException) { }
     }
     return Task.CompletedTask;
 });
+foreach (var value in new[] { int.MinValue, -17, 0, int.MaxValue }) {
+    await Check($"signed integer {value} persists and is returned without selecting a winner", async () => {
+        var f = new Fixture(); var dto = f.Request(new() { new() { UserId = f.UserId, Score = value } });
+        var response = await f.Service.CreateAsync(dto, f.UserId);
+        Assert(response.Players.Single().Score == value && response.WinnerId == null);
+        Assert((await f.Service.GetByIdAsync(f.Match!.Id, f.UserId))!.Players.Single().Score == value);
+    });
+}
+foreach (var kind in new[] { "missing", "null", "partial", "disabled", "implicit partial", "auto-added actor" }) {
+    await Check($"{kind} score coverage rejected before any dependency call", async () => {
+        var f = new Fixture(); var other = Guid.NewGuid();
+        var ids = kind == "auto-added actor" ? new List<Guid> { other } : new List<Guid> { f.UserId, other };
+        var scores = kind == "missing" ? null : new List<CreateMatchPlayerScoreDto> {
+            new() { UserId = ids[0], Score = kind == "null" ? null : -10 }
+        };
+        var dto = new CreateMatchDto { GameId = f.Game.Id, GameName = f.Game.Name, MatchDate = DateTime.UtcNow,
+            PlayerIds = ids, IsSoloGame = true, PlayerScores = scores,
+            ScoresEnabled = kind == "implicit partial" ? null : kind != "disabled" };
+        try { await f.Service.CreateAsync(dto, f.UserId); throw new Exception("Expected rejection"); }
+        catch (ArgumentException) { Assert(f.Calls == 0 && f.Saved == 0); }
+    });
+}
+await Check("competitive winner is explicit even when another player has higher score", async () => {
+    var f = new Fixture(); var other = Guid.NewGuid();
+    var response = await f.Service.CreateAsync(new CreateMatchDto { GameId = f.Game.Id, GameName = f.Game.Name,
+        MatchDate = DateTime.UtcNow, PlayerIds = new() { f.UserId, other }, WinnerId = f.UserId,
+        ScoresEnabled = true, PlayerScores = new() { new() { UserId = f.UserId, Score = -10 }, new() { UserId = other, Score = 0 } }
+    }, f.UserId);
+    Assert(response.WinnerId == f.UserId && response.Players.Single(p => p.UserId == other).Score == 0);
+});
+await Check("old partial scores remain readable without replacing null with zero", async () => {
+    var f = new Fixture(); var other = Guid.NewGuid();
+    await f.Service.CreateAsync(f.Request(null, other), f.UserId);
+    f.Match!.MatchPlayers.Single(p => p.UserId == f.UserId).UpdateScore(-5);
+    var read = await f.Service.GetByIdAsync(f.Match.Id, f.UserId);
+    Assert(read!.Players.Single(p => p.UserId == f.UserId).Score == -5 && read.Players.Single(p => p.UserId == other).Score == null);
+});
+
 foreach (var customDeadline in new[] { false, true }) {
     await Check($"SQL session timestamps retain UTC and {(customDeadline ? "custom" : "automatic")} deadline", () => {
         var scheduled = DateTime.UtcNow.AddDays(3);

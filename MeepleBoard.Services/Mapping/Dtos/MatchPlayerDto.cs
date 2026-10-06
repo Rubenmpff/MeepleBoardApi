@@ -31,9 +31,8 @@ namespace MeepleBoard.Services.DTOs
         public string? UserName { get; init; }
 
         /// <summary>
-        /// Pontuação do jogador (Opcional, não pode ser negativa).
+        /// Pontuação do jogador (opcional, inteiro com sinal).
         /// </summary>
-        [Range(0, int.MaxValue, ErrorMessage = "A pontuação do jogador não pode ser negativa.")]
         public int? Score { get; init; }
 
         /// <summary>

@@ -37,6 +37,9 @@ namespace MeepleBoard.Services.Mapping.Dtos
         /// <summary>Pontuações opcionais dos participantes; pedidos antigos podem omitir.</summary>
         public List<CreateMatchPlayerScoreDto>? PlayerScores { get; init; }
 
+        /// <summary>True exige uma pontuação por jogador; false não aceita valores. Omissão mantém pedidos antigos sem pontuação.</summary>
+        public bool? ScoresEnabled { get; init; }
+
         // ── Diário de partida ────────────────────────────────────────────────
 
         /// <summary>

@@ -53,6 +53,82 @@ public static class SqlHttpChecks {
             campaign.CampaignMatches.Add(new CampaignMatch(campaign.Id, matchId, 1, "Encontro fictício")); db.Campaigns.Add(campaign); campaignId = campaign.Id;
             await db.SaveChangesAsync();
         }
+        foreach (var origin in new Guid?[] { null, sessionId }) await Check("signed competitive scores and manual lower-score winner " + (origin.HasValue ? "session" : "quick"), async () => {
+            var text = await Send(HttpMethod.Post, "/MeepleBoard/matches", author, HttpStatusCode.Created, new {
+                gameId, gameName = "Meeple Teste Competitivo", gameSessionId = origin, matchDate = DateTime.UtcNow.AddMinutes(-2),
+                isSoloGame = false, winnerId = author, scoresEnabled = true, playerIds = new[] { author, peer },
+                playerScores = new[] { new { userId = author, score = -17 }, new { userId = peer, score = 0 } }
+            });
+            using var created = JsonDocument.Parse(text); var id = created.RootElement.GetProperty("id").GetGuid();
+            using var read = JsonDocument.Parse(await Send(HttpMethod.Get, $"/MeepleBoard/matches/{id}", author, HttpStatusCode.OK));
+            Assert(read.RootElement.GetProperty("winnerId").GetGuid() == author);
+            var players = read.RootElement.GetProperty("players").EnumerateArray().ToArray();
+            Assert(players.Single(p => p.GetProperty("userId").GetGuid() == author).GetProperty("score").GetInt32() == -17);
+            Assert(players.Single(p => p.GetProperty("userId").GetGuid() == peer).GetProperty("score").GetInt32() == 0);
+            using var scope = services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<MeepleBoardDbContext>();
+            Assert(await db.MatchPlayers.AnyAsync(p => p.MatchId == id && p.UserId == author && p.Score == -17));
+            Assert(await db.MatchPlayers.AnyAsync(p => p.MatchId == id && p.UserId == peer && p.Score == 0));
+            await Send(HttpMethod.Get, $"/MeepleBoard/matches/{id}", outsider, HttpStatusCode.Forbidden);
+            if (origin.HasValue) {
+                using var sessionRead = JsonDocument.Parse(await Send(HttpMethod.Get, $"/MeepleBoard/session/{sessionId}", author, HttpStatusCode.OK));
+                var nested = sessionRead.RootElement.GetProperty("matches").EnumerateArray().Single(m => m.GetProperty("id").GetGuid() == id);
+                Assert(nested.GetProperty("players").EnumerateArray().Single(p => p.GetProperty("userId").GetGuid() == author).GetProperty("score").GetInt32() == -17);
+            }
+        });
+        await Check("signed int32 endpoints round-trip through SQL and JSON", async () => {
+            var text = await Send(HttpMethod.Post, "/MeepleBoard/matches", author, HttpStatusCode.Created, new {
+                gameId, gameName = "Meeple Teste Competitivo", matchDate = DateTime.UtcNow.AddMinutes(-2),
+                isSoloGame = false, winnerId = author, scoresEnabled = true, playerIds = new[] { author, peer },
+                playerScores = new[] { new { userId = author, score = int.MinValue }, new { userId = peer, score = int.MaxValue } }
+            });
+            using var created = JsonDocument.Parse(text); var id = created.RootElement.GetProperty("id").GetGuid();
+            using var scope = services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<MeepleBoardDbContext>();
+            Assert(await db.MatchPlayers.AnyAsync(p => p.MatchId == id && p.UserId == author && p.Score == int.MinValue));
+            Assert(await db.MatchPlayers.AnyAsync(p => p.MatchId == id && p.UserId == peer && p.Score == int.MaxValue));
+            using var read = JsonDocument.Parse(await Send(HttpMethod.Get, $"/MeepleBoard/matches/{id}", author, HttpStatusCode.OK));
+            Assert(read.RootElement.GetProperty("players").EnumerateArray().Any(p => p.GetProperty("score").GetInt32() == int.MinValue));
+        });
+        await Check("incomplete/null/disabled/decimal/overflow score requests reject without SQL writes", async () => {
+            using var scope = services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<MeepleBoardDbContext>();
+            var before = await db.Matches.CountAsync();
+            foreach (var kind in new[] { "missing", "partial", "null", "disabled", "decimal", "positive overflow", "negative overflow" }) {
+                object? score = kind switch { "null" => null, "decimal" => 1.5m, "positive overflow" => 2147483648L, "negative overflow" => -2147483649L, _ => 0 };
+                var playerScores = kind == "missing" ? Array.Empty<object>() : kind == "partial" ? new object[] { new { userId = author, score = -17 } } :
+                    new object[] { new { userId = author, score = -17 }, new { userId = peer, score } };
+                await Send(HttpMethod.Post, "/MeepleBoard/matches", author, HttpStatusCode.BadRequest, new {
+                    gameId, gameName = "Meeple Teste Competitivo", matchDate = DateTime.UtcNow.AddMinutes(-2), isSoloGame = false,
+                    winnerId = author, scoresEnabled = kind != "disabled", playerIds = new[] { author, peer }, playerScores
+                });
+            }
+            Assert(await db.Matches.CountAsync() == before);
+        });
+        await Check("competitive without scores saves/reloads null and explicit winner", async () => {
+            var text = await Send(HttpMethod.Post, "/MeepleBoard/matches", author, HttpStatusCode.Created, new {
+                gameId, gameName = "Meeple Teste Competitivo", matchDate = DateTime.UtcNow.AddMinutes(-2), isSoloGame = false,
+                winnerId = author, scoresEnabled = false, playerIds = new[] { author, peer }
+            });
+            using var created = JsonDocument.Parse(text); var id = created.RootElement.GetProperty("id").GetGuid();
+            using var read = JsonDocument.Parse(await Send(HttpMethod.Get, $"/MeepleBoard/matches/{id}", author, HttpStatusCode.OK));
+            Assert(read.RootElement.GetProperty("winnerId").GetGuid() == author);
+            Assert(read.RootElement.GetProperty("players").EnumerateArray().All(p => p.GetProperty("score").ValueKind == JsonValueKind.Null));
+        });
+        await Check("legacy partial scores stay readable and absent is never filled with zero", async () => {
+            var text = await Send(HttpMethod.Post, "/MeepleBoard/matches", author, HttpStatusCode.Created, new {
+                gameId, gameName = "Meeple Teste Competitivo", matchDate = DateTime.UtcNow.AddMinutes(-2), isSoloGame = false,
+                winnerId = author, scoresEnabled = false, playerIds = new[] { author, peer }
+            });
+            using var created = JsonDocument.Parse(text); var id = created.RootElement.GetProperty("id").GetGuid();
+            // Reproduce a pre-existing partial record only in the marked DeviceTests database.
+            using (var scope = services.CreateScope()) {
+                var db = scope.ServiceProvider.GetRequiredService<MeepleBoardDbContext>();
+                (await db.MatchPlayers.SingleAsync(p => p.MatchId == id && p.UserId == author)).UpdateScore(-5);
+                await db.SaveChangesAsync();
+            }
+            using var read = JsonDocument.Parse(await Send(HttpMethod.Get, $"/MeepleBoard/matches/{id}", author, HttpStatusCode.OK));
+            var players = read.RootElement.GetProperty("players").EnumerateArray().ToArray();
+            Assert(players.Single(p => p.GetProperty("userId").GetGuid() == author).GetProperty("score").GetInt32() == -5);
+            Assert(players.Single(p => p.GetProperty("userId").GetGuid() == peer).GetProperty("score").ValueKind == JsonValueKind.Null);
+        });
         var detail = $"/MeepleBoard/matches/{matchId}"; var journal = $"/MeepleBoard/campaigns/matches/{matchId}/journal";
         await Check("journal writes use JWT actor even with forged user ID", async () => {
             await Send(HttpMethod.Put, journal, peer, HttpStatusCode.OK, new { userId = author, personalRating = 0, notes = "PRIVATE_SQL_PEER", tags = "partilhada" });
