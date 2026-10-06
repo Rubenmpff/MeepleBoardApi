@@ -61,6 +61,37 @@ await Check("legacy JSON remains compatible; decimal and overflow are rejected b
     }
     return Task.CompletedTask;
 });
+foreach (var customDeadline in new[] { false, true }) {
+    await Check($"SQL session timestamps retain UTC and {(customDeadline ? "custom" : "automatic")} deadline", () => {
+        var scheduled = DateTime.UtcNow.AddDays(3);
+        var session = new GameSession("Session UTC test", Guid.NewGuid(), scheduledStartDateUtc: scheduled,
+            responseDeadlineUtc: customDeadline ? scheduled.AddHours(-2) : null);
+        var player = new GameSessionPlayer(session.Id, Guid.NewGuid());
+        session.Players.Add(player);
+        // Simulate SQL datetime2 materialization, which loses DateTime.Kind.
+        foreach (var field in new[] { "ScheduledStartDate", "StartDate", "ResponseDeadline" }) {
+            var property = typeof(GameSession).GetProperty(field)!;
+            if (property.GetValue(session) is DateTime value)
+                property.SetValue(session, DateTime.SpecifyKind(value, DateTimeKind.Unspecified));
+        }
+        foreach (var field in new[] { "InvitedAt", "JoinedAt" }) {
+            var property = typeof(GameSessionPlayer).GetProperty(field)!;
+            property.SetValue(player, DateTime.SpecifyKind((DateTime)property.GetValue(player)!, DateTimeKind.Unspecified));
+        }
+        var mapper = new MapperConfiguration(c => c.AddProfile<MappingEntityToDto>()).CreateMapper();
+        var dto = mapper.Map<GameSessionDto>(session);
+        Assert(dto.ScheduledStartDate.Ticks == scheduled.Ticks && dto.ScheduledStartDate.Kind == DateTimeKind.Utc);
+        Assert(dto.StartDate.Kind == DateTimeKind.Utc && dto.Players.Single().InvitedAt.Kind == DateTimeKind.Utc);
+        Assert(dto.ResponseDeadline.HasValue == customDeadline && dto.EffectiveDeadline.Kind == DateTimeKind.Utc);
+        Assert(dto.EffectiveDeadline.Ticks == (customDeadline ? scheduled.AddHours(-2) : scheduled).Ticks);
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(dto));
+        Assert(json.RootElement.GetProperty("ScheduledStartDate").GetString()!.EndsWith("Z"));
+        Assert(json.RootElement.GetProperty("EffectiveDeadline").GetString()!.EndsWith("Z"));
+        return Task.CompletedTask;
+    });
+}
+
+
 Console.WriteLine($"{passed} focused service/contract tests passed.");
 
 class Fixture {

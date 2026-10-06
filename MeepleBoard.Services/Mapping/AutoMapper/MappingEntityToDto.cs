@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using MeepleBoard.Application.DTOs;
 using MeepleBoard.Domain.Entities;
 using MeepleBoard.Services.DTOs;
@@ -65,21 +65,25 @@ namespace MeepleBoardApi.Services.Mapping.AutoMapper
                 .ForMember(d => d.UserName, o => o.MapFrom(s => s.User != null ? s.User.UserName : "Jogador Desconhecido"))
                 .ForMember(d => d.IsOrganizer, o => o.MapFrom(s => s.IsOrganizer))
                 .ForMember(d => d.Status, o => o.MapFrom(s => s.Status))
-                .ForMember(d => d.InvitedAt, o => o.MapFrom(s => s.InvitedAt))
-                .ForMember(d => d.RespondedAt, o => o.MapFrom(s => s.RespondedAt))
-                .ForMember(d => d.JoinedAt, o => o.MapFrom(s => s.JoinedAt))
-                .ForMember(d => d.LeftAt, o => o.MapFrom(s => s.LeftAt));
+                .ForMember(d => d.InvitedAt, o => o.MapFrom(s => SessionUtc(s.InvitedAt)))
+                .ForMember(d => d.RespondedAt, o => o.MapFrom(s => SessionUtc(s.RespondedAt)))
+                .ForMember(d => d.JoinedAt, o => o.MapFrom(s => SessionUtc(s.JoinedAt)))
+                .ForMember(d => d.LeftAt, o => o.MapFrom(s => SessionUtc(s.LeftAt)));
 
             // --- GameSession ---
             CreateMap<GameSession, GameSessionDto>()
                 .ForMember(d => d.OrganizerId, opt => opt.MapFrom(s => s.OrganizerId))
                 .ForMember(d => d.OrganizerUserName, opt => opt.MapFrom(s => s.Organizer != null ? s.Organizer.UserName : string.Empty))
-                .ForMember(d => d.ScheduledStartDate, opt => opt.MapFrom(s => s.ScheduledStartDate))
-                .ForMember(d => d.StartDate, opt => opt.MapFrom(s => s.StartDate))
-                .ForMember(d => d.EndDate, opt => opt.MapFrom(s => s.EndDate))
+                .ForMember(d => d.ScheduledStartDate, opt => opt.MapFrom(s => SessionUtc(s.ScheduledStartDate)))
+                .ForMember(d => d.ResponseDeadline, opt => opt.MapFrom(s => SessionUtc(s.ResponseDeadline)))
+                .ForMember(d => d.StartDate, opt => opt.MapFrom(s => SessionUtc(s.StartDate)))
+                .ForMember(d => d.EndDate, opt => opt.MapFrom(s => SessionUtc(s.EndDate)))
                 .ForMember(d => d.Status, opt => opt.MapFrom(s => s.Status))
                 .ForMember(d => d.Players, opt => opt.MapFrom(s => s.Players))
                 .ForMember(d => d.Matches, opt => opt.MapFrom(s => s.Matches));
         }
+        // SQL datetime2 drops Kind; these session fields are stored in UTC.
+        private static DateTime SessionUtc(DateTime value) => DateTime.SpecifyKind(value, DateTimeKind.Utc);
+        private static DateTime? SessionUtc(DateTime? value) => value.HasValue ? SessionUtc(value.Value) : null;
     }
 }
