@@ -75,7 +75,7 @@ foreach (var kind in new[] { "missing", "null", "partial", "disabled", "implicit
         var scores = kind == "missing" ? null : new List<CreateMatchPlayerScoreDto> {
             new() { UserId = ids[0], Score = kind == "null" ? null : -10 }
         };
-        var dto = new CreateMatchDto { GameId = f.Game.Id, GameName = f.Game.Name, MatchDate = DateTime.UtcNow,
+        var dto = new CreateMatchDto { GameId = f.Game.Id, GameName = f.Game.Name, PersonalRating = 7.5, MatchDate = DateTime.UtcNow,
             PlayerIds = ids, IsSoloGame = true, PlayerScores = scores,
             ScoresEnabled = kind == "implicit partial" ? null : kind != "disabled" };
         try { await f.Service.CreateAsync(dto, f.UserId); throw new Exception("Expected rejection"); }
@@ -84,7 +84,7 @@ foreach (var kind in new[] { "missing", "null", "partial", "disabled", "implicit
 }
 await Check("competitive winner is explicit even when another player has higher score", async () => {
     var f = new Fixture(); var other = Guid.NewGuid();
-    var response = await f.Service.CreateAsync(new CreateMatchDto { GameId = f.Game.Id, GameName = f.Game.Name,
+    var response = await f.Service.CreateAsync(new CreateMatchDto { GameId = f.Game.Id, GameName = f.Game.Name, PersonalRating = 7.5,
         MatchDate = DateTime.UtcNow, PlayerIds = new() { f.UserId, other }, WinnerId = f.UserId,
         ScoresEnabled = true, PlayerScores = new() { new() { UserId = f.UserId, Score = -10 }, new() { UserId = other, Score = 0 } }
     }, f.UserId);
@@ -128,6 +128,33 @@ foreach (var customDeadline in new[] { false, true }) {
     });
 }
 
+
+foreach (var rating in new double?[] { null, -0.5, 10.5, 7.25, double.NaN, double.PositiveInfinity }) {
+    await Check($"invalid or missing rating {rating} rejected before dependencies", async () => {
+        var f = new Fixture();
+        try { await f.Service.CreateAsync(new CreateMatchDto { PersonalRating = rating, IsSoloGame = true, PlayerIds = new() { f.UserId } }, f.UserId); throw new Exception("Expected rejection"); }
+        catch (ArgumentException) { Assert(f.Calls == 0 && f.Saved == 0); }
+    });
+}
+foreach (var kind in new[] { "one", "duplicate", "session solo" }) {
+    await Check($"{kind} participant rule rejects before writes", async () => {
+        var f = new Fixture();
+        var dto = new CreateMatchDto { PersonalRating = 0, IsSoloGame = kind == "session solo", GameSessionId = kind == "session solo" ? Guid.NewGuid() : null,
+            PlayerIds = kind == "duplicate" ? new() { f.UserId, f.UserId } : new() { f.UserId }, WinnerId = f.UserId };
+        try { await f.Service.CreateAsync(dto, f.UserId); throw new Exception("Expected rejection"); }
+        catch (ArgumentException) { Assert(f.Calls == 0 && f.Saved == 0); }
+    });
+}
+foreach (var rating in new[] { 0d, .5, 7.5, 10d }) {
+    await Check($"own journal preserves rating {rating} without rounding or peer ratings", async () => {
+        var f = new Fixture(); var other = Guid.NewGuid();
+        await f.Service.CreateAsync(new CreateMatchDto { GameId = f.Game.Id, GameName = f.Game.Name, MatchDate = DateTime.UtcNow.AddMinutes(-1),
+            PersonalRating = rating, PlayerIds = new() { f.UserId, other }, WinnerId = f.UserId }, f.UserId);
+        Assert(f.Entries.Count == 1 && f.Entries.Single().UserId == f.UserId && f.Entries.Single().PersonalRating == rating);
+        var read = await f.Service.GetByIdAsync(f.Match!.Id, f.UserId);
+        Assert(read!.PersonalRating == rating && f.Match.JournalEntries.Single().PersonalRating == rating);
+    });
+}
 
 var ruleOwner = Guid.NewGuid();
 var ruleFriend = Guid.NewGuid();
@@ -229,6 +256,7 @@ class Fixture {
     public Game Game = new("Test game", "", null);
     public Match? Match;
     public int Saved, Calls;
+    public List<MatchJournalEntry> Entries = new();
     public MatchService Service;
     public Fixture() {
         T Proxy<T>(Func<MethodInfo, object?[]?, object?> handler) where T : class => Stub.Create<T>((m, a) => { Calls++; return handler(m, a); });
@@ -243,16 +271,27 @@ class Fixture {
             if (m.Name != "AddAsync") throw new Exception(m.Name);
             Match!.MatchPlayers.Add((MatchPlayer)a![0]!); return Task.CompletedTask;
         });
-        var games = Proxy<IGameRepository>((m, a) => m.Name == "GetByIdAsync" ? Task.FromResult<Game?>(Game) : throw new Exception(m.Name));
+        var games = Proxy<IGameRepository>((m, a) => m.Name switch {
+            "GetByIdAsync" => Task.FromResult<Game?>(Game),
+            "GetAveragePersonalRatingAsync" => Task.FromResult<double?>(Entries.Where(e => e.PersonalRating.HasValue).Average(e => e.PersonalRating)),
+            "UpdateAsync" => Task.CompletedTask,
+            _ => throw new Exception(m.Name)
+        });
+        var journals = Proxy<ICampaignRepository>((m, a) => m.Name switch {
+            "AddJournalEntryAsync" => AddEntry((MatchJournalEntry)a![0]!),
+            "SaveChangesAsync" => Task.CompletedTask,
+            _ => throw new Exception(m.Name)
+        });
         var users = Proxy<IUserRepository>((m, a) => m.Name == "GetByIdAsync" ? Task.FromResult<User?>(null) : throw new Exception(m.Name));
         var mapper = new MapperConfiguration(c => c.AddProfile<MappingEntityToDto>()).CreateMapper();
         Service = new(matches, players, Unused<IGameSessionRepository>(), Unused<IGameSessionPlayerRepository>(), users, games,
-            Unused<ICampaignRepository>(), Unused<IBGGService>(), Unused<IGameService>(), Unused<INotificationService>(), mapper);
+            journals, Unused<IBGGService>(), Unused<IGameService>(), Unused<INotificationService>(), mapper);
     }
+    Task AddEntry(MatchJournalEntry entry) { Entries.Add(entry); Match!.JournalEntries.Add(entry); return Task.CompletedTask; }
     Task AddMatch(Match match) { Match = match; return Task.CompletedTask; }
     Task<int> Save() { Saved++; return Task.FromResult(1); }
     public CreateMatchDto Request(List<CreateMatchPlayerScoreDto>? scores, Guid? other = null) => new() {
-        GameId = Game.Id, GameName = Game.Name, MatchDate = DateTime.UtcNow.AddMinutes(-1),
+        GameId = Game.Id, GameName = Game.Name, PersonalRating = 7.5, MatchDate = DateTime.UtcNow.AddMinutes(-1),
         PlayerIds = other.HasValue ? new() { UserId, other.Value } : new() { UserId },
         IsSoloGame = true, PlayerScores = scores
     };

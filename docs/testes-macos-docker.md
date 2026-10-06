@@ -2,6 +2,10 @@
 
 Verificado em 6 de outubro de 2026. O utilizador escolheu explicitamente experimentar SQL Server x86-64 em Docker no M2, para desenvolvimento com dados fictícios, aceitando a ausência de suporte Microsoft para emulação. Não foi escolhido outro servidor nem usada a base habitual.
 
+## Continuação — avaliação e participantes
+
+Aplicada apenas na base marcada de testes a 24.ª migração, `PreserveJournalHalfRatings`, que preserva avaliações em meios pontos no diário. Competitivo exige dois participantes distintos e avaliação própria é obrigatória, com zero válido. Ver [contrato, evidência e limitações](avaliacao-participantes.md). As contas/credenciais continuam exclusivamente locais. A revisão visual no iPhone permanece pendente.
+
 ## Ambiente validado
 
 - Docker Desktop instalado; CLI 28.3.0, motor Linux aarch64, cerca de 8 GB disponíveis. Foi necessário abrir Docker Desktop.

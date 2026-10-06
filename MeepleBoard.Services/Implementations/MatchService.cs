@@ -218,6 +218,10 @@ namespace MeepleBoard.Services.Implementations
             if (authenticatedUserId == Guid.Empty)
                 throw new ArgumentException("Utilizador autenticado inválido.");
 
+            MatchJournalEntry.ValidateRating(dto.PersonalRating, required: true);
+            if (dto.GameSessionId.HasValue && dto.IsSoloGame)
+                throw new ArgumentException("Não são permitidas partidas Solo dentro de sessões.");
+
             // Validate before game lookup/import or any repository write.
             // Keep legacy PlayerIds normalization; score entries must be unambiguous.
             var scores = new Dictionary<Guid, int?>();
@@ -241,6 +245,9 @@ namespace MeepleBoard.Services.Implementations
             // Quick registration includes the authenticated actor; session registration must select them.
             if (dto.GameSessionId is null && !playerIds.Contains(authenticatedUserId))
                 playerIds.Add(authenticatedUserId);
+
+            if (!dto.IsSoloGame && playerIds.Count < 2)
+                throw new ArgumentException("Uma partida competitiva exige pelo menos dois participantes distintos.");
 
             var scoresEnabled = dto.ScoresEnabled ?? scores.Values.Any(score => score.HasValue);
             if (dto.ScoresEnabled == false && scores.Count > 0)
@@ -341,10 +348,7 @@ namespace MeepleBoard.Services.Implementations
                 !string.IsNullOrWhiteSpace(dto.Tags))
             {
                 var entry = new MatchJournalEntry(match.Id, authenticatedUserId);
-                int? journalRating = dto.PersonalRating.HasValue
-                    ? (int?)Math.Round(dto.PersonalRating.Value)
-                    : null;
-                entry.Update(journalRating, dto.Notes, dto.Tags);
+                entry.Update(dto.PersonalRating, dto.Notes, dto.Tags);
                 await _campaignRepository.AddJournalEntryAsync(entry, cancellationToken);
                 await _campaignRepository.SaveChangesAsync(cancellationToken);
 

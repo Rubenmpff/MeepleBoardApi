@@ -46,6 +46,7 @@ namespace MeepleBoard.Services.Mapping.Dtos
         /// Avaliação pessoal desta partida (0–10, escala BGG).
         /// A média de todas as partidas dá a avaliação pessoal do utilizador para o jogo.
         /// </summary>
+        [Required(ErrorMessage = "A tua avaliação é obrigatória antes de guardar a partida.")]
         [Range(0, 10, ErrorMessage = "O rating deve estar entre 0 e 10.")]
         public double? PersonalRating { get; init; }
 

@@ -13,9 +13,10 @@ public static class DeviceSqlChecks {
             if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) != expected) throw new Exception("SQL check failed: " + name);
             Console.WriteLine("PASS SQL " + name);
         }
-        await Check("23 migrations applied", "SELECT COUNT(*) FROM __EFMigrationsHistory", 23);
+        await Check("24 migrations applied", "SELECT COUNT(*) FROM __EFMigrationsHistory", 24);
         await Check("CreatorId exists", "SELECT COUNT(*) FROM sys.columns WHERE object_id=OBJECT_ID('Matches') AND name='CreatorId'", 1);
         await Check("catalogue filtered index exists", "SELECT COUNT(*) FROM sys.indexes WHERE name='IX_GameSearchCatalog_RatingsCount_BggRank_AverageRating_Name_BggId' AND has_filter=1", 1);
+        await Check("journal half-point nullable column", "SELECT COUNT(*) FROM sys.columns WHERE object_id=OBJECT_ID('MatchJournalEntries') AND name='PersonalRating' AND system_type_id=TYPE_ID('float') AND is_nullable=1", 1);
         if (mode == "schema") return;
         var file = mode switch { "writes" => "session-write-fixture.json", "rule" => "session-rule-fixture.json", "invites" => "session-invite-friends-fixture.json", "dates" => "session-date-fixture.json", _ => throw new Exception("Unknown SQL verification mode") };
         using var fixture = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(dataPath, file)));

@@ -17,7 +17,7 @@ async function request(method, url, token, body, expected = 200) {
   const suggestions = await (await request('GET', '/MeepleBoard/game/suggestions?query=Meeple&limit=10')).json();
   assert.ok(suggestions.length >= 3); console.log('PASS real SQL catalogue search returns synthetic games');
   const game = suggestions.find(g => g.name.includes('Competitivo'));
-  const match = await (await request('POST', '/MeepleBoard/matches', tokens[0], { gameId: game.id, gameName: game.name, matchDate: new Date(Date.now() - 60000).toISOString(), isSoloGame: true, playerIds: [accounts[0].Id, accounts[1].Id] }, 201)).json();
+  const match = await (await request('POST', '/MeepleBoard/matches', tokens[0], { gameId: game.id, gameName: game.name, matchDate: new Date(Date.now() - 60000).toISOString(), isSoloGame: true, personalRating: 7.5, playerIds: [accounts[0].Id, accounts[1].Id] }, 201)).json();
   const route = '/MeepleBoard/campaigns/matches/' + match.id + '/journal/photos';
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN5kAAAAASUVORK5CYII=', 'base64');
   const form = new FormData(); form.append('file', new Blob([png], { type: 'image/png' }), 'fixture.png');

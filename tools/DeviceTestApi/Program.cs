@@ -68,12 +68,17 @@ public static class DeviceDatabase {
             var migrations = review.GetService<IMigrationsAssembly>();
             var creator = migrations.CreateMigration(migrations.Migrations["20261006120000_AddMatchCreator"], review.Database.ProviderName!);
             if (creator.UpOperations.Count != 1 || creator.UpOperations[0] is not Microsoft.EntityFrameworkCore.Migrations.Operations.AddColumnOperation c || c.Table != "Matches" || c.Name != "CreatorId" || !c.IsNullable) throw new Exception("Unexpected creator migration changes");
-            var latest = migrations.Migrations.Keys.Order().Last();
-            var index = migrations.CreateMigration(migrations.Migrations[latest], review.Database.ProviderName!);
+            var index = migrations.CreateMigration(migrations.Migrations["20261006130000_AddCatalogPendingDetailsIndex"], review.Database.ProviderName!);
             if (index.UpOperations.Count != 1 || index.UpOperations[0] is not Microsoft.EntityFrameworkCore.Migrations.Operations.CreateIndexOperation i || i.Name != "IX_GameSearchCatalog_RatingsCount_BggRank_AverageRating_Name_BggId" || i.Filter != "[DetailsSyncedAt] IS NULL" || !i.IsDescending!.SequenceEqual(new[] { true, false, true, false, false })) throw new Exception("Unexpected catalogue migration changes");
+            var ratings = migrations.CreateMigration(migrations.Migrations["20261006140000_PreserveJournalHalfRatings"], review.Database.ProviderName!);
+            if (ratings.UpOperations.Count != 1 || ratings.UpOperations[0] is not Microsoft.EntityFrameworkCore.Migrations.Operations.AlterColumnOperation r || r.Table != "MatchJournalEntries" || r.Name != "PersonalRating" || r.ClrType != typeof(double) || r.ColumnType != "float" || !r.IsNullable || r.OldColumn.ClrType != typeof(int) || r.OldColumn.ColumnType != "int" || !r.OldColumn.IsNullable) throw new Exception("Unexpected journal rating migration changes");
             var sql = review.GetService<IMigrator>().GenerateScript("20260824063025_OptimizeGameSearchTokenKey");
-            if (sql.Contains("DROP ") || sql.Contains("UPDATE [Matches]") || sql.Contains("DELETE ")) throw new Exception("Unexpected destructive migration SQL");
-            Console.WriteLine("Migration audit passed: model matches snapshot; nullable CreatorId and one filtered index only.");
+            // EF drops only a possible default constraint on this exact column before widening it.
+            const string approvedDefaultDrop = "IF @var IS NOT NULL EXEC(N'ALTER TABLE [MatchJournalEntries] DROP CONSTRAINT [' + @var + '];');";
+            if (!sql.Contains("WHERE ([d].[parent_object_id] = OBJECT_ID(N'[MatchJournalEntries]') AND [c].[name] = N'PersonalRating');") || !sql.Contains("ALTER TABLE [MatchJournalEntries] ALTER COLUMN [PersonalRating] float NULL;")) throw new Exception("Unexpected rating conversion SQL");
+            var auditedSql = sql.Replace(approvedDefaultDrop, "");
+            if (auditedSql.Contains("DROP ") || auditedSql.Contains("UPDATE [Matches]") || auditedSql.Contains("DELETE ")) throw new Exception("Unexpected destructive migration SQL");
+            Console.WriteLine("Migration audit passed: model matches snapshot; nullable CreatorId, one filtered index and nullable rating widened to float.");
             if (Environment.GetCommandLineArgs().Contains("--audit-only")) return;
         }
         // All SQL access derives from the same validated exclusive test connection.

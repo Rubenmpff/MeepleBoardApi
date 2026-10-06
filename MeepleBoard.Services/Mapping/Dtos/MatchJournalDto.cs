@@ -15,7 +15,7 @@ namespace MeepleBoard.Services.DTOs.MatchJournal
         public Guid Id { get; set; }
         public Guid UserId { get; set; }
         public string UserName { get; set; } = string.Empty;
-        public int? PersonalRating { get; set; }
+        public double? PersonalRating { get; set; }
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? Notes { get; set; }
         public string? Tags { get; set; }
@@ -28,7 +28,7 @@ namespace MeepleBoard.Services.DTOs.MatchJournal
     public class UpsertJournalEntryDto
     {
         [Range(0, 10, ErrorMessage = "O rating deve ser entre 0 e 10.")]
-        public int? PersonalRating { get; set; }
+        public double? PersonalRating { get; set; }
 
         [MaxLength(3000)]
         public string? Notes { get; set; }

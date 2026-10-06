@@ -57,7 +57,7 @@ namespace MeepleBoard.Domain.Entities
 
         /// <summary>Avaliação pessoal desta partida (0–10, igual ao resto da app).</summary>
         [Range(0, 10)]
-        public int? PersonalRating { get; private set; }
+        public double? PersonalRating { get; private set; }
 
         /// <summary>Notas livres — momentos épicos, estratégias, história.</summary>
         [MaxLength(3000)]
@@ -97,10 +97,17 @@ namespace MeepleBoard.Domain.Entities
 
         // ── Métodos ───────────────────────────────────────────────────────────
 
-        public void Update(int? personalRating, string? notes, string? tags)
+        public static void ValidateRating(double? rating, bool required = false)
         {
-            if (personalRating.HasValue && (personalRating < 0 || personalRating > 10))
-                throw new ArgumentException("O rating deve estar entre 0 e 10.");
+            if (required && !rating.HasValue)
+                throw new ArgumentException("A tua avaliação é obrigatória antes de guardar a partida.");
+            if (rating.HasValue && (!double.IsFinite(rating.Value) || rating < 0 || rating > 10 || rating.Value * 2 != Math.Truncate(rating.Value * 2)))
+                throw new ArgumentException("A avaliação deve estar entre 0 e 10, em meios pontos.");
+        }
+
+        public void Update(double? personalRating, string? notes, string? tags)
+        {
+            ValidateRating(personalRating);
 
             PersonalRating = personalRating;
             Notes = notes?.Trim();
