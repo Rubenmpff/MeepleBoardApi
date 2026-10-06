@@ -61,6 +61,20 @@ async Task<string> Expect(HttpMethod method, string path, Guid? user, HttpStatus
 }
 var matchPath = $"/MeepleBoard/matches/{f.Match.Id}";
 var journalPath = $"/MeepleBoard/campaigns/matches/{f.Match.Id}/journal";
+await Check("cover URL reaches authorized match/session DTOs; absent image remains absent", async () => {
+    const string cover = "https://example.invalid/fixture-cover.png";
+    f.Game.UpdateDetails(f.Game.Name, f.Game.Description, cover, f.Game.SupportsSoloMode);
+    using var detail = await Request(HttpMethod.Get, matchPath, f.Author);
+    using var body = JsonDocument.Parse(await detail.Content.ReadAsStringAsync());
+    Assert(body.RootElement.GetProperty("gameImageUrl").GetString() == cover, "Match cover mapping");
+    using var session = await Request(HttpMethod.Get, $"/MeepleBoard/session/{f.Session.Id}", f.Author);
+    using var sessionBody = JsonDocument.Parse(await session.Content.ReadAsStringAsync());
+    Assert(sessionBody.RootElement.GetProperty("matches")[0].GetProperty("gameImageUrl").GetString() == cover, "Session cover mapping");
+    f.Game.UpdateDetails(f.Game.Name, f.Game.Description, null, f.Game.SupportsSoloMode);
+    using var absent = await Request(HttpMethod.Get, matchPath, f.Author);
+    using var absentBody = JsonDocument.Parse(await absent.Content.ReadAsStringAsync());
+    Assert(string.IsNullOrEmpty(absentBody.RootElement.GetProperty("gameImageUrl").GetString()), "No fabricated image");
+});
 var ownPhoto = JournalPhotoReference.Path(f.Match.Id, f.Own.Id, f.Own.PhotoUrls[0]);
 var peerPhoto = JournalPhotoReference.Path(f.Match.Id, f.PeerEntry.Id, f.PeerEntry.PhotoUrls[0]);
 foreach (var identity in new (string Name, Guid? User, bool Participant)[] {

@@ -20,6 +20,7 @@ namespace MeepleBoardApi.Services.Mapping.AutoMapper
 
             // --- Match ---
             CreateMap<Match, MatchDto>()
+                .ForMember(d => d.GameImageUrl, o => o.MapFrom(s => s.Game != null ? s.Game.ImageUrl : null))
                 .ForMember(d => d.GameName, o => o.MapFrom(s => s.Game != null ? s.Game.Name : "Jogo Desconhecido"))
                 .ForMember(d => d.WinnerName, o => o.MapFrom(s => s.Winner != null ? s.Winner.UserName : null))
                 .ForMember(d => d.Players, o => o.MapFrom(s => s.MatchPlayers))

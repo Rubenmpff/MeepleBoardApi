@@ -23,6 +23,7 @@ async function get(route, token, expected = 200) {
   assert.ok(session.matches.length > 0);
   for (const match of session.matches) {
     const individual = await get('/MeepleBoard/matches/' + match.id, tokens[0]);
+    assert.equal(match.gameImageUrl, individual.gameImageUrl);
     assert.equal(match.gameName, individual.gameName); assert.notEqual(match.gameName, 'Jogo Desconhecido');
     assert.equal(match.winnerId, individual.winnerId); assert.equal(match.winnerName, individual.winnerName);
     assert.ok(match.players.length > 0);
