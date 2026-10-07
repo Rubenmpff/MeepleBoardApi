@@ -175,6 +175,8 @@ namespace MeepleBoardApi.Controllers
                 return NoContent();
             }
             catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
+            catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         }
 
         [HttpDelete("{id:guid}")]

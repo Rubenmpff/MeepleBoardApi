@@ -1,5 +1,7 @@
 # Próxima decisão — resultados e estatísticas
 
+Atualização: a parte de modos e resultados foi aprovada e implementada; ver [contrato atual](resultados-explicitos.md). As propostas de Estatísticas e retrospetiva permanecem por implementar.
+
 Proposta apenas; **não implementar resultados/migrações/estatísticas nesta etapa**. Ver [modos, resultados, histórico e denominadores](../../MeepleBoardApp/docs/proposta-modos-resultados.md) e [etapas de produto](../../MeepleBoardApp/docs/proximas-etapas-produto.md). Incluem Autenticação (duas propostas visuais com mascote/logótipo), Estatísticas, «O teu ano à mesa» e auditoria dos ecrãs. Desenvolvimento permanece exclusivamente em DeviceTests com dados fictícios; base habitual intacta.
 
 ## Causas técnicas confirmadas

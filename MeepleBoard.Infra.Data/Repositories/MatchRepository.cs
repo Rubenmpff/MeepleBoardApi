@@ -30,7 +30,7 @@ namespace MeepleBoard.Infra.Data.Repositories
 
         // ── Projecção: última partida do utilizador ───────────────────────────
         // Devolve tuplo simples — repositório não conhece DTOs (arquitectura limpa)
-        public async Task<(string Name, string Date, string Winner, string? ImageUrl)?> GetLastMatchProjectionForUserAsync(
+        public async Task<(string Name, string Date, string Winner, string? ImageUrl, string? GameMode, string? Result, List<string> WinnerNames)?> GetLastMatchProjectionForUserAsync(
             Guid userId, CancellationToken cancellationToken = default)
         {
             var result = await _context.Matches
@@ -40,17 +40,16 @@ namespace MeepleBoard.Infra.Data.Repositories
                 {
                     Name = m.Game != null ? m.Game.Name : "Desconhecido",
                     Date = m.MatchDate.ToString("yyyy-MM-dd"),
-                    Winner = m.MatchPlayers
-                                  .Where(mp => mp.IsWinner)
-                                  .Select(mp => mp.User != null ? mp.User.UserName : "Desconhecido")
-                                  .FirstOrDefault() ?? "Desconhecido",
+                    Winner = m.Winner != null ? m.Winner.UserName ?? "" : "",
+                    m.GameMode, m.Result,
+                    WinnerNames = m.MatchPlayers.Where(p => p.Outcome == "Win").Select(p => p.User != null ? p.User.UserName ?? "Nome do vencedor indisponível" : "Nome do vencedor indisponível").ToList(),
                     ImageUrl = m.Game != null ? m.Game.ImageUrl : null,
                 })
                 .AsNoTracking()
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (result == null) return null;
-            return (result.Name, result.Date, result.Winner, result.ImageUrl);
+            return (result.Name, result.Date, result.Winner, result.ImageUrl, result.GameMode, result.Result, result.WinnerNames);
         }
 
         // ── Projecção: partidas pendentes de avaliação ────────────────────────
@@ -249,13 +248,20 @@ namespace MeepleBoard.Infra.Data.Repositories
         public async Task AddAsync(Match match, CancellationToken cancellationToken = default)
             => await _context.Matches.AddAsync(match, cancellationToken);
 
-        public Task UpdateAsync(Match match, CancellationToken cancellationToken = default)
+        public async Task UpdateAsync(Match match, CancellationToken cancellationToken = default)
         {
-            // Callers update match fields only. Do not attach its read-only related
-            // users, scores and journal objects into an already tracked context.
+            // Attach only the match; related users and private journals remain read-only.
             _context.Entry(match).State = EntityState.Modified;
-            // The service/job owns SaveChanges; saving here makes its row count zero.
-            return Task.CompletedTask;
+            if (match.Result != null)
+            {
+                foreach (var player in match.MatchPlayers.ToList())
+                {
+                    var stored = await _context.MatchPlayers.FindAsync(new object[] { player.Id }, cancellationToken);
+                    if (stored != null && player.Outcome != null && stored.Outcome != player.Outcome)
+                        stored.SetOutcome(player.Outcome);
+                }
+            }
+            // The service/job owns SaveChanges and its affected-row count.
         }
 
         public async Task DeleteAsync(

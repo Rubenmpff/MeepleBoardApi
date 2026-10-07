@@ -1,4 +1,4 @@
-using AutoMapper;
+﻿using AutoMapper;
 using MeepleBoard.Application.DTOs;
 using MeepleBoard.Domain.Entities;
 using MeepleBoard.Services.DTOs;
@@ -20,6 +20,8 @@ namespace MeepleBoardApi.Services.Mapping.AutoMapper
 
             // --- Match ---
             CreateMap<Match, MatchDto>()
+                .ForMember(d => d.WinnerIds, o => o.MapFrom(s => s.MatchPlayers.Where(p => p.Outcome == "Win").Select(p => p.UserId)))
+                .ForMember(d => d.ResultPlayerIds, o => o.MapFrom(s => s.GameMode == "COMPETITIVE" ? s.MatchPlayers.Where(p => p.Outcome == s.Result && (s.Result == "Win" || s.Result == "Draw")).Select(p => p.UserId).ToList() : new List<Guid>()))
                 .ForMember(d => d.GameImageUrl, o => o.MapFrom(s => s.Game != null ? s.Game.ImageUrl : null))
                 .ForMember(d => d.GameName, o => o.MapFrom(s => s.Game != null ? s.Game.Name : "Jogo Desconhecido"))
                 .ForMember(d => d.WinnerName, o => o.MapFrom(s => s.Winner != null ? s.Winner.UserName : null))

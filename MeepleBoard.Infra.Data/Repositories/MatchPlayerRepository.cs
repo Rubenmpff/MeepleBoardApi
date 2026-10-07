@@ -47,22 +47,22 @@ namespace MeepleBoard.Infra.Data.Repositories
         {
             return await _context.MatchPlayers
                 .AsNoTracking()
-                .CountAsync(mp => mp.UserId == userId && mp.IsWinner, cancellationToken);
+                .CountAsync(mp => mp.UserId == userId && mp.Outcome == "Win", cancellationToken);
         }
 
-        public async Task<double> GetWinRateByUserAsync(Guid userId, CancellationToken cancellationToken = default)
+        public async Task<double?> GetWinRateByUserAsync(Guid userId, CancellationToken cancellationToken = default)
         {
             var result = await _context.MatchPlayers
                 .Where(mp => mp.UserId == userId)
                 .GroupBy(mp => mp.UserId)
                 .Select(g => new
                 {
-                    TotalMatches = g.Count(),
-                    TotalWins = g.Count(mp => mp.IsWinner)
+                    TotalMatches = g.Count(mp => mp.Outcome == "Win" || mp.Outcome == "Loss" || mp.Outcome == "Draw"),
+                    TotalWins = g.Count(mp => mp.Outcome == "Win")
                 })
                 .FirstOrDefaultAsync(cancellationToken);
 
-            return (result == null || result.TotalMatches == 0) ? 0 : (double)result.TotalWins / result.TotalMatches * 100;
+            return (result == null || result.TotalMatches == 0) ? (double?)null : (double)result.TotalWins / result.TotalMatches * 100;
         }
 
         public async Task<int> GetTotalMatchesByUserInPeriodAsync(Guid userId, DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default)
@@ -76,7 +76,7 @@ namespace MeepleBoard.Infra.Data.Repositories
         public async Task<int> GetTotalWinsByUserInPeriodAsync(Guid userId, DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default)
         {
             return await _context.MatchPlayers
-                .Where(mp => mp.UserId == userId && mp.IsWinner && mp.Match!.MatchDate >= startDate && mp.Match.MatchDate <= endDate)
+                .Where(mp => mp.UserId == userId && mp.Outcome == "Win" && mp.Match!.MatchDate >= startDate && mp.Match.MatchDate <= endDate)
                 .AsNoTracking()
                 .CountAsync(cancellationToken);
         }

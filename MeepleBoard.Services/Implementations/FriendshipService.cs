@@ -56,7 +56,7 @@ public sealed class FriendshipService : IFriendshipService
                 x.MatchId, x.GameId, x.GameName, x.ImageUrl, x.MatchDate, x.Result)).ToList(),
             p.RecentSharedSessions.Select(x => new SharedSessionDto(
                 x.SessionId, x.Name, x.Date, x.MatchesCount)).ToList(),
-            p.LibraryPrivacy, p.CanViewLibrary, p.IsOnline);
+            p.LibraryPrivacy, p.CanViewLibrary, p.IsOnline, p.MatchesWithoutResult, p.KnownResultMatches, p.LegacyResultMatches);
     }
 
     public async Task<SharedMatchesPageDto> GetSharedMatchesAsync(
@@ -93,7 +93,7 @@ public sealed class FriendshipService : IFriendshipService
 
     private static SharedMatchDetailDto MapMatchDetail(SharedMatchDetailProjection x)
         => new(x.MatchId, x.GameId, x.GameName, x.ImageUrl, x.MatchDate, x.Result,
-            x.DurationInMinutes, x.Location, x.CurrentUserScore, x.OtherUserScore);
+            x.DurationInMinutes, x.Location, x.CurrentUserScore, x.OtherUserScore, x.GameMode, x.CurrentOutcome, x.OtherOutcome, x.ResultSource);
 
     public async Task<IReadOnlyList<FriendRequestDto>> GetIncomingAsync(Guid currentUserId, CancellationToken ct = default)
     {

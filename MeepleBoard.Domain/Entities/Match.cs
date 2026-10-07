@@ -75,6 +75,20 @@ namespace MeepleBoard.Domain.Entities
         [ForeignKey("GameSessionId")]
         public virtual GameSession? GameSession { get; private set; }
 
+        [MaxLength(16)]
+        public string? GameMode { get; private set; }
+        [MaxLength(16)]
+        public string? Result { get; private set; }
+        public bool? SharedVictoryAllowed { get; private set; }
+
+        public void SetExplicitResult(string mode, string result, bool shared, IReadOnlyDictionary<Guid, string> outcomes)
+        {
+            GameMode = mode; Result = result; SharedVictoryAllowed = shared;
+            SetSoloGame(mode == "SOLO");
+            var winners = outcomes.Where(p => p.Value == "Win").Select(p => p.Key).ToList();
+            SetWinner(mode != "COOPERATIVE" && winners.Count == 1 ? winners[0] : null);
+        }
+
         public bool IsSoloGame { get; private set; }
 
         public Guid? WinnerId { get; private set; }

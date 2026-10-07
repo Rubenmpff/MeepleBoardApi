@@ -94,7 +94,7 @@ namespace MeepleBoard.Infra.Data.Repositories
         {
             var query = _context.MatchPlayers
                 .Where(mp =>
-                    mp.IsWinner &&
+                    mp.Outcome == "Win" && mp.Match!.IsOfficialMode &&
                     (!startDate.HasValue || mp.Match!.MatchDate >= startDate.Value))
                 .GroupBy(mp => mp.UserId)
                 .Select(g => new

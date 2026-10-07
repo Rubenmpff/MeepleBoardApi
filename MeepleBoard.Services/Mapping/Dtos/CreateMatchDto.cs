@@ -23,6 +23,11 @@ namespace MeepleBoard.Services.Mapping.Dtos
         public Guid? WinnerId { get; init; }
 
         public bool IsSoloGame { get; init; }
+        public string? GameMode { get; init; }
+        public string? Result { get; init; }
+        public List<Guid>? ResultPlayerIds { get; init; }
+        public bool? SharedVictoryAllowed { get; init; }
+
 
         public int? DurationInMinutes { get; init; }
 

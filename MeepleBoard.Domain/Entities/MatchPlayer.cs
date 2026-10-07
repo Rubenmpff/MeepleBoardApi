@@ -67,6 +67,13 @@ namespace MeepleBoard.Domain.Entities
 
         // 🔹 Indica se o jogador venceu
         public bool IsWinner { get; private set; }
+        [MaxLength(16)]
+        public string? Outcome { get; private set; }
+        public void SetOutcome(string outcome)
+        {
+            if (outcome is not ("Win" or "Loss" or "Draw" or "Undefined")) throw new ArgumentException("Resultado do participante inválido.");
+            Outcome = outcome; SetWinner(outcome == "Win"); UpdateTimestamp();
+        }
 
         // 🔹 Posição do jogador na partida
         private int? _rankPosition;

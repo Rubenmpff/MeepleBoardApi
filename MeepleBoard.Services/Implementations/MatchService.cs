@@ -105,7 +105,7 @@ namespace MeepleBoard.Services.Implementations
             {
                 Name = result.Value.Name,
                 Date = result.Value.Date,
-                Winner = result.Value.Winner,
+                Winner = result.Value.Winner, GameMode = result.Value.GameMode, Result = result.Value.Result, WinnerNames = result.Value.WinnerNames,
                 ImageUrl = imageUrl,
             };
         }
@@ -249,6 +249,14 @@ namespace MeepleBoard.Services.Implementations
             if (!dto.IsSoloGame && playerIds.Count < 2)
                 throw new ArgumentException("Uma partida competitiva exige pelo menos dois participantes distintos.");
 
+            var outcomes = dto.Result == null ? null : MatchOutcomeRules.Resolve(dto.GameMode, dto.Result, playerIds,
+                dto.ResultPlayerIds, dto.SharedVictoryAllowed == true, dto.GameSessionId.HasValue);
+            if (outcomes != null && dto.IsSoloGame != (dto.GameMode == "SOLO")) throw new ArgumentException("O modo e a indicação Solo devem ser coerentes.");
+            if (outcomes != null && dto.WinnerId.HasValue) {
+                var wins = outcomes.Where(p => p.Value == "Win").Select(p => p.Key).ToList();
+                if (dto.GameMode == "COOPERATIVE" || wins.Count != 1 || wins[0] != dto.WinnerId) throw new ArgumentException("O vencedor individual é incompatível com o resultado indicado.");
+            }
+
             var scoresEnabled = dto.ScoresEnabled ?? scores.Values.Any(score => score.HasValue);
             if (dto.ScoresEnabled == false && scores.Count > 0)
                 throw new ArgumentException("Uma partida sem pontuação não pode enviar valores.");
@@ -298,7 +306,7 @@ namespace MeepleBoard.Services.Implementations
                         "O utilizador autenticado tem de participar no match da sessão.");
             }
 
-            if (!dto.IsSoloGame)
+            if (outcomes == null && !dto.IsSoloGame)
             {
                 if (!dto.WinnerId.HasValue || dto.WinnerId.Value == Guid.Empty)
                     throw new ArgumentException("O vencedor é obrigatório em partidas multiplayer.");
@@ -311,8 +319,8 @@ namespace MeepleBoard.Services.Implementations
             match.UpdateMatchDetails(dto.Location, dto.ScoreSummary, dto.DurationInMinutes);
             match.SetSoloGame(dto.IsSoloGame);
 
-            if (dto.WinnerId.HasValue && dto.WinnerId.Value != Guid.Empty)
-                match.SetWinner(dto.WinnerId);
+            if (outcomes != null) match.SetExplicitResult(dto.GameMode!, dto.Result!, dto.SharedVictoryAllowed == true, outcomes);
+            else if (dto.WinnerId.HasValue && dto.WinnerId.Value != Guid.Empty) match.SetWinner(dto.WinnerId);
 
             if (dto.PersonalRating.HasValue ||
                 !string.IsNullOrWhiteSpace(dto.Notes) ||
@@ -329,8 +337,8 @@ namespace MeepleBoard.Services.Implementations
                 var mp = new MatchPlayer(match.Id, userId);
                 if (scores.TryGetValue(userId, out var playerScore))
                     mp.UpdateScore(playerScore);
-                if (dto.WinnerId.HasValue && dto.WinnerId.Value == userId)
-                    mp.SetWinner(true);
+                if (outcomes != null) mp.SetOutcome(outcomes[userId]);
+                else if (dto.WinnerId.HasValue && dto.WinnerId.Value == userId) mp.SetWinner(true);
                 await _matchPlayerRepository.AddAsync(mp, cancellationToken);
             }
 
@@ -404,11 +412,20 @@ namespace MeepleBoard.Services.Implementations
             var match = await _matchRepository.GetByIdAsync(matchDto.Id, cancellationToken);
             if (match == null) throw new KeyNotFoundException("Partida não encontrada.");
             RequireCreator(match, userId);
+            if (matchDto.Result != null) {
+                var outcomes = MatchOutcomeRules.Resolve(matchDto.GameMode, matchDto.Result, match.MatchPlayers.Select(p => p.UserId), matchDto.ResultPlayerIds, matchDto.SharedVictoryAllowed == true, match.GameSessionId.HasValue);
+                if (matchDto.IsSoloGame != (matchDto.GameMode == "SOLO")) throw new ArgumentException("O modo e a indicação Solo devem ser coerentes.");
+                var individualWinners = outcomes.Where(p => p.Value == "Win").Select(p => p.Key).ToList();
+                var expectedWinner = matchDto.GameMode != "COOPERATIVE" && individualWinners.Count == 1 ? (Guid?)individualWinners[0] : null;
+                if (matchDto.WinnerId.HasValue && matchDto.WinnerId != expectedWinner) throw new ArgumentException("O vencedor indicado não corresponde ao resultado escolhido.");
+                match.SetExplicitResult(matchDto.GameMode!, matchDto.Result, matchDto.SharedVictoryAllowed == true, outcomes);
+                foreach (var player in match.MatchPlayers) player.SetOutcome(outcomes[player.UserId]);
+            } else if (match.Result == null) {
+                match.SetSoloGame(matchDto.IsSoloGame); match.SetWinner(matchDto.WinnerId);
+            }
             match.SetGameId(matchDto.GameId);
             match.SetMatchDate(matchDto.MatchDate);
             match.UpdateMatchDetails(matchDto.Location, matchDto.ScoreSummary, matchDto.DurationInMinutes);
-            match.SetSoloGame(matchDto.IsSoloGame);
-            match.SetWinner(matchDto.WinnerId);
             await _matchRepository.UpdateAsync(match, cancellationToken);
             return await _matchRepository.SaveChangesAsync(cancellationToken);
         }

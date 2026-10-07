@@ -44,7 +44,7 @@ namespace MeepleBoard.Services.Mapping.Dtos
         /// <summary>Se quem pede o perfil pode ver a coleção (tab Coleção) deste utilizador.</summary>
         bool canViewLibrary,
         /// <summary>Se este utilizador fez algum pedido à API nos últimos 5 minutos.</summary>
-        bool isOnline);
+        bool isOnline, int matchesWithoutResult = 0, int knownResultMatches = 0, int legacyResultMatches = 0);
 
     /// <summary>
     /// Partida partilhada com detalhe (pontuações, duração, local) — usado na
@@ -53,7 +53,7 @@ namespace MeepleBoard.Services.Mapping.Dtos
     public record SharedMatchDetailDto(
         Guid matchId, Guid gameId, string gameName, string? imageUrl,
         DateTime matchDate, string result, int? durationInMinutes, string? location,
-        int? currentUserScore, int? otherUserScore);
+        int? currentUserScore, int? otherUserScore, string? gameMode = null, string? currentOutcome = null, string? otherOutcome = null, string resultSource = "Legacy");
 
     /// <summary>Página de partidas partilhadas (tab "Partidas").</summary>
     public record SharedMatchesPageDto(

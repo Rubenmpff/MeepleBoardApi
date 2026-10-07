@@ -261,25 +261,22 @@ namespace MeepleBoard.Infra.Data.Repositories
                     m.GameId,
                     GameName = m.Game!.Name,
                     m.Game.ImageUrl,
-                    m.Game.IsCooperative,
+                    GameMode = m.GameMode, m.Result,
                     m.MatchDate,
                     m.DurationInMinutes,
-                    CurrentWon = m.MatchPlayers.Any(p => p.UserId == currentUserId && p.IsWinner),
-                    OtherWon = m.MatchPlayers.Any(p => p.UserId == targetUserId && p.IsWinner)
+                    CurrentOutcome = m.MatchPlayers.Where(p => p.UserId == currentUserId).Select(p => p.Outcome).FirstOrDefault(),
+                    OtherOutcome = m.MatchPlayers.Where(p => p.UserId == targetUserId).Select(p => p.Outcome).FirstOrDefault()
                 })
                 .ToListAsync(ct);
 
             var topGames = sharedRows
-                .GroupBy(m => new { m.GameId, m.GameName, m.ImageUrl, m.IsCooperative })
-                .OrderByDescending(g => g.Count()).ThenBy(g => g.Key.GameName)
-                .Take(5)
-                .Select(g => new SharedGameProjection(
-                    g.Key.GameId, g.Key.GameName, g.Key.ImageUrl, g.Count(),
-                    g.Count(x => !x.IsCooperative && x.CurrentWon),
-                    g.Count(x => !x.IsCooperative && x.OtherWon),
-                    g.Count(x => x.IsCooperative && x.CurrentWon && x.OtherWon),
-                    g.Key.IsCooperative))
-                .ToList();
+                .GroupBy(m => new { m.GameId, m.GameName, m.ImageUrl })
+                .OrderByDescending(g => g.Count()).ThenBy(g => g.Key.GameName).Take(5)
+                .Select(g => new SharedGameProjection(g.Key.GameId, g.Key.GameName, g.Key.ImageUrl, g.Count(),
+                    g.Count(x => x.GameMode == "COMPETITIVE" && x.CurrentOutcome == "Win"),
+                    g.Count(x => x.GameMode == "COMPETITIVE" && x.OtherOutcome == "Win"),
+                    g.Count(x => x.GameMode == "COOPERATIVE" && x.Result == "Win"),
+                    g.All(x => x.GameMode == "COOPERATIVE"))).ToList();
 
             // 🔒 "Jogos em comum" mostra quais jogos o amigo possui — só faz sentido
             // devolver isto se a privacidade da coleção permitir vê-la.
@@ -307,13 +304,11 @@ namespace MeepleBoard.Infra.Data.Repositories
 
             var recentMatches = sharedRows.Take(5).Select(m =>
             {
-                var result = m.IsCooperative
-                    ? (m.CurrentWon && m.OtherWon ? "teamWin" : "teamLoss")
-                    : m.CurrentWon ? "currentUserWin" : m.OtherWon ? "otherUserWin" : "draw";
+                var result = MatchOutcomeRules.SharedResult(m.GameMode, m.Result, m.CurrentOutcome, m.OtherOutcome);
                 return new SharedMatchProjection(m.Id, m.GameId, m.GameName, m.ImageUrl, m.MatchDate, result);
             }).ToList();
 
-            var competitive = sharedRows.Where(m => !m.IsCooperative).ToList();
+            var competitive = sharedRows.Where(m => m.GameMode == "COMPETITIVE").ToList();
             return new FriendProfileProjection(
                 user.Id, user.UserName, user.ProfilePictureUrl, friendship?.Status,
                 friendship?.Id, friendship?.InitiatorId,
@@ -321,10 +316,13 @@ namespace MeepleBoard.Infra.Data.Repositories
                 totalMatches, totalGamesPlayed, totalGamesOwned,
                 sharedRows.Count, sharedRows.Select(m => m.GameId).Distinct().Count(),
                 sharedRows.Sum(m => m.DurationInMinutes ?? 0), sharedSessionRows.Count,
-                competitive.Count(m => m.CurrentWon), competitive.Count(m => m.OtherWon),
-                competitive.Count(m => !m.CurrentWon && !m.OtherWon), topGames, commonOwned,
+                competitive.Count(m => m.CurrentOutcome == "Win"), competitive.Count(m => m.OtherOutcome == "Win"),
+                competitive.Count(m => m.Result == "Draw"), topGames, commonOwned,
                 recentMatches, sharedSessionRows.Take(5).ToList(),
-                user.LibraryPrivacy.ToString(), canViewLibrary, IsRecentlyActive(user.LastActiveAt));
+                user.LibraryPrivacy.ToString(), canViewLibrary, IsRecentlyActive(user.LastActiveAt),
+                sharedRows.Count(m => m.Result == null || m.Result == "Undefined"),
+                sharedRows.Count(m => m.Result != null && m.Result != "Undefined"),
+                sharedRows.Count(m => m.Result == null));
         }
 
         /// <summary>
@@ -338,17 +336,15 @@ namespace MeepleBoard.Infra.Data.Repositories
 
         private static SharedMatchDetailProjection MapSharedMatchDetail(
             Guid currentUserId, Guid targetUserId,
-            Guid matchId, Guid gameId, string gameName, string? imageUrl, bool isCooperative,
+            Guid matchId, Guid gameId, string gameName, string? imageUrl, string? gameMode, string? storedResult,
             DateTime matchDate, int? durationInMinutes, string? location,
-            bool currentWon, bool otherWon, int? currentScore, int? otherScore)
+            string? currentOutcome, string? otherOutcome, int? currentScore, int? otherScore)
         {
-            var result = isCooperative
-                ? (currentWon && otherWon ? "teamWin" : "teamLoss")
-                : currentWon ? "currentUserWin" : otherWon ? "otherUserWin" : "draw";
+            var result = MatchOutcomeRules.SharedResult(gameMode, storedResult, currentOutcome, otherOutcome);
 
             return new SharedMatchDetailProjection(
                 matchId, gameId, gameName, imageUrl, matchDate, result,
-                durationInMinutes, location, currentScore, otherScore);
+                durationInMinutes, location, currentScore, otherScore, gameMode, currentOutcome, otherOutcome, storedResult == null ? "Legacy" : "Explicit");
         }
 
         public async Task<(IReadOnlyList<SharedMatchDetailProjection> Items, int TotalCount)> GetSharedMatchesAsync(
@@ -367,20 +363,20 @@ namespace MeepleBoard.Infra.Data.Repositories
                     m.GameId,
                     GameName = m.Game!.Name,
                     m.Game.ImageUrl,
-                    m.Game.IsCooperative,
+                    GameMode = m.GameMode, m.Result,
                     m.MatchDate,
                     m.DurationInMinutes,
                     m.Location,
-                    CurrentWon = m.MatchPlayers.Any(p => p.UserId == currentUserId && p.IsWinner),
-                    OtherWon = m.MatchPlayers.Any(p => p.UserId == targetUserId && p.IsWinner),
+                    CurrentOutcome = m.MatchPlayers.Where(p => p.UserId == currentUserId).Select(p => p.Outcome).FirstOrDefault(),
+                    OtherOutcome = m.MatchPlayers.Where(p => p.UserId == targetUserId).Select(p => p.Outcome).FirstOrDefault(),
                     CurrentScore = m.MatchPlayers.Where(p => p.UserId == currentUserId).Select(p => p.Score).FirstOrDefault(),
                     OtherScore = m.MatchPlayers.Where(p => p.UserId == targetUserId).Select(p => p.Score).FirstOrDefault(),
                 })
                 .ToListAsync(ct);
 
             var items = rows.Select(m => MapSharedMatchDetail(
-                currentUserId, targetUserId, m.Id, m.GameId, m.GameName, m.ImageUrl, m.IsCooperative,
-                m.MatchDate, m.DurationInMinutes, m.Location, m.CurrentWon, m.OtherWon, m.CurrentScore, m.OtherScore)).ToList();
+                currentUserId, targetUserId, m.Id, m.GameId, m.GameName, m.ImageUrl, m.GameMode, m.Result,
+                m.MatchDate, m.DurationInMinutes, m.Location, m.CurrentOutcome, m.OtherOutcome, m.CurrentScore, m.OtherScore)).ToList();
 
             return (items, totalCount);
         }
@@ -398,20 +394,20 @@ namespace MeepleBoard.Infra.Data.Repositories
                     m.GameId,
                     GameName = m.Game!.Name,
                     m.Game.ImageUrl,
-                    m.Game.IsCooperative,
+                    GameMode = m.GameMode, m.Result,
                     m.MatchDate,
                     m.DurationInMinutes,
                     m.Location,
-                    CurrentWon = m.MatchPlayers.Any(p => p.UserId == currentUserId && p.IsWinner),
-                    OtherWon = m.MatchPlayers.Any(p => p.UserId == targetUserId && p.IsWinner),
+                    CurrentOutcome = m.MatchPlayers.Where(p => p.UserId == currentUserId).Select(p => p.Outcome).FirstOrDefault(),
+                    OtherOutcome = m.MatchPlayers.Where(p => p.UserId == targetUserId).Select(p => p.Outcome).FirstOrDefault(),
                     CurrentScore = m.MatchPlayers.Where(p => p.UserId == currentUserId).Select(p => p.Score).FirstOrDefault(),
                     OtherScore = m.MatchPlayers.Where(p => p.UserId == targetUserId).Select(p => p.Score).FirstOrDefault(),
                 })
                 .ToListAsync(ct);
 
             return rows.Select(m => MapSharedMatchDetail(
-                currentUserId, targetUserId, m.Id, m.GameId, m.GameName, m.ImageUrl, m.IsCooperative,
-                m.MatchDate, m.DurationInMinutes, m.Location, m.CurrentWon, m.OtherWon, m.CurrentScore, m.OtherScore)).ToList();
+                currentUserId, targetUserId, m.Id, m.GameId, m.GameName, m.ImageUrl, m.GameMode, m.Result,
+                m.MatchDate, m.DurationInMinutes, m.Location, m.CurrentOutcome, m.OtherOutcome, m.CurrentScore, m.OtherScore)).ToList();
         }
 
 

@@ -1,5 +1,7 @@
 # Testes no Mac M2 — SQL Server local por emulação
 
+Atualização: DeviceTests tem 25 migrações, incluindo AddExplicitMatchOutcomes (quatro colunas anuláveis, sem preencher registos antigos). Ver [resultados explícitos](resultados-explicitos.md). Base habitual intacta.
+
 Verificado em 6 de outubro de 2026. O utilizador escolheu explicitamente experimentar SQL Server x86-64 em Docker no M2, para desenvolvimento com dados fictícios, aceitando a ausência de suporte Microsoft para emulação. Não foi escolhido outro servidor nem usada a base habitual.
 
 ## Continuação — avaliação e participantes

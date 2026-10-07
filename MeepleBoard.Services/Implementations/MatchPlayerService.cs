@@ -53,7 +53,7 @@ namespace MeepleBoard.Services.Implementations
         }
 
         // 🔹 Obtém a taxa de vitórias do usuário
-        public async Task<double> GetWinRateByUserAsync(Guid userId, CancellationToken cancellationToken = default)
+        public async Task<double?> GetWinRateByUserAsync(Guid userId, CancellationToken cancellationToken = default)
         {
             await ValidateUserExistsAsync(userId, cancellationToken);
             return await _matchPlayerRepository.GetWinRateByUserAsync(userId, cancellationToken);

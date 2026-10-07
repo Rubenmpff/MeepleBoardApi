@@ -68,7 +68,7 @@ public sealed record FriendProfileProjection(
     IReadOnlyList<SharedGameProjection> CommonOwnedGames,
     IReadOnlyList<SharedMatchProjection> RecentSharedMatches,
     IReadOnlyList<SharedSessionProjection> RecentSharedSessions,
-    string LibraryPrivacy, bool CanViewLibrary, bool IsOnline);
+    string LibraryPrivacy, bool CanViewLibrary, bool IsOnline, int MatchesWithoutResult = 0, int KnownResultMatches = 0, int LegacyResultMatches = 0);
 
 /// <summary>
 /// Partida partilhada com detalhe suficiente para a tab "Partidas" e o
@@ -78,4 +78,4 @@ public sealed record FriendProfileProjection(
 public sealed record SharedMatchDetailProjection(
     Guid MatchId, Guid GameId, string GameName, string? ImageUrl,
     DateTime MatchDate, string Result, int? DurationInMinutes, string? Location,
-    int? CurrentUserScore, int? OtherUserScore);
+    int? CurrentUserScore, int? OtherUserScore, string? GameMode = null, string? CurrentOutcome = null, string? OtherOutcome = null, string ResultSource = "Legacy");

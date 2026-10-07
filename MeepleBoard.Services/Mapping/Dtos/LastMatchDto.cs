@@ -2,6 +2,9 @@
 {
     public class LastMatchDto
     {
+        public string? GameMode { get; set; }
+        public string? Result { get; set; }
+        public List<string> WinnerNames { get; set; } = new();
         public string Name { get; set; } = string.Empty;
         public string Date { get; set; } = string.Empty;
         public string Winner { get; set; } = "Desconhecido";

@@ -16,7 +16,7 @@ namespace MeepleBoard.Domain.Interfaces
         Task<int> GetTotalMatchesByGameAsync(Guid gameId, CancellationToken cancellationToken = default);
 
         // ✅ Projecções optimizadas
-        Task<(string Name, string Date, string Winner, string? ImageUrl)?> GetLastMatchProjectionForUserAsync(Guid userId, CancellationToken cancellationToken = default);
+        Task<(string Name, string Date, string Winner, string? ImageUrl, string? GameMode, string? Result, List<string> WinnerNames)?> GetLastMatchProjectionForUserAsync(Guid userId, CancellationToken cancellationToken = default);
         Task<IReadOnlyList<Match>> GetPendingJournalMatchesForUserAsync(Guid userId, CancellationToken cancellationToken = default);
         Task<IReadOnlyList<Match>> GetMatchHistoryByGameForUserAsync(Guid gameId, Guid userId, CancellationToken cancellationToken = default);
 

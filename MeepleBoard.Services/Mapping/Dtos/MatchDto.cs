@@ -31,6 +31,13 @@ namespace MeepleBoard.Services.DTOs
         public string? WinnerName { get; init; }
 
         public bool IsSoloGame { get; init; } = false;
+        public string? GameMode { get; init; }
+        public string? Result { get; init; }
+        public List<Guid>? ResultPlayerIds { get; init; }
+        public bool? SharedVictoryAllowed { get; init; }
+        public string ResultSource => Result == null ? "Legacy" : "Explicit";
+        public List<Guid> WinnerIds { get; init; } = new();
+
 
         [Range(0, int.MaxValue, ErrorMessage = "A duração da partida não pode ser negativa.")]
         public int? DurationInMinutes { get; init; }
@@ -102,7 +109,7 @@ namespace MeepleBoard.Services.DTOs
             if (validationContext?.ObjectInstance is not MatchDto matchDto)
                 return ValidationResult.Success;
 
-            if (!matchDto.IsSoloGame && (value == null || (value is Guid guidValue && guidValue == Guid.Empty)))
+            if (matchDto.Result == null && !matchDto.IsSoloGame && (value == null || (value is Guid guidValue && guidValue == Guid.Empty)))
                 return new ValidationResult(ErrorMessage);
 
             return ValidationResult.Success;

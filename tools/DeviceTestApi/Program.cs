@@ -72,13 +72,16 @@ public static class DeviceDatabase {
             if (index.UpOperations.Count != 1 || index.UpOperations[0] is not Microsoft.EntityFrameworkCore.Migrations.Operations.CreateIndexOperation i || i.Name != "IX_GameSearchCatalog_RatingsCount_BggRank_AverageRating_Name_BggId" || i.Filter != "[DetailsSyncedAt] IS NULL" || !i.IsDescending!.SequenceEqual(new[] { true, false, true, false, false })) throw new Exception("Unexpected catalogue migration changes");
             var ratings = migrations.CreateMigration(migrations.Migrations["20261006140000_PreserveJournalHalfRatings"], review.Database.ProviderName!);
             if (ratings.UpOperations.Count != 1 || ratings.UpOperations[0] is not Microsoft.EntityFrameworkCore.Migrations.Operations.AlterColumnOperation r || r.Table != "MatchJournalEntries" || r.Name != "PersonalRating" || r.ClrType != typeof(double) || r.ColumnType != "float" || !r.IsNullable || r.OldColumn.ClrType != typeof(int) || r.OldColumn.ColumnType != "int" || !r.OldColumn.IsNullable) throw new Exception("Unexpected journal rating migration changes");
+            var outcomesMigration = migrations.CreateMigration(migrations.Migrations["20261006150000_AddExplicitMatchOutcomes"], review.Database.ProviderName!);
+            var expected = new HashSet<string> { "Matches.GameMode", "Matches.Result", "Matches.SharedVictoryAllowed", "MatchPlayers.Outcome" };
+            if (outcomesMigration.UpOperations.Count != 4 || outcomesMigration.UpOperations.Any(op => op is not Microsoft.EntityFrameworkCore.Migrations.Operations.AddColumnOperation col || !col.IsNullable || !expected.Remove(col.Table + "." + col.Name) || (col.Name == "SharedVictoryAllowed" ? col.ClrType != typeof(bool) || col.ColumnType != "bit" : col.ClrType != typeof(string) || col.ColumnType != "nvarchar(16)")) || expected.Count != 0) throw new Exception("Unexpected outcome migration changes");
             var sql = review.GetService<IMigrator>().GenerateScript("20260824063025_OptimizeGameSearchTokenKey");
             // EF drops only a possible default constraint on this exact column before widening it.
             const string approvedDefaultDrop = "IF @var IS NOT NULL EXEC(N'ALTER TABLE [MatchJournalEntries] DROP CONSTRAINT [' + @var + '];');";
             if (!sql.Contains("WHERE ([d].[parent_object_id] = OBJECT_ID(N'[MatchJournalEntries]') AND [c].[name] = N'PersonalRating');") || !sql.Contains("ALTER TABLE [MatchJournalEntries] ALTER COLUMN [PersonalRating] float NULL;")) throw new Exception("Unexpected rating conversion SQL");
             var auditedSql = sql.Replace(approvedDefaultDrop, "");
             if (auditedSql.Contains("DROP ") || auditedSql.Contains("UPDATE [Matches]") || auditedSql.Contains("DELETE ")) throw new Exception("Unexpected destructive migration SQL");
-            Console.WriteLine("Migration audit passed: model matches snapshot; nullable CreatorId, one filtered index and nullable rating widened to float.");
+            Console.WriteLine("Migration audit passed: model matches snapshot; nullable CreatorId, one filtered index and nullable rating widened to float, four nullable outcome columns.");
             if (Environment.GetCommandLineArgs().Contains("--audit-only")) return;
         }
         // All SQL access derives from the same validated exclusive test connection.

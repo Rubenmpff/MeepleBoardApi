@@ -38,6 +38,8 @@ namespace MeepleBoard.Services.DTOs
         /// <summary>
         /// Indica se o jogador venceu a partida.
         /// </summary>
+        public string? Outcome { get; init; }
+
         public bool IsWinner { get; init; } = false;
 
         /// <summary>

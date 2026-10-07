@@ -28,8 +28,7 @@ namespace MeepleBoard.Services.Implementations
             if (user == null) return null;
 
             var userDto = _mapper.Map<UserDto>(user);
-            userDto.TotalGamesPlayed = await GetTotalGamesPlayedAsync(user.Id, cancellationToken);
-            userDto.TotalWins = await GetTotalWinsAsync(user.Id, cancellationToken);
+            await PopulateResultStatistics(userDto, cancellationToken);
 
             return userDto;
         }
@@ -42,8 +41,7 @@ namespace MeepleBoard.Services.Implementations
             if (user == null) return null;
 
             var userDto = _mapper.Map<UserDto>(user);
-            userDto.TotalGamesPlayed = await GetTotalGamesPlayedAsync(user.Id, cancellationToken);
-            userDto.TotalWins = await GetTotalWinsAsync(user.Id, cancellationToken);
+            await PopulateResultStatistics(userDto, cancellationToken);
 
             return userDto;
         }
@@ -55,8 +53,7 @@ namespace MeepleBoard.Services.Implementations
 
             foreach (var userDto in userDtos)
             {
-                userDto.TotalGamesPlayed = await GetTotalGamesPlayedAsync(userDto.Id, cancellationToken);
-                userDto.TotalWins = await GetTotalWinsAsync(userDto.Id, cancellationToken);
+                await PopulateResultStatistics(userDto, cancellationToken);
             }
 
             return userDtos;
@@ -134,14 +131,19 @@ namespace MeepleBoard.Services.Implementations
         private async Task<int> GetTotalWinsAsync(Guid userId, CancellationToken cancellationToken)
         {
             var matches = await _matchRepository.GetByUserIdAsync(userId, cancellationToken: cancellationToken);
-            return matches.Count(m => m.WinnerId == userId);
+            return matches.Count(m => m.MatchPlayers.Any(p => p.UserId == userId && p.Outcome == "Win"));
         }
 
-        private async Task<double> GetWinRateAsync(Guid userId, CancellationToken cancellationToken)
+        private async Task PopulateResultStatistics(UserDto dto, CancellationToken cancellationToken)
         {
-            int totalGames = await GetTotalGamesPlayedAsync(userId, cancellationToken);
-            int totalWins = await GetTotalWinsAsync(userId, cancellationToken);
-            return totalGames > 0 ? Math.Round((double)totalWins / totalGames * 100, 2) : 0;
+            var matches = await _matchRepository.GetByUserIdAsync(dto.Id, cancellationToken: cancellationToken);
+            var outcomes = matches.SelectMany(m => m.MatchPlayers.Where(p => p.UserId == dto.Id)).Select(p => p.Outcome).ToList();
+            dto.TotalGamesPlayed = matches.Count;
+            dto.TotalWins = outcomes.Count(o => o == "Win"); dto.TotalLosses = outcomes.Count(o => o == "Loss"); dto.TotalDraws = outcomes.Count(o => o == "Draw");
+            dto.KnownResultMatches = dto.TotalWins + dto.TotalLosses + dto.TotalDraws;
+            dto.MatchesWithoutResult = outcomes.Count(o => o == null || o == "Undefined");
+            dto.LegacyResultMatches = matches.Count(m => m.Result == null);
+            dto.WinRate = dto.KnownResultMatches > 0 ? Math.Round(100d * dto.TotalWins / dto.KnownResultMatches, 2) : null;
         }
 
         /// <summary>

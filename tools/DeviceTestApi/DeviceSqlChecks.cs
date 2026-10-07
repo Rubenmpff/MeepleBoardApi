@@ -13,7 +13,9 @@ public static class DeviceSqlChecks {
             if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) != expected) throw new Exception("SQL check failed: " + name);
             Console.WriteLine("PASS SQL " + name);
         }
-        await Check("24 migrations applied", "SELECT COUNT(*) FROM __EFMigrationsHistory", 24);
+        await Check("25 migrations applied", "SELECT COUNT(*) FROM __EFMigrationsHistory", 25);
+        await Check("nullable explicit match metadata", "SELECT COUNT(*) FROM sys.columns WHERE object_id=OBJECT_ID('Matches') AND name IN ('GameMode','Result','SharedVictoryAllowed') AND is_nullable=1", 3);
+        await Check("nullable participant outcome", "SELECT COUNT(*) FROM sys.columns WHERE object_id=OBJECT_ID('MatchPlayers') AND name='Outcome' AND is_nullable=1", 1);
         await Check("CreatorId exists", "SELECT COUNT(*) FROM sys.columns WHERE object_id=OBJECT_ID('Matches') AND name='CreatorId'", 1);
         await Check("catalogue filtered index exists", "SELECT COUNT(*) FROM sys.indexes WHERE name='IX_GameSearchCatalog_RatingsCount_BggRank_AverageRating_Name_BggId' AND has_filter=1", 1);
         await Check("journal half-point nullable column", "SELECT COUNT(*) FROM sys.columns WHERE object_id=OBJECT_ID('MatchJournalEntries') AND name='PersonalRating' AND system_type_id=TYPE_ID('float') AND is_nullable=1", 1);

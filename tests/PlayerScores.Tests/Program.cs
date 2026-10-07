@@ -156,6 +156,51 @@ foreach (var rating in new[] { 0d, .5, 7.5, 10d }) {
     });
 }
 
+foreach (var mode in new[] { "COMPETITIVE", "SOLO", "COOPERATIVE" }) foreach (var result in new[] { "Win", "Loss", "Draw", "Undefined" }) {
+    if (mode == "COMPETITIVE" && result == "Loss") continue;
+    await Check($"explicit {mode}/{result} persists per-player outcome and rereads", async () => {
+        var f = new Fixture(); var other = Guid.NewGuid(); var third = Guid.NewGuid();
+        var ids = mode == "SOLO" ? new List<Guid> { f.UserId } : new List<Guid> { f.UserId, other, third };
+        var selected = mode != "COMPETITIVE" || result == "Undefined" ? new List<Guid>() : result == "Draw" ? new() { f.UserId, other } : new() { f.UserId };
+        var response = await f.Service.CreateAsync(new CreateMatchDto { GameId = f.Game.Id, GameName = f.Game.Name, MatchDate = DateTime.UtcNow.AddMinutes(-1), PersonalRating = 0,
+            PlayerIds = ids, GameMode = mode, Result = result, IsSoloGame = mode == "SOLO", ResultPlayerIds = selected }, f.UserId);
+        Assert(response.GameMode == mode && response.Result == result && response.ResultSource == "Explicit");
+        foreach (var p in response.Players) Assert(p.Outcome == (mode == "COMPETITIVE" && result != "Undefined" ? selected.Contains(p.UserId) ? result : "Loss" : result));
+        Assert(mode != "COOPERATIVE" || response.WinnerId == null);
+        Assert(result == "Win" || response.WinnerIds.Count == 0);
+        Assert((await f.Service.GetByIdAsync(response.Id, f.UserId))!.Result == result);
+    });
+}
+await Check("shared competitive victory persists both winners and no arbitrary WinnerId", async () => {
+    var f = new Fixture(); var other = Guid.NewGuid();
+    var response = await f.Service.CreateAsync(new CreateMatchDto { GameId = f.Game.Id, GameName = f.Game.Name, MatchDate = DateTime.UtcNow.AddMinutes(-1), PersonalRating = .5,
+        PlayerIds = new() { f.UserId, other }, GameMode = "COMPETITIVE", Result = "Win", ResultPlayerIds = new() { f.UserId, other }, SharedVictoryAllowed = true }, f.UserId);
+    Assert(response.WinnerIds.Count == 2 && response.WinnerId == null && response.Players.All(p => p.Outcome == "Win"));
+});
+foreach (var kind in new[] { "shared not allowed", "one draw", "outsider", "repeated selection", "competitive loss", "solo two", "team selection", "undefined selection", "solo flag", "bad mode", "bad result" }) {
+    await Check($"explicit {kind} rejected before dependencies", async () => {
+        var f = new Fixture(); var other = Guid.NewGuid();
+        var mode = kind.StartsWith("solo") ? "SOLO" : kind == "team selection" ? "COOPERATIVE" : kind == "bad mode" ? "INVALID" : "COMPETITIVE";
+        var result = kind == "one draw" ? "Draw" : kind == "competitive loss" ? "Loss" : kind == "undefined selection" ? "Undefined" : kind == "bad result" ? "INVALID" : "Win";
+        var selection = kind == "shared not allowed" ? new List<Guid> { f.UserId, other } : kind == "repeated selection" ? new() { f.UserId, f.UserId } : kind == "outsider" ? new() { Guid.NewGuid() } : mode == "SOLO" ? new() : new() { f.UserId };
+        var dto = new CreateMatchDto { GameId = f.Game.Id, GameName = f.Game.Name, MatchDate = DateTime.UtcNow.AddMinutes(-1), PersonalRating = 7.5, GameMode = mode, Result = result,
+            IsSoloGame = kind == "solo two", PlayerIds = kind == "solo flag" ? new() { f.UserId } : new() { f.UserId, other }, ResultPlayerIds = selection };
+        try { await f.Service.CreateAsync(dto, f.UserId); throw new Exception("Expected rejection"); } catch (ArgumentException) { Assert(f.Calls == 0 && f.Saved == 0); }
+    });
+}
+await Check("legacy winner and solo flags remain unchanged and not promoted to explicit results", async () => {
+    var f = new Fixture(); await f.Service.CreateAsync(f.Request(null), f.UserId);
+    var read = await f.Service.GetByIdAsync(f.Match!.Id, f.UserId);
+    Assert(read!.ResultSource == "Legacy" && read.Result == null && read.GameMode == null && read.Players.Single().Outcome == null);
+});
+await Check("shared classification distinguishes third-person victory, partial draw, team draw and legacy", () => {
+    Assert(MatchOutcomeRules.SharedResult("COMPETITIVE", "Win", "Loss", "Loss") == "bothLost");
+    Assert(MatchOutcomeRules.SharedResult("COMPETITIVE", "Draw", "Draw", "Loss") == "currentUserDraw");
+    Assert(MatchOutcomeRules.SharedResult("COOPERATIVE", "Draw", "Draw", "Draw") == "teamDraw");
+    Assert(MatchOutcomeRules.SharedResult(null, null, null, null) == "legacyUnknown");
+    return Task.CompletedTask;
+});
+
 var ruleOwner = Guid.NewGuid();
 var ruleFriend = Guid.NewGuid();
 (GameSessionService Service, List<GameSession> Sessions, List<GameSessionPlayer> Links) SessionRules(bool acceptedFriend = true) {

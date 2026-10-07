@@ -10,7 +10,7 @@ namespace MeepleBoard.Services.Interfaces
 
         Task<int> GetTotalWinsByUserAsync(Guid userId, CancellationToken cancellationToken = default);
 
-        Task<double> GetWinRateByUserAsync(Guid userId, CancellationToken cancellationToken = default);
+        Task<double?> GetWinRateByUserAsync(Guid userId, CancellationToken cancellationToken = default);
 
         Task<int> GetTotalMatchesByUserInPeriodAsync(Guid userId, DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default);
 

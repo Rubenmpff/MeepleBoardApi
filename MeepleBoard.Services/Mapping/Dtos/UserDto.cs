@@ -27,6 +27,12 @@ namespace MeepleBoard.Services.DTOs
 
         [Range(0, int.MaxValue, ErrorMessage = "O total de vitórias não pode ser negativo.")]
         public int TotalWins { get; set; } = 0;
+        public int TotalLosses { get; set; }
+        public int TotalDraws { get; set; }
+        public int KnownResultMatches { get; set; }
+        public int MatchesWithoutResult { get; set; }
+        public int LegacyResultMatches { get; set; }
+        public double? WinRate { get; set; }
 
         /// <summary>
         /// Quem pode ver a coleção de jogos deste utilizador (Private, FriendsOnly, Public).
