@@ -17,3 +17,11 @@ Propor campos nullable novos e resultados explícitos por pessoa/equipa, manter 
 ## Etapa atual — zero
 
 Avaliação 0 confirmada novamente com HTTP/JWT na API marcada `DeviceTests`, base `MeepleBoard_DeviceTests`, externalDelivery false. Criada uma única partida fictícia competitiva com dois participantes, vencedor manual, scores -17 e 0 e avaliação 0. Duas leituras independentes do diário conservaram 0; só o autor teve avaliação, não o outro participante. Nenhum segredo foi apresentado ou versionado. Sem alteração funcional backend nem nova migração; a correção de apresentação de zero/estrelas ocorreu no frontend.
+
+
+## Proposta atual de Estatísticas e retrospetiva
+
+Início/Biblioteca aprovados; próxima etapa é proposta, sem implementar. Ver [estrutura e análise dos contratos atuais](../../MeepleBoardApp/docs/proposta-estatisticas-ano-a-mesa.md). Resultados explícitos e denominadores já existem; faltam agregações por período/fuso/cobertura, diário exclusivamente próprio e payload de partilha privado. Aquisição/moeda/comparabilidade de pontuações requerem novos dados; não preencher histórico por inferência. Jogar novamente permanece pendente. Base habitual intacta.
+
+
+Fase 1 autorizada e implementada: [contratos/agregações e evidência](estatisticas-fase-1.md). Restante visão aprovada continua por fases, ainda não implementada; partilha de amigos sempre anónima e sem toggle.

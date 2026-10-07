@@ -1,5 +1,6 @@
 ﻿
 using AspNetCoreRateLimit;
+using MeepleBoard.Services.Statistics;
 using FluentValidation;
 using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Infra.Data.Context;
@@ -127,6 +128,8 @@ namespace MeepleBoard.CrossCutting.IoC
             /* =========================================================
                SERVIÇOS DE APLICAÇÃO
             ========================================================== */
+
+            services.AddScoped<StatisticsService>();
 
             services.AddScoped<
                 IUserService,
