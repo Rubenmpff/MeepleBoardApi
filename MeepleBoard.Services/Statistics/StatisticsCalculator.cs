@@ -51,7 +51,7 @@ public static class StatisticsCalculator
     }
     public static bool MatchesMetric(StatisticsRow row, string metric) => metric switch
     {
-        "all" or "games" => true, "duration" => row.DurationInMinutes.HasValue, "missing-duration" => !row.DurationInMinutes.HasValue, "ratings" => row.PersonalRating.HasValue,
+        "all" or "games" => true, "scores" => row.Score.HasValue, "duration" => row.DurationInMinutes.HasValue, "missing-duration" => !row.DurationInMinutes.HasValue, "ratings" => row.PersonalRating.HasValue,
         "known" => Outcome(row) != null, "wins" => Outcome(row) == "Win", "losses" => Outcome(row) == "Loss", "draws" => Outcome(row) == "Draw",
         "undefined" => Outcome(row) == null, "legacy" => row.Result == null,
         _ => throw new ArgumentException("Indicador inválido.")

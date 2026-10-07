@@ -2,7 +2,7 @@ using MeepleBoard.Infra.Data.Context;
 using Microsoft.EntityFrameworkCore;
 namespace MeepleBoard.Services.Statistics;
 
-public sealed class StatisticsService(MeepleBoardDbContext db)
+public sealed partial class StatisticsService(MeepleBoardDbContext db)
 {
     private async Task<(List<StatisticsRow> Rows, TimeZoneInfo Zone)> Load(Guid userId, StatisticsQuery query, CancellationToken ct)
     {
@@ -24,10 +24,12 @@ public sealed class StatisticsService(MeepleBoardDbContext db)
     public async Task<StatisticsMatchPage> Matches(Guid userId, StatisticsMatchesQuery query, CancellationToken ct)
     {
         if (query.Offset < 0 || query.Limit is < 1 or > 100) throw new ArgumentException("Paginação inválida.");
+        if (query.FriendId.HasValue) return await CompanyMatches(userId, query, ct);
         StatisticsCalculator.MatchesMetric(new(Guid.Empty, Guid.Empty, "", null, DateTime.UtcNow, null, null, null, null, null, null), query.Metric);
         var filter = query.ToQuery(); var (rows, zone) = await Load(userId, filter, ct);
         var result = rows.Where(r => !query.GameId.HasValue || r.GameId == query.GameId)
             .Where(r => StatisticsCalculator.MatchesMetric(r, query.Metric))
+            .Where(r => !query.ScoreValue.HasValue || r.Score == query.ScoreValue)
             .Where(r => query.Bucket == null || StatisticsCalculator.Bucket(r, filter, zone) == query.Bucket)
             .OrderByDescending(r => r.MatchDate).ThenBy(r => r.MatchId).ToList();
         return new(result.Count, query.Offset, query.Limit, result.Skip(query.Offset).Take(query.Limit).Select(r => new StatisticsMatch(r.MatchId, r.GameId, r.GameName,

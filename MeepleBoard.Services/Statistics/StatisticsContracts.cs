@@ -12,6 +12,8 @@ public sealed class StatisticsMatchesQuery : StatisticsQueryBase
 {
     public string Metric { get; set; } = "all";
     public string? Bucket { get; set; }
+    public Guid? FriendId { get; set; }
+    public int? ScoreValue { get; set; }
     public int Offset { get; set; }
     public int Limit { get; set; } = 25;
 }
@@ -38,5 +40,5 @@ public sealed record StatisticsSummary(DateOnly Start, DateOnly EndExclusive, st
     string BucketUnit, IReadOnlyList<StatisticsBucket> Evolution, IReadOnlyList<StatisticsGame> Games,
     IReadOnlyList<StatisticsGame> GameOptions);
 public sealed record StatisticsMatch(Guid Id, Guid GameId, string GameName, string? GameImageUrl, DateTime MatchDate,
-    string GameMode, string? Outcome, string ResultSource, int? DurationInMinutes, int? Score, double? PersonalRating);
+    string GameMode, string? Outcome, string ResultSource, int? DurationInMinutes, int? Score, double? PersonalRating, int? FriendScore = null, string? FriendOutcome = null);
 public sealed record StatisticsMatchPage(int Total, int Offset, int Limit, IReadOnlyList<StatisticsMatch> Items);

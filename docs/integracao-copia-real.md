@@ -3,7 +3,7 @@
 ## Estado confirmado
 
 - Branch `fix/session-invite-accepted-friends`. API ativa em 5099: `DeviceTests`, base `MeepleBoard_DeviceTests`, `externalDelivery=false` (health consultado nesta revisão).
-- O anfitrião DeviceTests carrega os controllers da API principal e reutiliza `AddInfrastructure`, Identity, EF, serviços e repositórios reais. As Estatísticas (`/MeepleBoard/statistics/me` e `/matches`) estão na API principal e registadas no IoC habitual; não dependem de endpoints privados de DeviceTests.
+- O anfitrião DeviceTests carrega os controllers da API principal e reutiliza `AddInfrastructure`, Identity, EF, serviços e repositórios reais. As Estatísticas (`/MeepleBoard/statistics/me`, `/matches`, `/company`, `/explore` e `/year`) estão na API principal e registadas no IoC habitual; não dependem de endpoints privados de DeviceTests.
 - Health, preparação/semente de dados fictícios, JWT efémero e substitutos externos pertencem ao anfitrião de testes. Email é guardado em outbox local, push não envia, fotografias são locais, BGG usa dados locais e não há processamento Hangfire.
 - `Program.cs` habitual ativa Hangfire, regista tarefas de limpeza de utilizadores/sessões/partidas e sincronização BGG. Development/QA criam utilizadores de teste; roles são criadas em todos os ambientes. O programa não aplica `Database.Migrate` no arranque.
 - NÃO apontar DeviceTests à cópia: exige o nome/marcador da base fictícia e executa sementes. NÃO apontar já o arranque habitual à cópia: os workers podem consumir tarefas restauradas e executar limpezas/entregas.
@@ -61,3 +61,7 @@ Não executar `database update` contra a ligação habitual. Rever SQL das migra
 As funcionalidades são partilhadas no backend principal, não é necessário portar os controllers de DeviceTests. Fazer pull das branches de trabalho sem merge implícito, confirmar SDK 9.0.318/Node 22.14.0 e identificar a configuração efetiva do PC. LocalDB é viável no Windows se já for a origem habitual; Docker é apenas outra configuração SQL, não uma dependência das Estatísticas.
 
 Primeiro criar backup e cópia isolada no Windows ou transferir backup para destino Mac compatível. Comparar o histórico de migrações, gerar/rever o SQL pendente e aplicar à cópia. O principal não aplica migrações automaticamente. Manter desativados jobs, sementes e entregas na cópia antes de ensaiar o arranque principal. Validar as mesmas rotas `/MeepleBoard/statistics/me` e `/matches`, autenticação, privacidade e histórico antigo. Só depois planear atualização habitual com backup e decisão explícita; esta etapa não a executa.
+
+## Extensão de Estatísticas implementada
+
+Companhia, jogos/recordes, avaliações, coleção e retrospetiva estão nos serviços da API principal, com contratos documentados em [Estatísticas exploráveis](estatisticas-companhia-explorar-ano.md). Esta extensão não acrescenta migrações nem serviços externos obrigatórios para calcular os dados. Partilha é captura local na app; não exige Cloudinary. Permanecem as migrações anteriores e todas as proteções/bloqueios da cópia real descritos acima. O backup Windows continua indisponível nesta etapa.
