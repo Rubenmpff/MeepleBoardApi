@@ -1,5 +1,14 @@
 # Modos e resultados explícitos — regras aprovadas
 
+## Estado atual da validação no iPhone — 7 de outubro de 2026
+
+A pedido explícito do utilizador, ficam **pendentes** os testes de Solo com empate, Solo com resultado não definido e **todos os resultados cooperativos** (vitória, derrota, empate e não definido). Esta marcação substitui as confirmações breves anteriormente interpretadas como validação desses percursos. Os testes automatizados não substituem esta confirmação.
+
+Confirmados de forma explícita: empate competitivo parcial, vitória partilhada competitiva, Solo com vitória, Solo com derrota, pontuação zero e negativa, avaliação zero e 7,5/meios pontos, estrelas douradas legíveis e releitura dos percursos confirmados. Não generalizar estas confirmações a todos os ecrãs/estados nativos.
+
+Etapa atual: **duas propostas visuais de autenticação para escolher antes de implementar**. Sem alteração dos ecrãs, regras, API ou base. Estatísticas e retrospetiva «O teu ano à mesa» continuam como etapas seguintes de análise/proposta, não autorizadas para implementação nesta etapa.
+
+
 Implementação funcional em DeviceTests. Validação física no iPhone pendente. A base habitual não foi alterada. A avaliação zero e o dourado das estrelas continuam à espera de confirmação visual.
 
 | Modo | Participantes | Resultado | Seleção |
