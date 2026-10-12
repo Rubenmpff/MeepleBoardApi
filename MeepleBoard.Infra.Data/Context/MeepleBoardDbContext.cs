@@ -41,6 +41,10 @@ namespace MeepleBoard.Infra.Data.Context
         public DbSet<CampaignMatch> CampaignMatches { get; set; }
         public DbSet<MatchJournalEntry> MatchJournalEntries { get; set; }
 
+        // ── Recursos dos jogos (links externos) ──────────────────────────────
+        public DbSet<GameResource> GameResources { get; set; }
+        public DbSet<GameResourceReport> GameResourceReports { get; set; }
+
         protected override void OnModelCreating(
             ModelBuilder modelBuilder)
         {
@@ -337,6 +341,20 @@ namespace MeepleBoard.Infra.Data.Context
                     .WithOne(p => p.Session)
                     .HasForeignKey(p => p.SessionId)
                     .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<GameResource>(b =>
+            {
+                b.HasOne(r => r.Game).WithMany().HasForeignKey(r => r.GameId).OnDelete(DeleteBehavior.Cascade);
+                b.HasOne(r => r.SuggestedBy).WithMany().HasForeignKey(r => r.SuggestedById).OnDelete(DeleteBehavior.SetNull);
+                b.HasIndex(r => new { r.GameId, r.Status });
+            });
+
+            modelBuilder.Entity<GameResourceReport>(b =>
+            {
+                b.HasOne(r => r.Resource).WithMany(r => r.Reports).HasForeignKey(r => r.ResourceId).OnDelete(DeleteBehavior.Cascade);
+                b.HasOne(r => r.User).WithMany().HasForeignKey(r => r.UserId).OnDelete(DeleteBehavior.Restrict);
+                b.HasIndex(r => new { r.ResourceId, r.UserId });
             });
 
             modelBuilder.Entity<GameSessionPlayer>(b =>

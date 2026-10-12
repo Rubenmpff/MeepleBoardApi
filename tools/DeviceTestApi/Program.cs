@@ -80,13 +80,21 @@ public static class DeviceDatabase {
             var closeTime = migrations.CreateMigration(migrations.Migrations["20261012080128_AddSessionCloseTime"], review.Database.ProviderName!);
             if (closeTime.UpOperations.Count != 2 || closeTime.UpOperations.Any(op => op is not Microsoft.EntityFrameworkCore.Migrations.Operations.AddColumnOperation col || col.Table != "GameSessions"
                 || !(col.Name == "ClosesAt" && col.IsNullable && col.ColumnType == "datetime2" || col.Name == "ClosedAutomatically" && !col.IsNullable && col.ColumnType == "bit" && Equals(col.DefaultValue, false)))) throw new Exception("Unexpected session close-time migration changes");
+            var resources = migrations.CreateMigration(migrations.Migrations["20261012081445_AddGameResources"], review.Database.ProviderName!);
+            var tables = resources.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.CreateTableOperation>().Select(o => o.Name).OrderBy(n => n).ToArray();
+            if (!tables.SequenceEqual(new[] { "GameResourceReports", "GameResources" }) || resources.UpOperations.Count != 6
+                || resources.UpOperations.Skip(2).Any(op => op is not Microsoft.EntityFrameworkCore.Migrations.Operations.CreateIndexOperation)) throw new Exception("Unexpected game resources migration changes");
             var sql = review.GetService<IMigrator>().GenerateScript("20260824063025_OptimizeGameSearchTokenKey");
             // EF drops only a possible default constraint on this exact column before widening it.
             const string approvedDefaultDrop = "IF @var IS NOT NULL EXEC(N'ALTER TABLE [MatchJournalEntries] DROP CONSTRAINT [' + @var + '];');";
             if (!sql.Contains("WHERE ([d].[parent_object_id] = OBJECT_ID(N'[MatchJournalEntries]') AND [c].[name] = N'PersonalRating');") || !sql.Contains("ALTER TABLE [MatchJournalEntries] ALTER COLUMN [PersonalRating] float NULL;")) throw new Exception("Unexpected rating conversion SQL");
-            var auditedSql = sql.Replace(approvedDefaultDrop, "");
+            // Referential actions on the new resource tables' foreign keys: no existing row is touched.
+            string[] approvedResourceKeys = [
+                "REFERENCES [AspNetUsers] ([Id]) ON DELETE SET NULL", "REFERENCES [Games] ([Id]) ON DELETE CASCADE",
+                "REFERENCES [AspNetUsers] ([Id]) ON DELETE NO ACTION", "REFERENCES [GameResources] ([Id]) ON DELETE CASCADE"];
+            var auditedSql = approvedResourceKeys.Aggregate(sql.Replace(approvedDefaultDrop, ""), (text, clause) => text.Replace(clause, ""));
             if (auditedSql.Contains("DROP ") || auditedSql.Contains("UPDATE [Matches]") || auditedSql.Contains("DELETE ")) throw new Exception("Unexpected destructive migration SQL");
-            Console.WriteLine("Migration audit passed: model matches snapshot; nullable CreatorId, one filtered index and nullable rating widened to float, four nullable outcome columns, two session close-time columns.");
+            Console.WriteLine("Migration audit passed: model matches snapshot; nullable CreatorId, one filtered index and nullable rating widened to float, four nullable outcome columns, two session close-time columns, two new resource tables.");
             if (Environment.GetCommandLineArgs().Contains("--audit-only")) return;
         }
         // All SQL access derives from the same validated exclusive test connection.
@@ -109,10 +117,12 @@ public static class DeviceDatabase {
         await db.Database.MigrateAsync();
         var users = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
         var roles = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole<Guid>>>();
-        if (!await roles.RoleExistsAsync("User")) { var r = await roles.CreateAsync(new IdentityRole<Guid>("User")); if (!r.Succeeded) throw new Exception("Test role creation failed"); }
+        foreach (var role in new[] { "User", "Admin" })
+            if (!await roles.RoleExistsAsync(role)) { var r = await roles.CreateAsync(new IdentityRole<Guid>(role)); if (!r.Succeeded) throw new Exception("Test role creation failed"); }
         var file = Path.Combine(dataPath, "accounts.json");
         var accounts = File.Exists(file) ? JsonSerializer.Deserialize<List<TestAccount>>(await File.ReadAllTextAsync(file))! : new List<TestAccount>();
-        foreach (var name in new[] { "autor", "participante", "alheio", "membro" }) {
+        // "admin" is the only fictitious administrator (resource management); it is nobody's friend.
+        foreach (var name in new[] { "autor", "participante", "alheio", "membro", "admin" }) {
             var email = name + "@meepleboard.test";
             var account = accounts.SingleOrDefault(a => a.Email == email);
             if (account == null) { account = new(email, "aA1!" + Convert.ToBase64String(RandomNumberGenerator.GetBytes(18)), Guid.Empty); accounts.Add(account); }
@@ -123,6 +133,7 @@ public static class DeviceDatabase {
                 var r = await users.CreateAsync(user, account.Password); if (!r.Succeeded) throw new Exception("Test account creation failed: " + string.Join(",", r.Errors.Select(e => e.Code)));
                 await users.AddToRoleAsync(user, "User");
             }
+            if (name == "admin" && !await users.IsInRoleAsync(user, "Admin")) await users.AddToRoleAsync(user, "Admin");
             account.Id = user.Id;
         }
         await File.WriteAllTextAsync(file, JsonSerializer.Serialize(accounts, new JsonSerializerOptions { WriteIndented = true }));
@@ -135,6 +146,16 @@ public static class DeviceDatabase {
             Set(catalog, "DetailsSyncedAt", DateTime.UtcNow);
             db.GameSearchCatalog.Add(catalog);
         }
+        // One real game, with facts verified on the publisher's site (BGG 266192, Stonemaier Games, 2019, 1–5 players),
+        // so the resource catalogue can hold real links. No BGG description, image or ratings are copied.
+        if (!await db.Games.AnyAsync(g => g.BGGId == 266192)) {
+            var wingspan = new Game("Wingspan", "", null, supportsSoloMode: true);
+            Set(wingspan, "BGGId", 266192); Set(wingspan, "YearPublished", 2019); Set(wingspan, "MinPlayers", 1); Set(wingspan, "MaxPlayers", 5); Set(wingspan, "IsApproved", true);
+            db.Games.Add(wingspan);
+            var catalog = new GameSearchCatalog(266192, "Wingspan", "wingspan", 2019, null, false, 1, 5, false, false, null, null, null);
+            Set(catalog, "DetailsSyncedAt", DateTime.UtcNow);
+            db.GameSearchCatalog.Add(catalog);
+        }
         // Repair search word tokens for fixtures created by earlier test-host versions.
         // Only the three synthetic catalog IDs are touched; existing tokens are preserved.
         foreach (var catalog in await db.GameSearchCatalog.Where(g => g.BggId >= 990001 && g.BggId <= 990003).ToListAsync()) {
@@ -144,7 +165,7 @@ public static class DeviceDatabase {
                     db.GameSearchTokens.Add(new GameSearchToken(catalog.BggId, words[position], position));
             }
         }
-        foreach (var other in accounts.Skip(1)) {
+        foreach (var other in accounts.Skip(1).Where(a => a.Email != "admin@meepleboard.test")) {
             var author = accounts[0].Id; var a = author.CompareTo(other.Id) < 0 ? author : other.Id; var b = a == author ? other.Id : author;
             if (!await db.Friendships.AnyAsync(f => f.UserAId == a && f.UserBId == b)) db.Friendships.Add(new Friendship { Id = Guid.NewGuid(), UserAId = a, UserBId = b, InitiatorId = author, Status = FriendshipStatus.Accepted });
         }

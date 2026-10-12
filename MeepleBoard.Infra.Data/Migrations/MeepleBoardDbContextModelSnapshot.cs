@@ -279,6 +279,129 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.ToTable("Games");
                 });
 
+            modelBuilder.Entity("MeepleBoard.Domain.Entities.GameResource", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Author")
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.Property<string>("Compatibility")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("GameId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool?>("IsFree")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsOfficial")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<string>("Language")
+                        .HasMaxLength(2)
+                        .HasColumnType("nvarchar(2)");
+
+                    b.Property<string>("Platform")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<string>("PrintCategory")
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<string>("ReviewNote")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<DateTime?>("ReviewedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ReviewedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<Guid?>("SuggestedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SuggestedById");
+
+                    b.HasIndex("GameId", "Status");
+
+                    b.ToTable("GameResources");
+                });
+
+            modelBuilder.Entity("MeepleBoard.Domain.Entities.GameResourceReport", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ResolvedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ResourceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("ResourceId", "UserId");
+
+                    b.ToTable("GameResourceReports");
+                });
+
             modelBuilder.Entity("MeepleBoard.Domain.Entities.GameSearchCatalog", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1033,6 +1156,43 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.Navigation("BaseGame");
                 });
 
+            modelBuilder.Entity("MeepleBoard.Domain.Entities.GameResource", b =>
+                {
+                    b.HasOne("MeepleBoard.Domain.Entities.Game", "Game")
+                        .WithMany()
+                        .HasForeignKey("GameId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("MeepleBoard.Domain.Entities.User", "SuggestedBy")
+                        .WithMany()
+                        .HasForeignKey("SuggestedById")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Game");
+
+                    b.Navigation("SuggestedBy");
+                });
+
+            modelBuilder.Entity("MeepleBoard.Domain.Entities.GameResourceReport", b =>
+                {
+                    b.HasOne("MeepleBoard.Domain.Entities.GameResource", "Resource")
+                        .WithMany("Reports")
+                        .HasForeignKey("ResourceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("MeepleBoard.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Resource");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("MeepleBoard.Domain.Entities.GameSession", b =>
                 {
                     b.HasOne("MeepleBoard.Domain.Entities.User", "Organizer")
@@ -1221,6 +1381,11 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.Navigation("Matches");
 
                     b.Navigation("UserGameLibraries");
+                });
+
+            modelBuilder.Entity("MeepleBoard.Domain.Entities.GameResource", b =>
+                {
+                    b.Navigation("Reports");
                 });
 
             modelBuilder.Entity("MeepleBoard.Domain.Entities.GameSession", b =>

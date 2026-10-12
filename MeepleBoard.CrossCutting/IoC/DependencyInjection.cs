@@ -114,6 +114,10 @@ namespace MeepleBoard.CrossCutting.IoC
                 ICampaignRepository,
                 CampaignRepository>();
 
+            services.AddScoped<
+                IGameResourceRepository,
+                GameResourceRepository>();
+
             return services;
         }
 
@@ -178,6 +182,10 @@ namespace MeepleBoard.CrossCutting.IoC
             services.AddScoped<
                 ICampaignService,
                 CampaignService>();
+
+            services.AddScoped<
+                IGameResourceService,
+                GameResourceService>();
 
             /* =========================================================
                SERVIÇOS EXTERNOS
