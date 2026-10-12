@@ -18,6 +18,9 @@ namespace MeepleBoard.Services.Interfaces
         /// <summary>Encerra a sessão com sucesso (Closed). Só organizer.</summary>
         Task CloseSessionAsync(Guid sessionId, Guid organizerId);
 
+        /// <summary>Organizer escolhe outra hora de fim (até 48 h após o início real).</summary>
+        Task<GameSessionDto> SetCloseTimeAsync(Guid sessionId, Guid organizerId, DateTime closesAtUtc);
+
         /// <summary>
         /// Cancela a sessão manualmente (Cancelled). Só organizer.
         /// Só possível enquanto Upcoming.

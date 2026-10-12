@@ -54,6 +54,21 @@ namespace MeepleBoard.Infra.Data.Repositories
                 .FirstOrDefaultAsync(s => s.Id == id, ct);
         }
 
+        public async Task<GameSession?> GetByIdWithPlayersForUpdateAsync(Guid id, CancellationToken ct = default)
+        {
+            return await _context.GameSessions
+                .Include(s => s.Players)
+                .FirstOrDefaultAsync(s => s.Id == id, ct);
+        }
+
+        public async Task<IReadOnlyList<GameSession>> GetOpenForUpdateAsync(CancellationToken ct = default)
+        {
+            return await _context.GameSessions
+                .Include(s => s.Players)
+                .Where(s => s.EndDate == null && !s.IsCancelled)
+                .ToListAsync(ct);
+        }
+
         public async Task AddAsync(GameSession session, CancellationToken ct = default)
         {
             if (session == null) throw new ArgumentNullException(nameof(session));

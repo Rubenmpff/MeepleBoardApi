@@ -8,6 +8,13 @@ namespace MeepleBoard.Domain.Entities
     ///   Criada → Upcoming → Active → Closed
     ///                  ↘ Cancelled (apagada pelo job de limpeza)
     ///
+    ///   Encerramento automático (independente do prazo de resposta):
+    ///   - Início real (StartedAt): a hora marcada, ou a primeira aceitação
+    ///     ainda válida se chegou depois dessa hora.
+    ///   - Fecha em StartedAt + 24 h, salvo se o organizador escolher outra
+    ///     hora de fim (ClosesAt) até StartedAt + 48 h.
+    ///   - O SessionAutoCloseJob persiste o fim (EndDate = AutoCloseAt).
+    ///
     /// Regras:
     ///   - ResponseDeadline: data limite para os convidados responderem.
     ///     Se não for definida, usa-se ScheduledStartDate como limite.
@@ -60,6 +67,19 @@ namespace MeepleBoard.Domain.Entities
         /// </summary>
         public bool IsCancelled { get; private set; } = false;
 
+        /// <summary>
+        /// Hora de fim escolhida pelo organizador (UTC). Null: StartedAt + 24 h.
+        /// </summary>
+        public DateTime? ClosesAt { get; private set; }
+
+        /// <summary>
+        /// True quando foi o encerramento automático a terminar a sessão.
+        /// </summary>
+        public bool ClosedAutomatically { get; private set; }
+
+        public static readonly TimeSpan DefaultDuration = TimeSpan.FromHours(24);
+        public static readonly TimeSpan MaxDuration = TimeSpan.FromHours(48);
+
         public virtual ICollection<GameSessionPlayer> Players { get; private set; }
             = new HashSet<GameSessionPlayer>();
 
@@ -85,7 +105,9 @@ namespace MeepleBoard.Domain.Entities
             {
                 if (IsCancelled) return "Cancelled";
                 if (EndDate != null) return "Closed";
-                if (DateTime.UtcNow >= ScheduledStartDate && AcceptedGuestCount >= 1) return "Active";
+                if (DateTime.UtcNow >= ScheduledStartDate && AcceptedGuestCount >= 1)
+                    // Past its end but not yet persisted by the job: already closed for everyone.
+                    return DateTime.UtcNow >= AutoCloseAt ? "Closed" : "Active";
                 return "Upcoming";
             }
         }
@@ -99,6 +121,28 @@ namespace MeepleBoard.Domain.Entities
         /// Data efectiva de deadline — ResponseDeadline se definida, senão ScheduledStartDate.
         /// </summary>
         public DateTime EffectiveDeadline => ResponseDeadline ?? ScheduledStartDate;
+
+        /// <summary>
+        /// Início real: a hora marcada, ou a primeira aceitação ainda válida se chegou depois.
+        /// Aceitações sem data (dados antigos) contam como anteriores à hora marcada.
+        /// Null enquanto nenhum convidado aceitou.
+        /// </summary>
+        public DateTime? StartedAt
+        {
+            get
+            {
+                var accepted = Players.Where(p => !p.IsOrganizer && p.Status == Domain.Enums.GameSessionInviteStatus.Accepted).ToList();
+                if (accepted.Count == 0) return null;
+                var firstAcceptance = accepted.Min(p => p.RespondedAt ?? ScheduledStartDate);
+                return firstAcceptance > ScheduledStartDate ? firstAcceptance : ScheduledStartDate;
+            }
+        }
+
+        /// <summary>Hora a que a sessão termina sozinha (UTC), ou null se ainda não pode começar.</summary>
+        public DateTime? AutoCloseAt => StartedAt is { } start ? ClosesAt ?? start + DefaultDuration : null;
+
+        /// <summary>Limite para prolongar: 48 h depois do início real.</summary>
+        public DateTime? LatestCloseAt => StartedAt is { } start ? start + MaxDuration : null;
 
         /// <summary>
         /// Número de aceitações além do organizer.
@@ -179,7 +223,39 @@ namespace MeepleBoard.Domain.Entities
             if (EndDate != null)
                 return; // já encerrada, idempotente
 
+            // Past its automatic end: keep the time it actually ended.
+            if (AutoClose(DateTime.UtcNow)) return;
+
             EndDate = DateTime.UtcNow;
+        }
+
+        /// <summary>
+        /// Encerramento automático: grava a hora prevista, não a hora em que o job correu.
+        /// Repetir não altera nada.
+        /// </summary>
+        public bool AutoClose(DateTime nowUtc)
+        {
+            if (IsCancelled || EndDate != null || AutoCloseAt is not { } due || nowUtc < due) return false;
+            EndDate = due;
+            ClosedAutomatically = true;
+            return true;
+        }
+
+        /// <summary>
+        /// O organizador escolhe outra hora de fim enquanto a sessão decorre:
+        /// mais tarde que agora e até 48 h depois do início real.
+        /// Terminar já usa CloseSession().
+        /// </summary>
+        public void SetClosesAt(DateTime closesAtUtc, DateTime nowUtc)
+        {
+            if (Status != "Active")
+                throw new InvalidOperationException("Só é possível alterar o fim de uma sessão a decorrer.");
+            var value = closesAtUtc.ToUniversalTime();
+            if (value <= nowUtc.AddMinutes(1))
+                throw new ArgumentException("Escolhe uma hora futura. Para terminar já, usa Terminar sessão.");
+            if (value > LatestCloseAt!.Value.AddMinutes(1))
+                throw new ArgumentException("A sessão pode durar no máximo 48 horas desde o início.");
+            ClosesAt = value > LatestCloseAt.Value ? LatestCloseAt.Value : value;
         }
 
         /// <summary>

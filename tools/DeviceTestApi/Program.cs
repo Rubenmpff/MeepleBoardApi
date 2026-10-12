@@ -47,7 +47,9 @@ builder.Services.RemoveAll<INotificationService>(); builder.Services.AddSingleto
 builder.Services.RemoveAll<IPhotoStorageService>(); builder.Services.AddSingleton<IPhotoStorageService>(new LocalPhotos(Path.Combine(dataPath, "photos")));
 builder.Services.AddScoped<IBGGService, OfflineCatalog>();
 builder.Services.AddSingleton<Hangfire.IBackgroundJobClient, DisabledBackgroundJobs>();
-// No Hangfire server, jobs, production seeders, OAuth providers, auto-refresh or external clients started.
+// No Hangfire server, production seeders, OAuth providers, auto-refresh or external clients started.
+// The only job that runs is the real session auto-close job, on a timer (Hangfire runs it in production).
+if (!args.Contains("--verify") && !args.Contains("--audit-only")) builder.Services.AddHostedService<DeviceSessionAutoClose>();
 await using var app = builder.Build();
 app.UseCors(); app.UseAuthentication(); app.UseAuthorization(); app.MapControllers();
 app.MapGet("/device-test/health", () => new { environment = "DeviceTests", database = "MeepleBoard_DeviceTests", externalDelivery = false });
@@ -75,13 +77,16 @@ public static class DeviceDatabase {
             var outcomesMigration = migrations.CreateMigration(migrations.Migrations["20261006150000_AddExplicitMatchOutcomes"], review.Database.ProviderName!);
             var expected = new HashSet<string> { "Matches.GameMode", "Matches.Result", "Matches.SharedVictoryAllowed", "MatchPlayers.Outcome" };
             if (outcomesMigration.UpOperations.Count != 4 || outcomesMigration.UpOperations.Any(op => op is not Microsoft.EntityFrameworkCore.Migrations.Operations.AddColumnOperation col || !col.IsNullable || !expected.Remove(col.Table + "." + col.Name) || (col.Name == "SharedVictoryAllowed" ? col.ClrType != typeof(bool) || col.ColumnType != "bit" : col.ClrType != typeof(string) || col.ColumnType != "nvarchar(16)")) || expected.Count != 0) throw new Exception("Unexpected outcome migration changes");
+            var closeTime = migrations.CreateMigration(migrations.Migrations["20261012080128_AddSessionCloseTime"], review.Database.ProviderName!);
+            if (closeTime.UpOperations.Count != 2 || closeTime.UpOperations.Any(op => op is not Microsoft.EntityFrameworkCore.Migrations.Operations.AddColumnOperation col || col.Table != "GameSessions"
+                || !(col.Name == "ClosesAt" && col.IsNullable && col.ColumnType == "datetime2" || col.Name == "ClosedAutomatically" && !col.IsNullable && col.ColumnType == "bit" && Equals(col.DefaultValue, false)))) throw new Exception("Unexpected session close-time migration changes");
             var sql = review.GetService<IMigrator>().GenerateScript("20260824063025_OptimizeGameSearchTokenKey");
             // EF drops only a possible default constraint on this exact column before widening it.
             const string approvedDefaultDrop = "IF @var IS NOT NULL EXEC(N'ALTER TABLE [MatchJournalEntries] DROP CONSTRAINT [' + @var + '];');";
             if (!sql.Contains("WHERE ([d].[parent_object_id] = OBJECT_ID(N'[MatchJournalEntries]') AND [c].[name] = N'PersonalRating');") || !sql.Contains("ALTER TABLE [MatchJournalEntries] ALTER COLUMN [PersonalRating] float NULL;")) throw new Exception("Unexpected rating conversion SQL");
             var auditedSql = sql.Replace(approvedDefaultDrop, "");
             if (auditedSql.Contains("DROP ") || auditedSql.Contains("UPDATE [Matches]") || auditedSql.Contains("DELETE ")) throw new Exception("Unexpected destructive migration SQL");
-            Console.WriteLine("Migration audit passed: model matches snapshot; nullable CreatorId, one filtered index and nullable rating widened to float, four nullable outcome columns.");
+            Console.WriteLine("Migration audit passed: model matches snapshot; nullable CreatorId, one filtered index and nullable rating widened to float, four nullable outcome columns, two session close-time columns.");
             if (Environment.GetCommandLineArgs().Contains("--audit-only")) return;
         }
         // All SQL access derives from the same validated exclusive test connection.
@@ -159,6 +164,19 @@ public class OfflineEmail(string directory) : IEmailService {
     }
     public Task SendConfirmationEmailAsync(string recipientEmail, string recipientName, string confirmationLink) => Store(recipientEmail, "confirmation", confirmationLink);
     public Task SendPasswordResetEmailAsync(string recipientEmail, string recipientName, string resetLink) => Store(recipientEmail, "password-reset", resetLink);
+}
+// Runs the production SessionAutoCloseJob every minute; state is in SQL, so restarts resume correctly.
+public class DeviceSessionAutoClose(IServiceScopeFactory scopes, ILogger<DeviceSessionAutoClose> logger) : BackgroundService {
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken) {
+        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(1));
+        do {
+            try {
+                using var scope = scopes.CreateScope();
+                var closed = await scope.ServiceProvider.GetRequiredService<MeepleBoard.Services.Job.SessionAutoCloseJob>().ExecuteAsync(stoppingToken);
+                if (closed > 0) Console.WriteLine($"Session auto-close: {closed} session(s) ended.");
+            } catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogWarning(ex, "Session auto-close failed; retrying next minute."); }
+        } while (await timer.WaitForNextTickAsync(stoppingToken));
+    }
 }
 public class DisabledBackgroundJobs : Hangfire.IBackgroundJobClient {
     public string Create(Hangfire.Common.Job job, Hangfire.States.IState state) => "device-test-jobs-disabled";

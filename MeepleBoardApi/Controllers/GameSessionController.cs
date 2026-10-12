@@ -234,6 +234,27 @@ namespace MeepleBoardApi.Controllers
             }
         }
 
+        public sealed record CloseTimeRequest(DateTime ClosesAt);
+
+        /// <summary>
+        /// O organizador escolhe outra hora de fim para a sessão a decorrer (até 48 h após o início real).
+        /// </summary>
+        [HttpPut("{id:guid}/close-time")]
+        public async Task<IActionResult> SetCloseTime(Guid id, [FromBody] CloseTimeRequest request)
+        {
+            Guid authUserId;
+            try { authUserId = GetAuthUserId(); }
+            catch (UnauthorizedAccessException ex) { return Unauthorized(new { message = ex.Message }); }
+            try
+            {
+                return Ok(await _sessionService.SetCloseTimeAsync(id, authUserId, request.ClosesAt));
+            }
+            catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message }); }
+            catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+            catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
+            catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        }
+
         [HttpPost("{id:guid}/cancel")]
         [Authorize]
         public async Task<IActionResult> Cancel(Guid id)

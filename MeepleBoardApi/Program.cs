@@ -600,6 +600,13 @@ RecurringJob.AddOrUpdate<SessionCleanupJob>(
         CancellationToken.None),
     Cron.Hourly());
 
+// Termina sessões 24 h após o início real (ou à hora escolhida, até 48 h).
+RecurringJob.AddOrUpdate<SessionAutoCloseJob>(
+    "session-auto-close",
+    job => job.ExecuteAsync(
+        CancellationToken.None),
+    "*/5 * * * *");
+
 RecurringJob.AddOrUpdate<MatchCleanupJob>(
     "match-cleanup",
     job => job.ExecuteAsync(

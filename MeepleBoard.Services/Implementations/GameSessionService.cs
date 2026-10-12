@@ -183,6 +183,19 @@ namespace MeepleBoard.Services.Implementations
             await _sessionRepository.SaveChangesAsync();
         }
 
+        public async Task<GameSessionDto> SetCloseTimeAsync(Guid sessionId, Guid organizerId, DateTime closesAtUtc)
+        {
+            if (sessionId == Guid.Empty) throw new ArgumentException("Sessão inválida.");
+            var session = await _sessionRepository.GetByIdWithPlayersForUpdateAsync(sessionId)
+                ?? throw new KeyNotFoundException("Sessão não encontrada.");
+            if (session.OrganizerId != organizerId)
+                throw new UnauthorizedAccessException("Apenas o organizador pode alterar o fim da sessão.");
+
+            session.SetClosesAt(closesAtUtc, DateTime.UtcNow);
+            await _sessionRepository.SaveChangesAsync();
+            return (await GetByIdAsync(sessionId, organizerId))!;
+        }
+
         /// <summary>
         /// Cancelamento manual pelo organizer.
         /// Só possível enquanto Upcoming.

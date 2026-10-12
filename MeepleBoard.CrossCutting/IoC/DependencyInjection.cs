@@ -239,6 +239,7 @@ namespace MeepleBoard.CrossCutting.IoC
             services.AddScoped<UserCleanupJob>();
 
             services.AddScoped<SessionCleanupJob>();
+            services.AddScoped<SessionAutoCloseJob>();
 
             services.AddScoped<MatchCleanupJob>();
 

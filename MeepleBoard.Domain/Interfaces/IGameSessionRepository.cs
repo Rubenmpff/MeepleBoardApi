@@ -16,6 +16,12 @@ namespace MeepleBoard.Domain.Interfaces
         // Para updates (tracking)
         Task<GameSession?> GetByIdForUpdateAsync(Guid id, CancellationToken ct = default);
 
+        // Update with players loaded: the start and end times depend on who accepted.
+        Task<GameSession?> GetByIdWithPlayersForUpdateAsync(Guid id, CancellationToken ct = default);
+
+        // Not closed nor cancelled, with players, tracked: candidates for automatic closing.
+        Task<IReadOnlyList<GameSession>> GetOpenForUpdateAsync(CancellationToken ct = default);
+
         Task AddAsync(GameSession session, CancellationToken ct = default);
         Task UpdateAsync(GameSession session, CancellationToken ct = default);
         Task DeleteAsync(Guid id, CancellationToken ct = default);

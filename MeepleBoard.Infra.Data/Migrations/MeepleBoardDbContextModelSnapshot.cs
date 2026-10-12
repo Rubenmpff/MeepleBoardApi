@@ -386,6 +386,12 @@ namespace MeepleBoard.Infra.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("ClosedAutomatically")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("ClosesAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime?>("EndDate")
                         .HasColumnType("datetime2");
 
@@ -462,9 +468,6 @@ namespace MeepleBoard.Infra.Data.Migrations
 
             modelBuilder.Entity("MeepleBoard.Domain.Entities.Match", b =>
                 {
-                    b.Property<string>("GameMode").HasMaxLength(16).HasColumnType("nvarchar(16)");
-                    b.Property<string>("Result").HasMaxLength(16).HasColumnType("nvarchar(16)");
-                    b.Property<bool?>("SharedVictoryAllowed").HasColumnType("bit");
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -486,6 +489,10 @@ namespace MeepleBoard.Infra.Data.Migrations
 
                     b.Property<Guid>("GameId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("GameMode")
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
 
                     b.Property<Guid?>("GameSessionId")
                         .HasColumnType("uniqueidentifier");
@@ -513,9 +520,16 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.Property<double?>("PersonalRating")
                         .HasColumnType("float");
 
+                    b.Property<string>("Result")
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
                     b.Property<string>("ScoreSummary")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
+
+                    b.Property<bool?>("SharedVictoryAllowed")
+                        .HasColumnType("bit");
 
                     b.Property<string>("Tags")
                         .HasMaxLength(500)
@@ -587,7 +601,6 @@ namespace MeepleBoard.Infra.Data.Migrations
 
             modelBuilder.Entity("MeepleBoard.Domain.Entities.MatchPlayer", b =>
                 {
-                    b.Property<string>("Outcome").HasMaxLength(16).HasColumnType("nvarchar(16)");
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -600,6 +613,10 @@ namespace MeepleBoard.Infra.Data.Migrations
 
                     b.Property<Guid>("MatchId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Outcome")
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
 
                     b.Property<int?>("RankPosition")
                         .HasColumnType("int");
