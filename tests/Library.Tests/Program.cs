@@ -1,4 +1,4 @@
-// Isolated HTTP tests: production controller/service, in-memory repositories, no application configuration or SQL connection.
+﻿// Isolated HTTP tests: production controller/service, in-memory repositories, no application configuration or SQL connection.
 using System.Net;
 using System.Net.Http.Json;
 using System.Reflection;
@@ -109,6 +109,27 @@ await Check("offline EF SQL needs CreatorId; deleting a library dependent keeps 
     Assert(db.ChangeTracker.Entries().Count(e => e.State == EntityState.Deleted) == 1);
     return Task.CompletedTask;
 });
+await Check("friends who have the game: only «Tenho», never a private library, wishlist or «Já joguei»", async () => {
+    Guid Id() => Guid.NewGuid();
+    var visible = new[] { ("Zélia pública", LibraryPrivacy.Public), ("ana só amigos", LibraryPrivacy.FriendsOnly) };
+    f.FriendEntries = [
+        new(Id(), visible[0].Item1, "https://example.invalid/a.jpg", visible[0].Item2, GameLibraryStatus.Owned),
+        new(Id(), visible[1].Item1, null, visible[1].Item2, GameLibraryStatus.Owned),
+        new(Id(), "Privada", null, LibraryPrivacy.Private, GameLibraryStatus.Owned),
+        new(Id(), "Quer jogar", null, LibraryPrivacy.Public, GameLibraryStatus.Wishlist),
+        new(Id(), "Já jogou", null, LibraryPrivacy.Public, GameLibraryStatus.Played),
+        new(f.Owner.Id, "Eu", null, LibraryPrivacy.Public, GameLibraryStatus.Owned)];
+    var text = await Request(HttpMethod.Get, $"/MeepleBoard/game/{f.Game.Id}/friend-owners", null, HttpStatusCode.OK, f.Owner.Id);
+    using var json = JsonDocument.Parse(text);
+    var names = json.RootElement.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("userName").GetString()).ToArray();
+    Assert(names.SequenceEqual(new[] { "ana só amigos", "Zélia pública" }), "unexpected owners: " + text);
+    Assert(json.RootElement.GetProperty("total").GetInt32() == 2);
+    Assert(!text.Contains("privacy", StringComparison.OrdinalIgnoreCase) && !text.Contains("status", StringComparison.OrdinalIgnoreCase), "no private fields: " + text);
+    await Request(HttpMethod.Get, $"/MeepleBoard/game/{f.Game.Id}/friend-owners", null, HttpStatusCode.Unauthorized, null);
+    await Request(HttpMethod.Get, $"/MeepleBoard/game/{Guid.NewGuid()}/friend-owners", null, HttpStatusCode.NotFound, f.Owner.Id);
+    f.FriendEntries = [];
+    Assert((await f.Service.GetFriendOwnersAsync(f.Owner.Id, f.Game.Id)).Total == 0);
+});
 Console.WriteLine($"{passed} isolated library HTTP/service/model tests passed.");
 await app.StopAsync();
 
@@ -120,6 +141,7 @@ public class Fixture {
     public User Owner = new("Fixture", "fixture@example.invalid", "local");
     public Game Game = new("Fixture game", "", null);
     public UserGameLibrary? Entry;
+    public List<FriendGameEntryProjection> FriendEntries = [];
     public int CatalogueReads;
     public UserGameLibraryService Service;
     public Fixture() {
@@ -133,11 +155,12 @@ public class Fixture {
             "UpdateAsync" => Task.CompletedTask,
             "RemoveAsync" => Remove(),
             "CommitAsync" => Task.FromResult(1),
+            "GetFriendEntriesForGameAsync" => Task.FromResult<IReadOnlyList<FriendGameEntryProjection>>(FriendEntries),
             _ => throw new Exception(m.Name)
         });
         var games = Stub.Create<IGameRepository>((m, a) => {
             CatalogueReads++;
-            return m.Name switch { "GetByIdAsync" => Task.FromResult<Game?>(Game), "GetByIdsAsync" => Task.FromResult<IReadOnlyList<Game>>([Game]), _ => throw new Exception("Unexpected catalogue mutation: " + m.Name) };
+            return m.Name switch { "GetByIdAsync" => Task.FromResult<Game?>((Guid)a![0]! == Game.Id ? Game : null), "GetByIdsAsync" => Task.FromResult<IReadOnlyList<Game>>([Game]), _ => throw new Exception("Unexpected catalogue mutation: " + m.Name) };
         });
         var users = Stub.Create<IUserRepository>((m, a) => m.Name == "GetByIdAsync" ? Task.FromResult<User?>(Owner) : throw new Exception(m.Name));
         var matches = Stub.Create<IMatchRepository>((m, a) => m.Name == "GetPlayCountsByGameForUserAsync" ? Task.FromResult<IReadOnlyDictionary<Guid, (int Count, DateTime LastPlayed)>>(new Dictionary<Guid, (int Count, DateTime LastPlayed)> { [Game.Id] = (3, DateTime.UtcNow.AddDays(-1)) }) : throw new Exception("Unexpected match mutation: " + m.Name));

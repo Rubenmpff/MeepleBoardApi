@@ -30,17 +30,26 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'game-resources.
   assert.equal((await call(user, 'POST', `/admin/game/${game.id}/resources`, fixture.resources[0])).status, 403);
   pass('only the administrator account can manage; the others get 403');
 
-  const existing = (await call(admin, 'GET', `/admin/game-resources?gameId=${game.id}`)).data.map(r => r.resource.url);
-  let added = 0;
+  const existing = new Map((await call(admin, 'GET', `/admin/game-resources?gameId=${game.id}`)).data.map(r => [r.resource.url, r.resource]));
+  const fields = Object.keys(fixture.resources[0]);
+  let added = 0, updated = 0;
   for (const r of fixture.resources) {
-    if (existing.includes(new URL(r.url).toString())) continue;
-    const created = await call(admin, 'POST', `/admin/game/${game.id}/resources`, r);
-    assert.equal(created.status, 201, JSON.stringify(created.data)); added++;
+    const current = existing.get(new URL(r.url).toString());
+    if (!current) {
+      const created = await call(admin, 'POST', `/admin/game/${game.id}/resources`, r);
+      assert.equal(created.status, 201, JSON.stringify(created.data)); added++;
+    } else if (fields.some(k => k !== 'url' && (current[k] ?? null) !== (r[k] ?? null))) {
+      const changed = await call(admin, 'PUT', `/admin/game-resources/${current.id}`, r);
+      assert.equal(changed.status, 200, JSON.stringify(changed.data)); updated++;
+    }
   }
   const all = await list(user, 'all');
   assert.equal(all.total, fixture.resources.length, 'catalogue holds exactly the verified links');
   assert.equal(all.items[0].isOfficial, true, 'publisher rules first');
-  pass(`seeded ${added} new verified links (${fixture.resources.length} in total)`);
+  const groups = all.items.map(i => i.expansion ?? '');
+  assert.deepEqual(groups, [...groups].sort((a, b) => (a !== '') - (b !== '') || a.localeCompare(b)), 'base game first, then expansions');
+  assert.ok(all.items.filter(i => i.thumbnailUrl).length === 8 && all.items.every(i => !i.thumbnailUrl || i.thumbnailUrl.startsWith('https://')), 'thumbnails from the original sites');
+  pass(`seeded ${added} new and updated ${updated} verified links (${fixture.resources.length} in total); base game first, 8 thumbnails`);
 
   const pt = await list(user, 'pt'), en = await list(user, 'en');
   assert.ok(pt.items.every(i => i.language === null) && pt.items.length === 5, 'Portuguese shows only the language-independent models');

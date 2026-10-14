@@ -1,8 +1,9 @@
-namespace MeepleBoard.Services.Mapping.Dtos
+﻿namespace MeepleBoard.Services.Mapping.Dtos
 {
     /// <summary>A public (approved) resource as the game page shows it.</summary>
     public sealed record GameResourceDto(Guid Id, Guid GameId, string Kind, string? PrintCategory, string? Language, string Title,
-        string? Author, string Platform, string Url, string? Compatibility, bool IsOfficial, bool? IsFree, string Status);
+        string? Author, string Platform, string Url, string? Compatibility, bool IsOfficial, bool? IsFree, string Status,
+        string? Expansion, string? ThumbnailUrl);
 
     /// <summary>Resources for one language filter, plus what exists in other languages so the app can offer alternatives.</summary>
     public sealed record GameResourceListDto(string Language, IReadOnlyList<GameResourceDto> Items, IReadOnlyList<GameResourceLanguageDto> Languages, int Total);
@@ -12,7 +13,7 @@ namespace MeepleBoard.Services.Mapping.Dtos
 
     /// <summary>Fields a user suggests or an administrator edits.</summary>
     public sealed record GameResourceRequest(string Kind, string? PrintCategory, string? Language, string Title, string? Author,
-        string Platform, string Url, string? Compatibility, bool IsOfficial, bool? IsFree);
+        string Platform, string Url, string? Compatibility, bool IsOfficial, bool? IsFree, string? Expansion = null, string? ThumbnailUrl = null);
 
     public sealed record GameResourceReportRequest(string Reason, string? Comment);
 

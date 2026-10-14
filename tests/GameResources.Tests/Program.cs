@@ -1,4 +1,4 @@
-// Game resource catalogue over HTTP: permissions, approval, language filters, reports and validation.
+﻿// Game resource catalogue over HTTP: permissions, approval, language filters, reports and validation.
 // Production controllers/service/entities; in-memory repository; no configuration or SQL connection.
 using System.Net;
 using System.Net.Http.Json;
@@ -135,6 +135,19 @@ await Check("administrators edit and remove; users cannot", async () => {
     await Call(HttpMethod.Delete, $"/admin/game-resources/{created}", null, admin, HttpStatusCode.NoContent, asAdmin: true);
     Assert(!store.Resources.Any(r => r.Id == created) && !store.Reports.Any(r => r.ResourceId == created), "removal should take its reports");
     await Call(HttpMethod.Delete, $"/admin/game-resources/{created}", null, admin, HttpStatusCode.NotFound, asAdmin: true);
+});
+await Check("base game first, then each expansion; thumbnails only over https; old requests without them still work", async () => {
+    object WithExtras(string url, string? expansion, string? thumbnail) =>
+        new { kind = "Unboxing", printCategory = (string?)null, language = "en", title = "Extra " + url[^4..], author = (string?)null, platform = "YouTube", url, compatibility = (string?)null, isOfficial = false, isFree = (bool?)null, expansion, thumbnailUrl = thumbnail };
+    await Call(HttpMethod.Post, $"/admin/game/{game.Id}/resources", WithExtras("https://example.org/xp02", "Oceania Expansion", null), admin, HttpStatusCode.Created, asAdmin: true);
+    await Call(HttpMethod.Post, $"/admin/game/{game.Id}/resources", WithExtras("https://example.org/xp01", "European Expansion", "https://example.org/thumb.jpg"), admin, HttpStatusCode.Created, asAdmin: true);
+    await Call(HttpMethod.Post, $"/admin/game/{game.Id}/resources", WithExtras("https://example.org/xp03", null, null), admin, HttpStatusCode.Created, asAdmin: true);
+    await Call(HttpMethod.Post, $"/admin/game/{game.Id}/resources", WithExtras("https://example.org/xp04", null, "http://example.org/t.jpg"), admin, HttpStatusCode.BadRequest, asAdmin: true);
+    var items = (await list("all")).GetProperty("items").EnumerateArray().ToArray();
+    var order = items.Select(i => i.GetProperty("expansion").ValueKind == JsonValueKind.Null ? "" : i.GetProperty("expansion").GetString()).ToArray();
+    Assert(order.SequenceEqual(order.OrderBy(e => e != "").ThenBy(e => e, StringComparer.Ordinal)), "base first, expansions after: " + string.Join("|", order));
+    Assert(order.Contains("European Expansion") && order.Contains("Oceania Expansion") && order.First() == "", "groups present");
+    Assert(items.Single(i => i.GetProperty("url").GetString() == "https://example.org/xp01").GetProperty("thumbnailUrl").GetString() == "https://example.org/thumb.jpg", "thumbnail kept");
 });
 Console.WriteLine($"{passed} isolated game resource HTTP tests passed.");
 await app.StopAsync();

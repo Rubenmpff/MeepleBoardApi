@@ -1,9 +1,10 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text.Json;
 using AutoMapper;
 using MeepleBoard.CrossCutting.IoC;
 using MeepleBoard.CrossCutting.Security;
 using MeepleBoard.Domain.Entities;
+using MeepleBoard.Domain.Enums;
 using MeepleBoard.Infra.Data.Context;
 using MeepleBoard.Services.Interfaces;
 using MeepleBoard.Services.ExternalServices.Interfaces;
@@ -84,6 +85,9 @@ public static class DeviceDatabase {
             var tables = resources.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.CreateTableOperation>().Select(o => o.Name).OrderBy(n => n).ToArray();
             if (!tables.SequenceEqual(new[] { "GameResourceReports", "GameResources" }) || resources.UpOperations.Count != 6
                 || resources.UpOperations.Skip(2).Any(op => op is not Microsoft.EntityFrameworkCore.Migrations.Operations.CreateIndexOperation)) throw new Exception("Unexpected game resources migration changes");
+            var resourceExtras = migrations.CreateMigration(migrations.Migrations["20261014100853_AddGameResourceExpansionThumbnail"], review.Database.ProviderName!);
+            if (resourceExtras.UpOperations.Count != 2 || resourceExtras.UpOperations.Any(op => op is not Microsoft.EntityFrameworkCore.Migrations.Operations.AddColumnOperation col || col.Table != "GameResources" || !col.IsNullable
+                || !(col.Name == "Expansion" && col.ColumnType == "nvarchar(100)" || col.Name == "ThumbnailUrl" && col.ColumnType == "nvarchar(500)"))) throw new Exception("Unexpected resource expansion/thumbnail migration changes");
             var sql = review.GetService<IMigrator>().GenerateScript("20260824063025_OptimizeGameSearchTokenKey");
             // EF drops only a possible default constraint on this exact column before widening it.
             const string approvedDefaultDrop = "IF @var IS NOT NULL EXEC(N'ALTER TABLE [MatchJournalEntries] DROP CONSTRAINT [' + @var + '];');";
@@ -94,7 +98,7 @@ public static class DeviceDatabase {
                 "REFERENCES [AspNetUsers] ([Id]) ON DELETE NO ACTION", "REFERENCES [GameResources] ([Id]) ON DELETE CASCADE"];
             var auditedSql = approvedResourceKeys.Aggregate(sql.Replace(approvedDefaultDrop, ""), (text, clause) => text.Replace(clause, ""));
             if (auditedSql.Contains("DROP ") || auditedSql.Contains("UPDATE [Matches]") || auditedSql.Contains("DELETE ")) throw new Exception("Unexpected destructive migration SQL");
-            Console.WriteLine("Migration audit passed: model matches snapshot; nullable CreatorId, one filtered index and nullable rating widened to float, four nullable outcome columns, two session close-time columns, two new resource tables.");
+            Console.WriteLine("Migration audit passed: model matches snapshot; nullable CreatorId, one filtered index and nullable rating widened to float, four nullable outcome columns, two session close-time columns, two new resource tables, two nullable resource columns.");
             if (Environment.GetCommandLineArgs().Contains("--audit-only")) return;
         }
         // All SQL access derives from the same validated exclusive test connection.
@@ -165,10 +169,54 @@ public static class DeviceDatabase {
                     db.GameSearchTokens.Add(new GameSearchToken(catalog.BggId, words[position], position));
             }
         }
-        foreach (var other in accounts.Skip(1).Where(a => a.Email != "admin@meepleboard.test")) {
+        string[] authorFriends = ["participante@meepleboard.test", "alheio@meepleboard.test", "membro@meepleboard.test"];
+        foreach (var other in accounts.Where(a => authorFriends.Contains(a.Email))) {
             var author = accounts[0].Id; var a = author.CompareTo(other.Id) < 0 ? author : other.Id; var b = a == author ? other.Id : author;
             if (!await db.Friendships.AnyAsync(f => f.UserAId == a && f.UserBId == b)) db.Friendships.Add(new Friendship { Id = Guid.NewGuid(), UserAId = a, UserBId = b, InitiatorId = author, Status = FriendshipStatus.Accepted });
         }
+        await db.SaveChangesAsync();
+        await SeedGameFriends(db, users, accounts, file);
+    }
+
+    // «Amigos que têm este jogo» (Wingspan), seen by "participante": who may appear and who must not.
+    // Fictitious accounts named Teste-…; libraries and privacy are reset to these values on every start.
+    static async Task SeedGameFriends(MeepleBoardDbContext db, UserManager<User> users, List<TestAccount> accounts, string file) {
+        var viewer = accounts.Single(a => a.Email == "participante@meepleboard.test").Id;
+        var wingspan = await db.Games.SingleAsync(g => g.BGGId == 266192);
+        (string Name, LibraryPrivacy Privacy, GameLibraryStatus Status, FriendshipStatus? Friendship)[] people = [
+            ("amiga-colecionadora", LibraryPrivacy.Public, GameLibraryStatus.Owned, FriendshipStatus.Accepted),
+            ("amigo-com-um-nome-de-utilizador-bastante-comprido", LibraryPrivacy.FriendsOnly, GameLibraryStatus.Owned, FriendshipStatus.Accepted),
+            ("amiga-tabuleiro", LibraryPrivacy.FriendsOnly, GameLibraryStatus.Owned, FriendshipStatus.Accepted),
+            ("amigo-dados", LibraryPrivacy.Public, GameLibraryStatus.Owned, FriendshipStatus.Accepted),
+            ("amiga-meeples", LibraryPrivacy.Public, GameLibraryStatus.Owned, FriendshipStatus.Accepted),
+            ("amigo-privado", LibraryPrivacy.Private, GameLibraryStatus.Owned, FriendshipStatus.Accepted),   // private library: hidden
+            ("amiga-quer-jogar", LibraryPrivacy.Public, GameLibraryStatus.Wishlist, FriendshipStatus.Accepted), // wishlist is not ownership
+            ("amigo-ja-jogou", LibraryPrivacy.Public, GameLibraryStatus.Played, FriendshipStatus.Accepted),    // «Já joguei» is not ownership
+            ("pedido-pendente", LibraryPrivacy.Public, GameLibraryStatus.Owned, FriendshipStatus.Pending),     // not yet a friend
+            ("desconhecido", LibraryPrivacy.Public, GameLibraryStatus.Owned, null)];                           // not a friend
+        foreach (var (name, privacy, status, friendship) in people) {
+            var email = name + "@meepleboard.test";
+            var account = accounts.SingleOrDefault(a => a.Email == email);
+            if (account == null) { account = new(email, "aA1!" + Convert.ToBase64String(RandomNumberGenerator.GetBytes(18)), Guid.Empty); accounts.Add(account); }
+            var user = await users.FindByEmailAsync(email);
+            if (user == null) {
+                await File.WriteAllTextAsync(file, JsonSerializer.Serialize(accounts, new JsonSerializerOptions { WriteIndented = true }));
+                user = new User("Teste-" + name, email, "Local") { EmailConfirmed = true };
+                var r = await users.CreateAsync(user, account.Password); if (!r.Succeeded) throw new Exception("Test account creation failed: " + string.Join(",", r.Errors.Select(e => e.Code)));
+                await users.AddToRoleAsync(user, "User");
+            }
+            account.Id = user.Id;
+            user.SetLibraryPrivacy(privacy);
+            var entry = await db.UserGameLibraries.SingleOrDefaultAsync(l => l.UserId == user.Id && l.GameId == wingspan.Id);
+            if (entry == null) db.UserGameLibraries.Add(new UserGameLibrary(user.Id, wingspan.Id, status));
+            else if (entry.Status != status) entry.UpdateStatus(status);
+            var a = viewer.CompareTo(user.Id) < 0 ? viewer : user.Id; var b = a == viewer ? user.Id : viewer;
+            var link = await db.Friendships.SingleOrDefaultAsync(f => f.UserAId == a && f.UserBId == b);
+            if (friendship == null) { if (link != null) db.Friendships.Remove(link); }
+            else if (link == null) db.Friendships.Add(new Friendship { Id = Guid.NewGuid(), UserAId = a, UserBId = b, InitiatorId = user.Id, Status = friendship.Value });
+            else link.Status = friendship.Value;
+        }
+        await File.WriteAllTextAsync(file, JsonSerializer.Serialize(accounts, new JsonSerializerOptions { WriteIndented = true }));
         await db.SaveChangesAsync();
     }
     public static void Set(object entity, string property, object value) => entity.GetType().GetProperty(property)!.SetValue(entity, value);

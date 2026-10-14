@@ -68,6 +68,19 @@ namespace MeepleBoard.Infra.Data.Repositories
         }
 
         // 🔹 Obtém os jogos mais jogados pelo usuário (Top N)
+        public async Task<IReadOnlyList<FriendGameEntryProjection>> GetFriendEntriesForGameAsync(Guid userId, Guid gameId, CancellationToken cancellationToken = default)
+        {
+            var friendIds = _context.Friendships.AsNoTracking()
+                .Where(f => f.Status == FriendshipStatus.Accepted && (f.UserAId == userId || f.UserBId == userId))
+                .Select(f => f.UserAId == userId ? f.UserBId : f.UserAId);
+
+            return await (from entry in _context.UserGameLibraries.AsNoTracking()
+                          where entry.GameId == gameId && friendIds.Contains(entry.UserId)
+                          join user in _context.Users.AsNoTracking() on entry.UserId equals user.Id
+                          select new FriendGameEntryProjection(user.Id, user.UserName ?? string.Empty, user.ProfilePictureUrl, user.LibraryPrivacy, entry.Status))
+                .ToListAsync(cancellationToken);
+        }
+
         public async Task<IReadOnlyDictionary<string, int>> GetMostPlayedGamesByUserAsync(Guid userId, int topN, CancellationToken cancellationToken = default)
         {
             var result = await _context.UserGameLibraries

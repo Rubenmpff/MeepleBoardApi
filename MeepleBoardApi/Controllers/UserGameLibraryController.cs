@@ -48,6 +48,26 @@ namespace MeepleBoardApi.Controllers
             }
         }
 
+        /// <summary>
+        /// Accepted friends who have this game («Tenho») and whose library the current user may see.
+        /// </summary>
+        [HttpGet("~/MeepleBoard/game/{gameId:guid}/friend-owners")]
+        public async Task<ActionResult<GameFriendOwnersDto>> GetFriendOwners(Guid gameId, CancellationToken cancellationToken)
+        {
+            try
+            {
+                return Ok(await _libraryService.GetFriendOwnersAsync(User.GetUserId(), gameId, cancellationToken));
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { Message = ex.Message });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { Message = ex.Message });
+            }
+        }
+
         [HttpGet("{userId:guid}/played-games")]
         public async Task<ActionResult<IEnumerable<PlayedGameDto>>> GetPlayedGames(Guid userId, CancellationToken cancellationToken)
         {

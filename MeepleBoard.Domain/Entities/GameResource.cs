@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using System.Text.RegularExpressions;
 
 namespace MeepleBoard.Domain.Entities
@@ -10,6 +10,8 @@ namespace MeepleBoard.Domain.Entities
     /// Suggestions start Pending and only Approved resources are public.
     /// Language is an ISO 639-1 code, or null when the resource does not depend on a language (e.g. a 3D model).
     /// IsFree is null unless the price was confirmed.
+    /// Expansion names the one expansion a resource is specifically for; null means the base game (or the game as a whole).
+    /// ThumbnailUrl is an image on the original site (never hosted here); null shows a neutral placeholder.
     /// </summary>
     public class GameResource
     {
@@ -31,6 +33,10 @@ namespace MeepleBoard.Domain.Entities
         [Required, MaxLength(500)] public string Url { get; private set; } = string.Empty;
         /// <summary>Edition or expansions it fits, when known (free text).</summary>
         [MaxLength(200)] public string? Compatibility { get; private set; }
+        /// <summary>The expansion this resource is for; null: the base game.</summary>
+        [MaxLength(100)] public string? Expansion { get; private set; }
+        /// <summary>Preview image on the original site (https), when one exists.</summary>
+        [MaxLength(500)] public string? ThumbnailUrl { get; private set; }
         /// <summary>Provided by the publisher (rules, official videos).</summary>
         public bool IsOfficial { get; private set; }
         /// <summary>True free, false paid, null not confirmed.</summary>
@@ -89,6 +95,8 @@ namespace MeepleBoard.Domain.Entities
             Platform = Required(d.Platform, 60, "plataforma");
             Url = ValidUrl(d.Url);
             Compatibility = Optional(d.Compatibility, 200);
+            Expansion = Optional(d.Expansion, 100);
+            ThumbnailUrl = string.IsNullOrWhiteSpace(d.ThumbnailUrl) ? null : ValidUrl(d.ThumbnailUrl);
             IsOfficial = d.IsOfficial;
             IsFree = d.IsFree;
         }
@@ -118,5 +126,5 @@ namespace MeepleBoard.Domain.Entities
     }
 
     public sealed record GameResourceDetails(string Kind, string? PrintCategory, string? Language, string Title, string? Author,
-        string Platform, string Url, string? Compatibility, bool IsOfficial, bool? IsFree);
+        string Platform, string Url, string? Compatibility, bool IsOfficial, bool? IsFree, string? Expansion = null, string? ThumbnailUrl = null);
 }

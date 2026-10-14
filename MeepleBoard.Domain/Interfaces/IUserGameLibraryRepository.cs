@@ -1,4 +1,5 @@
 ﻿using MeepleBoard.Domain.Entities;
+using MeepleBoard.Domain.Enums;
 
 namespace MeepleBoard.Domain.Interfaces
 {
@@ -25,6 +26,9 @@ namespace MeepleBoard.Domain.Interfaces
         // 🔹 Obtém os jogos mais jogados pelo usuário (Top N)
         Task<IReadOnlyDictionary<string, int>> GetMostPlayedGamesByUserAsync(Guid userId, int topN, CancellationToken cancellationToken = default);
 
+        // 🔹 Entradas deste jogo nas bibliotecas dos amigos aceites, com a privacidade de cada um (as regras aplicam-se no serviço)
+        Task<IReadOnlyList<FriendGameEntryProjection>> GetFriendEntriesForGameAsync(Guid userId, Guid gameId, CancellationToken cancellationToken = default);
+
         // 🔹 Adiciona um jogo à biblioteca do usuário
         Task AddAsync(UserGameLibrary userGameLibrary, CancellationToken cancellationToken = default);
 
@@ -37,4 +41,7 @@ namespace MeepleBoard.Domain.Interfaces
         // 🔹 Salva as mudanças no banco
         Task<int> CommitAsync(CancellationToken cancellationToken = default);
     }
+
+    /// <summary>An accepted friend's library entry for one game, with that friend's library privacy.</summary>
+    public sealed record FriendGameEntryProjection(Guid UserId, string UserName, string? ProfilePictureUrl, LibraryPrivacy Privacy, GameLibraryStatus Status);
 }

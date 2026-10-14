@@ -15,6 +15,8 @@ namespace MeepleBoard.Services.Interfaces
 
         Task RemoveGameFromLibraryAsync(Guid userId, Guid gameId, CancellationToken cancellationToken = default);
 
+        Task<GameFriendOwnersDto> GetFriendOwnersAsync(Guid requesterId, Guid gameId, CancellationToken cancellationToken = default);
+
         Task<decimal> GetTotalAmountSpentByUserAsync(Guid userId, CancellationToken cancellationToken = default);
     }
 }

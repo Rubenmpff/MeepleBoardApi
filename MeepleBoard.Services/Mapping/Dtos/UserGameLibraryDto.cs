@@ -86,4 +86,9 @@ namespace MeepleBoard.Services.DTOs
         public GameLibraryStatus? Status { get; set; }
         public decimal? PricePaid { get; set; }
     }
+
+    /// <summary>A friend who has the game («Tenho»): only what the friends list already shows.</summary>
+    public sealed record GameFriendOwnerDto(Guid UserId, string UserName, string? ProfilePictureUrl);
+
+    public sealed record GameFriendOwnersDto(int Total, IReadOnlyList<GameFriendOwnerDto> Items);
 }

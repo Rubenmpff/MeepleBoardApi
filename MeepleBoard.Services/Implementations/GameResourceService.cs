@@ -1,4 +1,4 @@
-using MeepleBoard.Domain.Entities;
+﻿using MeepleBoard.Domain.Entities;
 using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Services.Interfaces;
 using MeepleBoard.Services.Mapping.Dtos;
@@ -25,7 +25,9 @@ namespace MeepleBoard.Services.Implementations
             var code = Normalize(language);
             var approved = await _resources.GetApprovedByGameAsync(gameId, ct);
             var items = approved.Where(r => code == "all" || r.Language == null || r.Language == code)
-                .OrderByDescending(r => r.IsOfficial).ThenBy(r => Array.IndexOf(GameResource.Kinds, r.Kind))
+                // Base game first, then each expansion; within them, the publisher's own first.
+                .OrderBy(r => r.Expansion != null).ThenBy(r => r.Expansion)
+                .ThenByDescending(r => r.IsOfficial).ThenBy(r => Array.IndexOf(GameResource.Kinds, r.Kind))
                 .ThenBy(r => r.Language == code ? 0 : r.Language == null ? 1 : 2).ThenBy(r => r.Title)
                 .Select(ToDto).ToList();
             var languages = approved.GroupBy(r => r.Language).OrderBy(g => g.Key == null).ThenByDescending(g => g.Count())
@@ -117,7 +119,7 @@ namespace MeepleBoard.Services.Implementations
             await _resources.GetForUpdateAsync(id, ct) ?? throw new KeyNotFoundException("Recurso não encontrado.");
 
         private static GameResourceDetails Details(GameResourceRequest r) =>
-            new(r.Kind, r.PrintCategory, r.Language, r.Title, r.Author, r.Platform, r.Url, r.Compatibility, r.IsOfficial, r.IsFree);
+            new(r.Kind, r.PrintCategory, r.Language, r.Title, r.Author, r.Platform, r.Url, r.Compatibility, r.IsOfficial, r.IsFree, r.Expansion, r.ThumbnailUrl);
 
         private static string Normalize(string? language)
         {
@@ -127,6 +129,6 @@ namespace MeepleBoard.Services.Implementations
         }
 
         private static GameResourceDto ToDto(GameResource r) => new(r.Id, r.GameId, r.Kind, r.PrintCategory, r.Language, r.Title, r.Author,
-            r.Platform, r.Url, r.Compatibility, r.IsOfficial, r.IsFree, r.Status);
+            r.Platform, r.Url, r.Compatibility, r.IsOfficial, r.IsFree, r.Status, r.Expansion, r.ThumbnailUrl);
     }
 }

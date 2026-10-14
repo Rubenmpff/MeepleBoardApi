@@ -174,6 +174,23 @@ namespace MeepleBoard.Services.Implementations
             await _userGameLibraryRepository.CommitAsync(cancellationToken);
         }
 
+        /// <summary>
+        /// Accepted friends who have the game with the status «Tenho», among those whose library the requester may see
+        /// (the same rule as GetUserLibraryAsync: Public or FriendsOnly; never Private). Wishlist and «Já joguei» are not ownership.
+        /// </summary>
+        public async Task<GameFriendOwnersDto> GetFriendOwnersAsync(Guid requesterId, Guid gameId, CancellationToken cancellationToken = default)
+        {
+            if (requesterId == Guid.Empty) throw new ArgumentException("Utilizador inválido.");
+            if (await _gameRepository.GetByIdAsync(gameId, cancellationToken) == null) throw new KeyNotFoundException("Jogo não encontrado.");
+            var owners = (await _userGameLibraryRepository.GetFriendEntriesForGameAsync(requesterId, gameId, cancellationToken))
+                .Where(e => e.UserId != requesterId && e.Status == GameLibraryStatus.Owned && e.Privacy != LibraryPrivacy.Private)
+                .GroupBy(e => e.UserId).Select(g => g.First())
+                .OrderBy(e => e.UserName, StringComparer.CurrentCultureIgnoreCase)
+                .Select(e => new GameFriendOwnerDto(e.UserId, e.UserName, e.ProfilePictureUrl))
+                .ToList();
+            return new GameFriendOwnersDto(owners.Count, owners);
+        }
+
         public async Task<decimal> GetTotalAmountSpentByUserAsync(Guid userId, CancellationToken cancellationToken = default)
         {
             await EnsureUserExistsAsync(userId, cancellationToken);
