@@ -40,6 +40,8 @@ Cumprido na app: origem visível junto dos dados («Ficha do BoardGameGeek» com
 - O repositório não identifica a aplicação registada no BGG (nome ou ID).
 - Outra fonte de dados BGG: importação do catálogo a partir do ficheiro de rankings (`Bgg:CatalogLocalFilePath`, `Bgg:CatalogPageUrl`); deve estar coberta pela mesma autorização.
 - DeviceTests não contacta o BGG (`OfflineCatalog`).
+- Mac (2026-10-14): `Bgg__Token` não está definido em nenhum ponto (shell, perfis zsh, `launchctl`, Keychain, user-secrets nem no processo da API DeviceTests): ausente, não apenas não herdado. Os scripts de arranque não o definem.
+- Token local: `scripts/bgg-token.sh set` guarda-o no Keychain de início de sessão (o próprio `security` pede o valor, oculto); `scripts/bgg-token.sh run -- <comando>` passa-o como `Bgg__Token` (lido como `Bgg:Token`) só a esse processo; `status` indica apenas se existe. O Azure não foi alterado.
 
 **Pendente (BGG-ATTR01):** confirmar o âmbito com os termos e a autorização fornecidos; configurar o token como segredo (user-secrets ou variável `Bgg__Token`, nunca em ficheiros versionados); colocar o ficheiro oficial «Powered by BGG», sem alterações e nas condições da autorização, junto dos dados BGG. Não fechar com base em excertos de pesquisa.
 
