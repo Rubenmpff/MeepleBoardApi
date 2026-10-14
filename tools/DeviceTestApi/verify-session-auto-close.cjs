@@ -26,14 +26,14 @@ const HOUR = 3600000, sleep = ms => new Promise(r => setTimeout(r, ms));
     return;
   }
 
-  // Legacy sessions left active: closed at start + 24 h (or the chosen end), with players and matches kept.
+  // Legacy sessions left active: closed at the scheduled time + 24 h (or the chosen end), with players and matches kept.
   const sessions = await mine();
   const auto = sessions.filter(s => s.closedAutomatically);
   assert.ok(auto.length > 0, 'expected legacy sessions closed automatically');
   for (const s of auto) {
     assert.equal(s.status, 'Closed');
     assert.equal(Date.parse(s.endDate), Date.parse(s.autoCloseAt), 'endDate is the due time: ' + s.name);
-    assert.ok(Date.parse(s.autoCloseAt) <= Date.parse(s.latestCloseAt) && Date.parse(s.autoCloseAt) - Date.parse(s.startedAt) >= 0);
+    assert.ok(Date.parse(s.autoCloseAt) <= Date.parse(s.latestCloseAt) && Date.parse(s.autoCloseAt) - Date.parse(s.scheduledStartDate) >= 0);
     assert.ok(!sessions.some(x => x.id === s.id && x.status === 'Active'));
   }
   const withMatches = [];
@@ -48,21 +48,25 @@ const HOUR = 3600000, sleep = ms => new Promise(r => setTimeout(r, ms));
   assert.equal(after, before);
   pass('the job ran again without changing ended sessions');
 
-  // A new session: real start, 24 h end, response deadline independent, organizer-only changes within 48 h.
+  // A new session: starts at its scheduled time, ends 24 h later, response deadline independent, organizer-only changes within 48 h.
   const scheduled = new Date(Date.now() + 40000);
   const created = await call(organizer, 'POST', '/session', { name: 'Sessão de teste · fim automático', location: 'DeviceTests', scheduledStartDate: scheduled.toISOString(), responseDeadline: new Date(Date.now() + 20000).toISOString(), playerIds: [guest.id] });
   assert.equal(created.status, 201, JSON.stringify(created.data));
   const id = created.data.id;
+  // Before anyone confirms, start and end are already known to everyone.
+  const unconfirmed = (await call(guest, 'GET', '/session/' + id)).data;
+  assert.equal(unconfirmed.status, 'Upcoming');
+  assert.equal(Date.parse(unconfirmed.autoCloseAt) - Date.parse(unconfirmed.scheduledStartDate), 24 * HOUR, 'end known without confirmed guests');
+  assert.equal(Date.parse(unconfirmed.latestCloseAt) - Date.parse(unconfirmed.scheduledStartDate), 48 * HOUR);
   assert.equal((await call(guest, 'POST', `/session/${id}/invites/respond`, { accept: true })).status, 200);
   const waiting = (await call(organizer, 'GET', '/session/' + id)).data;
   assert.equal(waiting.status, 'Upcoming');
-  assert.equal(Date.parse(waiting.autoCloseAt) - Date.parse(waiting.startedAt), 24 * HOUR);
-  assert.equal(Date.parse(waiting.startedAt), Date.parse(waiting.scheduledStartDate), 'accepted before the time: starts at the scheduled time');
+  assert.equal(waiting.autoCloseAt, unconfirmed.autoCloseAt, 'accepting does not move the end');
   assert.equal((await call(organizer, 'PUT', `/session/${id}/close-time`, { closesAt: new Date(Date.now() + 5 * HOUR).toISOString() })).status, 409, 'not before it starts');
   await sleep(Math.max(0, scheduled - Date.now()) + 2000);
   const running = (await call(organizer, 'GET', '/session/' + id)).data;
   assert.equal(running.status, 'Active');
-  const start = Date.parse(running.startedAt);
+  const start = Date.parse(running.scheduledStartDate);
   assert.equal(Date.parse(running.latestCloseAt) - start, 48 * HOUR);
   assert.notEqual(Date.parse(running.autoCloseAt), Date.parse(running.effectiveDeadline), 'independent of the response deadline');
   pass('new session starts at its scheduled time and ends 24 h later; the response deadline is separate');

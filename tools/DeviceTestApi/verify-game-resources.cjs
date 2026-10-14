@@ -65,6 +65,22 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'game-resources.
   assert.equal((await call(admin, 'DELETE', `/admin/game-resources/${rejected.data.id}`)).status, 204);
   pass('suggestions stay pending until approved; rejected ones stay hidden (test suggestions removed)');
 
+  // Every other game: no invented content, the same empty catalogue and the same suggestion path.
+  const games = (await call(user, 'GET', '/game?pageSize=100')).data.data;
+  const others = games.filter(g => g.id !== game.id);
+  assert.ok(others.length > 0, 'expected games besides Wingspan');
+  for (const g of others) {
+    const r = await call(user, 'GET', `/game/${g.id}/resources?language=all`);
+    assert.equal(r.status, 200, g.name);
+    assert.equal(r.data.total, 0, 'only Wingspan has a curated catalogue: ' + g.name);
+  }
+  const empty = others[0];
+  const pending = await call(other, 'POST', `/game/${empty.id}/resources/suggestions`, { kind: 'HowToPlay', printCategory: null, language: 'pt', title: 'Sugestão de teste', author: null, platform: 'Teste', url: `https://example.org/meepleboard-device-test/e${stamp}`, compatibility: null, isOfficial: false, isFree: null });
+  assert.equal(pending.status, 201); assert.equal(pending.data.status, 'Pending');
+  assert.equal((await call(user, 'GET', `/game/${empty.id}/resources?language=all`)).data.total, 0, 'pending suggestion is public');
+  assert.equal((await call(admin, 'DELETE', `/admin/game-resources/${pending.data.id}`)).status, 204);
+  pass(`${others.length} other games: empty catalogue, suggestions accepted as pending (test suggestion removed)`);
+
   const target = all.items.find(i => i.kind === 'HowToPlay');
   assert.equal((await call(other, 'POST', `/game-resources/${target.id}/reports`, { reason: 'WrongLanguage', comment: 'Teste' })).status, 201);
   assert.equal((await call(other, 'POST', `/game-resources/${target.id}/reports`, { reason: 'BrokenLink', comment: null })).status, 409);

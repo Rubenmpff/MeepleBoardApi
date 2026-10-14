@@ -24,14 +24,11 @@ public class GameSessionDto
 
     public DateTime? EndDate { get; set; }
 
-    /// <summary>Início real (UTC): hora marcada, ou primeira aceitação se chegou depois. Null sem aceitações.</summary>
-    public DateTime? StartedAt { get; set; }
+    /// <summary>Hora a que a sessão termina sozinha (UTC): hora marcada + 24 h, ou a escolhida pelo organizador.</summary>
+    public DateTime AutoCloseAt { get; set; }
 
-    /// <summary>Hora a que a sessão termina sozinha (UTC): 24 h depois do início, ou a escolhida pelo organizador.</summary>
-    public DateTime? AutoCloseAt { get; set; }
-
-    /// <summary>Limite para prolongar (UTC): 48 h depois do início real.</summary>
-    public DateTime? LatestCloseAt { get; set; }
+    /// <summary>Limite para prolongar (UTC): 48 h depois da hora marcada.</summary>
+    public DateTime LatestCloseAt { get; set; }
 
     /// <summary>True quando o organizador escolheu a hora de fim.</summary>
     public bool CloseTimeChosen { get; set; }

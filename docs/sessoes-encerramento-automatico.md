@@ -2,9 +2,10 @@
 
 ## Regras
 
-- **Início real** (`StartedAt`, calculado): a hora marcada; se a primeira aceitação ainda válida de um convidado chegou depois, essa hora. Mantém-se a ativação automática à hora marcada com pelo menos um convidado aceite (decisão do utilizador, 2026-10-12); não existe ação «Iniciar».
-- **Fim automático** (`AutoCloseAt`): início real + 24 h, ou a hora escolhida pelo organizador (`ClosesAt`).
-- **Escolher o fim:** só o organizador, só com a sessão a decorrer, entre agora (+1 min) e início real + 48 h (`PUT /MeepleBoard/session/{id}/close-time`). Terminar já continua a ser `POST /session/{id}/close`.
+- **Início:** sempre a hora marcada (`ScheduledStartDate`). Aceitar um convite não muda o início, mesmo quando chega depois dessa hora (decisão do utilizador, 2026-10-14: aceitar não significa que já se está a jogar). Não existe ação «Iniciar».
+- **Fim automático** (`AutoCloseAt`, sempre definido): hora marcada + 24 h, ou a hora escolhida pelo organizador (`ClosesAt`). Início e fim são conhecidos desde a criação e aparecem a todos, com ou sem convidados confirmados.
+- **Quando decorre:** fica `Active` entre a hora marcada e o fim, desde que haja pelo menos um convidado aceite. Uma aceitação tardia ativa a sessão até ao mesmo fim; não a prolonga. Sem nenhum convidado aceite, a sessão nunca decorre nem termina sozinha: chegado o prazo de resposta, o `SessionCleanupJob` cancela-a (regra existente).
+- **Escolher o fim:** só o organizador, só com a sessão a decorrer, entre agora (+1 min) e hora marcada + 48 h (`PUT /MeepleBoard/session/{id}/close-time`). Terminar já continua a ser `POST /session/{id}/close`.
 - **Independente do prazo de resposta** (`ResponseDeadline`/`EffectiveDeadline`), que continua a servir só o cancelamento por falta de confirmações (`SessionCleanupJob`).
 - **Ao terminar:** `EndDate` = hora prevista de fim (não a hora em que o job correu), `ClosedAutomatically = true`, estado `Closed` («Terminada» na app). Participantes, partidas, resultados e diários ficam como estavam. Entre a hora de fim e a execução do job, o estado calculado já é `Closed`, por isso a sessão deixa de aceitar partidas na hora certa.
 
@@ -16,7 +17,7 @@ Verificado no código: não existe estado persistido de partida em curso. As par
 
 - `SessionAutoCloseJob` (Hangfire, `*/5 * * * *`, `session-auto-close`). O Hangfire guarda o agendamento em SQL; o estado das sessões também está em SQL, por isso tudo continua certo depois de reinícios.
 - **Idempotente:** só considera sessões sem `EndDate` e não canceladas; uma segunda execução não altera nada (`DisableConcurrentExecution` evita execuções em paralelo).
-- **Sessões antigas que ficaram ativas:** a mesma regra. Não há data real de início guardada; usa-se a hora marcada, ou a data de resposta da primeira aceitação quando é posterior. Aceitações antigas sem data contam como anteriores à hora marcada. Fecham com `EndDate` = esse início + 24 h.
+- **Sessões antigas que ficaram ativas:** a mesma regra: `EndDate` = hora marcada + 24 h. A primeira versão (2026-10-12) usava a primeira aceitação quando chegava depois da hora marcada; nas 9 sessões do DeviceTests a diferença era inferior a 1 ms e foram alinhadas com a regra atual.
 - **DeviceTests:** sem servidor Hangfire; o anfitrião corre o mesmo job a cada minuto (`DeviceSessionAutoClose`). Na primeira execução, 9 sessões antigas do DeviceTests terminaram automaticamente, todas com as partidas preservadas.
 
 ## Esquema

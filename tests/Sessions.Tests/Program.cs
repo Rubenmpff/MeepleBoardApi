@@ -1,4 +1,4 @@
-// Session start, automatic end and organizer end time: domain rules, the job and the HTTP endpoint.
+﻿// Session times, automatic end and organizer end time: domain rules, the job and the HTTP endpoint.
 // Production entity/service/controller/job; in-memory repositories; no configuration, SQL or Hangfire.
 using System.Net;
 using System.Net.Http.Json;
@@ -26,26 +26,27 @@ async Task Check(string name, Func<Task> action) { await action(); passed++; Con
 Task Sync(string name, Action action) => Check(name, () => { action(); return Task.CompletedTask; });
 var now = DateTime.UtcNow;
 
-await Sync("no accepted guest: no start, no end, still upcoming (cleanup job's case)", () => {
-    var s = Sessions.Create(now.AddHours(-30));
-    Assert(s.StartedAt == null && s.AutoCloseAt == null && s.Status == "Upcoming", "unexpected start without guests");
-    Assert(!s.AutoClose(now), "must not close a session that never started");
+await Sync("no accepted guest: start and end known from the scheduled time, but never active nor auto-closed (cleanup job's case)", () => {
+    var scheduled = now.AddHours(-30);
+    var s = Sessions.Create(scheduled);
+    Assert(s.AutoCloseAt == scheduled.AddHours(24) && s.LatestCloseAt == scheduled.AddHours(48), "times must not depend on guests");
+    Assert(s.Status == "Upcoming" && !s.AutoClose(now) && s.EndDate == null, "must not close a session that never ran");
 });
 await Sync("accepted before the scheduled time: starts at the scheduled time, ends 24 h later, can extend to 48 h", () => {
     var start = now.AddHours(-2);
     var s = Sessions.Create(start, accepted: [start.AddHours(-5)]);
-    Assert(s.StartedAt == start && s.AutoCloseAt == start.AddHours(24) && s.LatestCloseAt == start.AddHours(48), "wrong times");
+    Assert(s.AutoCloseAt == start.AddHours(24) && s.LatestCloseAt == start.AddHours(48), "wrong times");
     Assert(s.Status == "Active", "should be active");
 });
-await Sync("first acceptance after the scheduled time is the real start", () => {
-    var scheduled = now.AddHours(-10); var accepted = now.AddHours(-3);
-    var s = Sessions.Create(scheduled, accepted: [accepted, now.AddHours(-1)]);
-    Assert(s.StartedAt == accepted && s.AutoCloseAt == accepted.AddHours(24), "late acceptance should move the start");
+await Sync("an acceptance after the scheduled time activates the session but does not move its start or end", () => {
+    var scheduled = now.AddHours(-10);
+    var s = Sessions.Create(scheduled, accepted: [now.AddHours(-3), now.AddHours(-1)]);
+    Assert(s.Status == "Active" && s.AutoCloseAt == scheduled.AddHours(24) && s.LatestCloseAt == scheduled.AddHours(48), "late acceptance moved the times");
 });
-await Sync("legacy acceptance without a date counts as before the scheduled time", () => {
+await Sync("legacy acceptance without a date: same rule from the scheduled time", () => {
     var scheduled = now.AddDays(-5);
     var s = Sessions.Create(scheduled, accepted: [null]);
-    Assert(s.StartedAt == scheduled && s.AutoCloseAt == scheduled.AddHours(24), "legacy start");
+    Assert(s.AutoCloseAt == scheduled.AddHours(24), "legacy end");
     Assert(s.Status == "Closed", "past its end the session reads as closed before the job persists it");
 });
 await Sync("response deadline does not change the end time", () => {
@@ -129,19 +130,19 @@ async Task<string> Put(Guid session, DateTime closesAt, Guid? user, HttpStatusCo
     return text;
 }
 await Check("organizer extends; response carries start, end and limit", async () => {
-    var target = active.StartedAt!.Value.AddHours(30);
+    var target = active.ScheduledStartDate.AddHours(30);
     using var json = JsonDocument.Parse(await Put(active.Id, target, organizer, HttpStatusCode.OK));
     var root = json.RootElement;
     Assert(root.GetProperty("autoCloseAt").GetDateTime() == target && root.GetProperty("closeTimeChosen").GetBoolean(), "end not returned");
-    Assert(root.GetProperty("latestCloseAt").GetDateTime() == active.StartedAt.Value.AddHours(48), "limit not returned");
-    Assert(root.GetProperty("startedAt").GetDateTime() == active.StartedAt.Value, "start not returned");
+    Assert(root.GetProperty("latestCloseAt").GetDateTime() == active.ScheduledStartDate.AddHours(48), "limit not returned");
+    Assert(root.GetProperty("scheduledStartDate").GetDateTime() == active.ScheduledStartDate, "start not returned");
     Assert(repository.Saves == 1, "should persist once");
 });
 await Check("guest, anonymous, beyond 48 h, not started and unknown are refused without changes", async () => {
     var before = active.AutoCloseAt;
     await Put(active.Id, now.AddHours(10), guest, HttpStatusCode.Forbidden);
     await Put(active.Id, now.AddHours(10), null, HttpStatusCode.Unauthorized);
-    await Put(active.Id, active.StartedAt!.Value.AddHours(49), organizer, HttpStatusCode.BadRequest);
+    await Put(active.Id, active.ScheduledStartDate.AddHours(49), organizer, HttpStatusCode.BadRequest);
     await Put(waiting.Id, now.AddHours(10), organizer, HttpStatusCode.Conflict);
     await Put(Guid.NewGuid(), now.AddHours(10), organizer, HttpStatusCode.NotFound);
     Assert(active.AutoCloseAt == before && repository.Saves == 1, "refused requests changed state");

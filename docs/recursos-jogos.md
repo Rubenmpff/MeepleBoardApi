@@ -23,13 +23,16 @@ Endereços repetidos no mesmo jogo são recusados (409), exceto se o anterior fo
 
 ## Atribuição BoardGameGeek
 
-A página oficial de termos (`boardgamegeek.com/wiki/page/XML_API_Terms_of_Use`, política citada como versão de 2025-07-02 em `boardgamegeek.com/using_the_xml_api`) recusa leitura automática (HTTP 403); o resumo abaixo vem de fontes secundárias e tem de ser confirmado à mão antes de uma publicação pública:
+Estado em 2026-10-14: as páginas oficiais (`boardgamegeek.com/wiki/page/XML_API_Terms_of_Use`, `boardgamegeek.com/using_the_xml_api`, `boardgamegeek.com/wiki/page/BGG_XML_API_Commercial_Use`) e as cópias no Wayback Machine recusam leitura automática (HTTP 403, desafio Cloudflare). Os excertos do texto oficial devolvidos por pesquisa dizem:
 
-- apps públicas mostram o logótipo **«Powered by BGG»** com ligação a boardgamegeek.com, em tamanho legível;
-- uso comercial exige licença comercial do BGG; registo da aplicação e token para a XML API;
-- pedidos limitados e com cache; não reencaminhar dados BGG para terceiros.
+- em todas as utilizações, creditar o BoardGameGeek pelo nome como origem dos dados;
+- apps públicas incluem o logótipo **«Powered by BGG»** com ligação ao BoardGameGeek (ficheiros de exemplo na página `using_the_xml_api`);
+- licença só para fins estritamente não comerciais; qualquer fim comercial (por exemplo cobrar funcionalidades ou suporte) exige licença comercial, caso a caso;
+- os dados obtidos pela XML API não podem ser modificados; é proibido usá-los para treinar IA.
 
-Na app, os dados BGG estão identificados junto da informação («Ficha do BoardGameGeek» com ligação à página do jogo, «Avaliação BGG», origem da descrição). **Pendente:** colocar o ficheiro oficial do logótipo «Powered by BGG» (página de logótipos inacessível a leitura automática) e confirmar a classificação comercial/não comercial do MeepleBoard.
+Cumprido na app: origem visível junto dos dados («Ficha do BoardGameGeek» com ligação à página do jogo; «Avaliação BGG» separada de «Avaliação MeepleBoard» e «A tua avaliação»; descrição mostrada sem alterações, só recolhida, com «Texto original do BoardGameGeek, sem tradução.»).
+
+**Pendente (BGG-ATTR01), precisa do responsável do projeto:** abrir as três páginas num navegador e guardar o texto (PDF ou colado em `docs/`); descarregar os ficheiros oficiais do logótipo «Powered by BGG» de `using_the_xml_api` sem os alterar; confirmar se o MeepleBoard é não comercial e se a aplicação está registada com token. Com os ficheiros, coloca-se o logótipo com ligação ao BoardGameGeek no detalhe do jogo e no Perfil (Sobre).
 
 ## Descrições traduzidas
 

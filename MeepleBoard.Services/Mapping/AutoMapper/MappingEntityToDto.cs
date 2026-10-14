@@ -81,7 +81,6 @@ namespace MeepleBoardApi.Services.Mapping.AutoMapper
                 .ForMember(d => d.ResponseDeadline, opt => opt.MapFrom(s => SessionUtc(s.ResponseDeadline)))
                 .ForMember(d => d.StartDate, opt => opt.MapFrom(s => SessionUtc(s.StartDate)))
                 .ForMember(d => d.EndDate, opt => opt.MapFrom(s => SessionUtc(s.EndDate)))
-                .ForMember(d => d.StartedAt, opt => opt.MapFrom(s => SessionUtc(s.StartedAt)))
                 .ForMember(d => d.AutoCloseAt, opt => opt.MapFrom(s => SessionUtc(s.AutoCloseAt)))
                 .ForMember(d => d.LatestCloseAt, opt => opt.MapFrom(s => SessionUtc(s.LatestCloseAt)))
                 .ForMember(d => d.CloseTimeChosen, opt => opt.MapFrom(s => s.ClosesAt != null))
