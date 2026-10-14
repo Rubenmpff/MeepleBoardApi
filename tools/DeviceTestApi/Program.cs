@@ -148,9 +148,12 @@ public static class DeviceDatabase {
             account.Id = user.Id;
         }
         await File.WriteAllTextAsync(file, JsonSerializer.Serialize(accounts, new JsonSerializerOptions { WriteIndented = true }));
+        // Fictitious games carry no description: the app labels descriptions of games with a BGG id as original BGG text,
+        // so an invented sentence would be attributed to BGG. Older rows are cleared on start.
+        foreach (var fictitious in await db.Games.Where(g => g.BGGId >= 990001 && g.BGGId <= 990003 && g.Description != "").ToListAsync()) Set(fictitious, "Description", "");
         foreach (var (name, bgg) in new[] { ("Meeple Teste Competitivo", 990001), ("Meeple Teste Cooperativo", 990002), ("Meeple Teste Solo", 990003) }) {
             if (await db.Games.AnyAsync(g => g.BGGId == bgg)) continue;
-            var game = new Game(name, "Jogo fictício exclusivo da base descartável.", null, supportsSoloMode: true);
+            var game = new Game(name, "", null, supportsSoloMode: true);
             Set(game, "BGGId", bgg); Set(game, "MinPlayers", 1); Set(game, "MaxPlayers", 4); Set(game, "IsCooperative", bgg == 990002); Set(game, "SupportsCampaign", true); Set(game, "IsApproved", true);
             db.Games.Add(game);
             var catalog = new GameSearchCatalog(bgg, name, name.ToLowerInvariant(), 2026, null, false, 1, 4, bgg == 990002, true, null, 0, null);

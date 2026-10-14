@@ -23,8 +23,10 @@ public sealed partial class StatisticsService
   var friends = await AcceptedFriends(userId, ct); var own = OwnMatches(userId, query);
   var counts = await db.MatchPlayers.AsNoTracking().Where(p => friends.Contains(p.UserId) && own.Contains(p.MatchId))
    .GroupBy(p => p.UserId).Select(g => new { Id = g.Key, Matches = g.Select(p => p.MatchId).Distinct().Count() }).ToListAsync(ct);
-  var names = await db.Users.AsNoTracking().Where(u => friends.Contains(u.Id)).Select(u => new { u.Id, u.UserName }).ToListAsync(ct);
-  return names.Select(n => new Companion(n.Id, n.UserName ?? "", counts.FirstOrDefault(c => c.Id == n.Id)?.Matches ?? 0))
+  // «Com quem jogaste»: only friends with at least one shared match under the selected filters.
+  var played = counts.Select(c => c.Id).ToList();
+  var names = await db.Users.AsNoTracking().Where(u => played.Contains(u.Id)).Select(u => new { u.Id, u.UserName }).ToListAsync(ct);
+  return names.Select(n => new Companion(n.Id, n.UserName ?? "", counts.First(c => c.Id == n.Id).Matches))
    .OrderByDescending(c => c.Matches).ThenBy(c => c.FriendId).ToList();
  }
  private async Task<(List<PairRow> Rows, TimeZoneInfo Zone)> Pairs(Guid userId, Guid friendId, StatisticsQuery query, CancellationToken ct) {
