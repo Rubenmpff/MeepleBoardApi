@@ -39,11 +39,11 @@ Cumprido na app: origem visível junto dos dados («Ficha do BoardGameGeek» com
 - Nenhum token configurado neste computador: `Bgg:Token` vazio em `appsettings.json`, ausente em `appsettings.Development.json`, nos user-secrets e nas variáveis de ambiente; `.env.example` não documenta a chave. A configuração do servidor de produção não está no repositório e não foi verificada.
 - O repositório não identifica a aplicação registada no BGG (nome ou ID).
 - Outra fonte de dados BGG: importação do catálogo a partir do ficheiro de rankings (`Bgg:CatalogLocalFilePath`, `Bgg:CatalogPageUrl`); deve estar coberta pela mesma autorização.
-- DeviceTests não contacta o BGG (`OfflineCatalog`).
-- Mac (2026-10-14): `Bgg__Token` não está definido em nenhum ponto (shell, perfis zsh, `launchctl`, Keychain, user-secrets nem no processo da API DeviceTests): ausente, não apenas não herdado. Os scripts de arranque não o definem.
-- Token local: `scripts/bgg-token.sh set` guarda-o no Keychain de início de sessão (o próprio `security` pede o valor, oculto); `scripts/bgg-token.sh run -- <comando>` passa-o como `Bgg__Token` (lido como `Bgg:Token`) só a esse processo; `status` indica apenas se existe. O Azure não foi alterado.
+- Mecanismo em uso: só a chave de configuração `Bgg:Token`, lida pelos fornecedores normais do ASP.NET e usada pelo cliente da XML API e pela importação do catálogo (no Windows, variável de ambiente `Bgg__Token`). Nenhum script, perfil do IDE (`launchSettings.json`), Docker (`Dockerfile`, `docker-compose.yml`) ou workflow a define; nunca esteve em `appsettings*.json` no histórico.
+- Mac (2026-10-14): `Bgg__Token` ausente (shell, perfis zsh, `launchctl`, user-secrets e processo da API), não apenas não herdado. Basta defini-la no Mac, por exemplo em `~/.zprofile`, que o Terminal e os IDEs abertos pelo Dock herdam.
+- DeviceTests fica isolado: o anfitrião usa configuração em memória (não lê variáveis de ambiente para o BGG) e `OfflineCatalog`.
 
-**Pendente (BGG-ATTR01):** confirmar o âmbito com os termos e a autorização fornecidos; configurar o token como segredo (user-secrets ou variável `Bgg__Token`, nunca em ficheiros versionados); colocar o ficheiro oficial «Powered by BGG», sem alterações e nas condições da autorização, junto dos dados BGG. Não fechar com base em excertos de pesquisa.
+**Pendente (BGG-ATTR01):** confirmar o âmbito com os termos e a autorização fornecidos; definir `Bgg__Token` no Mac (nunca em ficheiros versionados); colocar o ficheiro oficial «Powered by BGG», sem alterações e nas condições da autorização, junto dos dados BGG. Não fechar com base em excertos de pesquisa.
 
 ## Descrições traduzidas
 
