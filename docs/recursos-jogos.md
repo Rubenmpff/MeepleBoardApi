@@ -4,10 +4,11 @@ Catálogo de links externos por jogo (regras, vídeos, modelos 3D, unboxings, ma
 
 ## Modelo
 
-`GameResource`: jogo, tipo (`Rules`, `HowToPlay`, `Playthrough`, `PrintModel`, `Unboxing`, `Material`), categoria 3D (`Organizer`, `Accessory`, `ReplacementPart`, `Decorative`, obrigatória só em `PrintModel`), idioma (ISO 639-1; nulo quando não depende de idioma), título, autor, plataforma, URL (https, até 500), edição/expansões compatíveis (texto livre), `IsOfficial` (da editora), `IsFree` (nulo se não confirmado), estado (`Pending`/`Approved`/`Rejected`), quem sugeriu e revisão.
+`GameResource`: jogo, tipo (`Rules`, `HowToPlay`, `Playthrough`, `PrintModel`, `Unboxing`, `Material`), categoria 3D (`Organizer`, `Accessory`, `ReplacementPart`, `Decorative`, obrigatória só em `PrintModel`), idioma (ISO 639-1; nulo quando não depende de idioma), título, autor, plataforma, URL (https, até 500), edição/expansões compatíveis (texto livre), `Expansion` (a expansão a que se destina; nulo = jogo base), `ThumbnailUrl` (imagem de pré-visualização no site original, https; nula quando não existe), `IsOfficial` (da editora), `IsFree` (nulo se não confirmado), estado (`Pending`/`Approved`/`Rejected`), quem sugeriu e revisão.
 `GameResourceReport`: recurso, utilizador, motivo (`BrokenLink`, `WrongGame`, `WrongLanguage`, `Incompatible`, `Other` com descrição obrigatória), comentário, resolução. Um relato aberto por utilizador e recurso.
 
 Migração `20261012081445_AddGameResources`: duas tabelas novas e quatro índices. Apagar um jogo apaga os seus recursos; apagar um recurso apaga os relatos.
+Migração `20261014100853_AddGameResourceExpansionThumbnail`: duas colunas anuláveis em `GameResources` (`Expansion` nvarchar(100), `ThumbnailUrl` nvarchar(500)); aprovada na auditoria do anfitrião DeviceTests.
 
 ## API
 
@@ -19,7 +20,18 @@ Migração `20261012081445_AddGameResources`: duas tabelas novas e quatro índic
 | `GET /MeepleBoard/game-resources/permissions` | autenticado | `canManage` para a app mostrar a gestão |
 | `/MeepleBoard/admin/game-resources…` e `POST /MeepleBoard/admin/game/{gameId}/resources` | papel `Admin` | Listar por estado, criar (aprovado), editar, aprovar, rejeitar (com nota), remover, relatos e resolver |
 
-Endereços repetidos no mesmo jogo são recusados (409), exceto se o anterior foi rejeitado. Ordenação: da editora primeiro, depois por tipo, idioma pedido e título.
+Endereços repetidos no mesmo jogo são recusados (409), exceto se o anterior foi rejeitado. Ordenação: jogo base primeiro e depois cada expansão; dentro de cada grupo, da editora primeiro, depois por tipo, idioma pedido e título.
+
+## Amigos que têm o jogo
+
+`GET /MeepleBoard/game/{gameId}/friend-owners` (autenticado) devolve `{ total, items: [{ userId, userName, profilePictureUrl }] }`, ordenado por nome. Regras, aplicadas no serviço (`UserGameLibraryService.GetFriendOwnersAsync`) sobre as entradas devolvidas pelo repositório:
+
+- só amizades `Accepted` (pedidos pendentes e não-amigos ficam de fora);
+- só o estado «Tenho» (`Owned`); «Quero jogar» e «Já joguei» não são posse;
+- só bibliotecas que o utilizador pode ver, a mesma regra de `GetUserLibraryAsync`: `Public` ou `FriendsOnly`; `Private` nunca aparece;
+- não devolve preço, estado nem privacidade; jogo inexistente 404, sem sessão 401.
+
+DeviceTests: o anfitrião cria contas fictícias `Teste-…` ligadas a `participante` para o Wingspan: cinco que aparecem (incluindo um nome longo) e cinco que não podem aparecer (biblioteca privada, lista de desejos, «Já joguei», pedido pendente, não amigo). A lista de amigos do `autor` não muda. `verify-game-friends.cjs` verifica-o com SQL real, incluindo tornar uma biblioteca privada (e repô-la).
 
 ## Atribuição BoardGameGeek
 
@@ -53,10 +65,12 @@ Não existe tradução de descrições na API nem na app: as descrições são o
 
 - Conta fictícia `admin@meepleboard.test` com papel `Admin` (palavra-passe em `.device-tests/accounts.json`, não versionado); não é amiga de ninguém.
 - Jogo real **Wingspan** (BGG 266192, Stonemaier Games, 2019, 1–5 jogadores, factos verificados) sem descrição, imagem ou avaliações BGG copiadas.
-- `tools/DeviceTestApi/game-resources.fixture.json`: 9 links reais verificados a 2026-10-12 (página de regras da editora com HTTP 200; títulos e canais dos vídeos via oEmbed do YouTube; nome, autor e gratuitidade dos modelos via API da Printables). Sem vídeos de partida completa, unboxings, materiais ou conteúdos em português que tenham sido confirmados: essas áreas mostram estados vazios.
+- `tools/DeviceTestApi/game-resources.fixture.json`: 9 links reais verificados a 2026-10-12 (página de regras da editora com HTTP 200; títulos e canais dos vídeos via oEmbed do YouTube; nome, autor e gratuitidade dos modelos via API da Printables). Sem vídeos de partida completa, unboxings, materiais ou conteúdos em português que tenham sido confirmados: essas áreas mostram estados vazios. A 2026-10-14 ganharam expansão (European, Oceania, Wingspan Asia) e miniatura: a do próprio YouTube (`i.ytimg.com`) para os vídeos e a pré-visualização da Printables (`media.printables.com`) para os modelos, todas com HTTP 200; a página de regras não tem imagem adequada e mostra o ícone neutro.
 
 ```sh
-dotnet run --project tests/GameResources.Tests --no-launch-profile   # 9 testes HTTP isolados
+dotnet run --project tests/GameResources.Tests --no-launch-profile   # 10 testes HTTP isolados
+dotnet run --project tests/Library.Tests --no-launch-profile         # inclui amigos com o jogo
+node tools/DeviceTestApi/verify-game-friends.cjs                     # amigos com o jogo, SQL real
 node tools/DeviceTestApi/verify-game-resources.cjs                   # semeia (idempotente) e verifica com SQL real
 node tools/DeviceTestApi/verify-game-resources.cjs --recheck         # depois de reiniciar a API
 ```
