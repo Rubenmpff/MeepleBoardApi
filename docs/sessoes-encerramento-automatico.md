@@ -20,14 +20,23 @@ Verificado no código: não existe estado persistido de partida em curso. As par
 - **Sessões antigas que ficaram ativas:** a mesma regra: `EndDate` = hora marcada + 24 h. A primeira versão (2026-10-12) usava a primeira aceitação quando chegava depois da hora marcada; nas 9 sessões do DeviceTests a diferença era inferior a 1 ms e foram alinhadas com a regra atual.
 - **DeviceTests:** sem servidor Hangfire; o anfitrião corre o mesmo job a cada minuto (`DeviceSessionAutoClose`). Na primeira execução, 9 sessões antigas do DeviceTests terminaram automaticamente, todas com as partidas preservadas.
 
+## Jogo previsto
+
+Opcional (`GameSessions.PlannedGameId`, chave para `Games` com `ON DELETE SET NULL`): indica a intenção do organizador e não limita os jogos registados na sessão, que pode ter partidas de vários jogos.
+
+- Criação: `plannedGameId` no `POST /MeepleBoard/session` (jogo inexistente: 400). Sem ele, a sessão é criada como antes.
+- `PUT /MeepleBoard/session/{id}/planned-game` `{ gameId }` (null retira): só o organizador (403), só com a sessão agendada ou a decorrer (409), sessão inexistente 404, sem sessão iniciada 401. Muda apenas este campo: partidas, prazo de resposta, início e fim ficam iguais.
+- O DTO devolve `plannedGameId`, `plannedGameName` e `plannedGameImageUrl` na lista e no detalhe. Sessões existentes ficam sem jogo.
+
 ## Esquema
 
 Migração `20261012080128_AddSessionCloseTime`: `GameSessions.ClosesAt` (`datetime2 NULL`) e `GameSessions.ClosedAutomatically` (`bit NOT NULL DEFAULT 0`). Só adiciona colunas; auditada pelo anfitrião DeviceTests antes de aplicar.
+Migração `20261014164836_AddGameSheetAndSessionPlannedGame`: `GameSessions.PlannedGameId` (`uniqueidentifier NULL`, índice e chave para `Games` com `ON DELETE SET NULL`) e a ficha BGG em `Games`; também auditada.
 
 ## Verificação
 
 ```sh
-dotnet run --project tests/Sessions.Tests --no-launch-profile            # 13 testes isolados
+dotnet run --project tests/Sessions.Tests --no-launch-profile            # 16 testes isolados (inclui o jogo previsto)
 node tools/DeviceTestApi/verify-session-auto-close.cjs                   # SQL real, API DeviceTests ativa
 # reiniciar a API DeviceTests e depois:
 node tools/DeviceTestApi/verify-session-auto-close.cjs --recheck
