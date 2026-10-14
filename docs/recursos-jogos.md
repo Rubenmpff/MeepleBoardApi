@@ -73,6 +73,7 @@ Não existe tradução de descrições na API nem na app: as descrições são o
 
 ## DeviceTests
 
+- Os jogos fictícios (IDs BGG inventados 990001–990003) não têm descrição: a app identificaria qualquer texto deles como original do BGG. O anfitrião limpa as descrições antigas no arranque.
 - Conta fictícia `admin@meepleboard.test` com papel `Admin` (palavra-passe em `.device-tests/accounts.json`, não versionado); não é amiga de ninguém.
 - Jogo real **Wingspan** (BGG 266192, Stonemaier Games, 2019, 1–5 jogadores, factos verificados) sem descrição, imagem ou avaliações BGG copiadas. A 2026-10-14 ganhou a duração 40–70 min e a idade 10+, tal como a página do BGG as mostrava nas capturas do utilizador desse dia; a complexidade (estatística da comunidade BGG) não é copiada, por isso a ficha fica incompleta. Ganhou também duas expansões reais, só com o nome (`Wingspan: European Expansion`, `Wingspan: Oceania Expansion`); a conta `participante` tem a European com «Tenho». Tudo reposto em cada arranque.
 - `tools/DeviceTestApi/game-resources.fixture.json`: 9 links reais verificados a 2026-10-12 (página de regras da editora com HTTP 200; títulos e canais dos vídeos via oEmbed do YouTube; nome, autor e gratuitidade dos modelos via API da Printables). Sem vídeos de partida completa, unboxings, materiais ou conteúdos em português que tenham sido confirmados: essas áreas mostram estados vazios. A 2026-10-14 ganharam expansão (European, Oceania, Wingspan Asia) e miniatura: a do próprio YouTube (`i.ytimg.com`) para os vídeos e a pré-visualização da Printables (`media.printables.com`) para os modelos, todas com HTTP 200; a página de regras não tem imagem adequada e mostra o ícone neutro.
@@ -82,6 +83,8 @@ dotnet run --project tests/GameResources.Tests --no-launch-profile   # 11 testes
 dotnet run --project tests/Library.Tests --no-launch-profile         # inclui amigos com o jogo
 node tools/DeviceTestApi/verify-game-friends.cjs                     # amigos com o jogo, SQL real
 node tools/DeviceTestApi/verify-game-page.cjs                        # ficha, expansões e jogo previsto, SQL real
+node tools/DeviceTestApi/verify-planned-game-journey.cjs             # sessão com jogo previsto e partida de outro jogo (deixa uma sessão a decorrer)
+node tools/DeviceTestApi/verify-company-companions.cjs               # Companhia: só amigos com partidas em conjunto, só leitura
 node tools/DeviceTestApi/verify-game-resources.cjs                   # semeia (idempotente) e verifica com SQL real
 node tools/DeviceTestApi/verify-game-resources.cjs --recheck         # depois de reiniciar a API
 ```
