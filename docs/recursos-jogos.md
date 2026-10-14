@@ -32,7 +32,16 @@ Estado em 2026-10-14: as páginas oficiais (`boardgamegeek.com/wiki/page/XML_API
 
 Cumprido na app: origem visível junto dos dados («Ficha do BoardGameGeek» com ligação à página do jogo; «Avaliação BGG» separada de «Avaliação MeepleBoard» e «A tua avaliação»; descrição mostrada sem alterações, só recolhida, com «Texto original do BoardGameGeek, sem tradução.»).
 
-**Pendente (BGG-ATTR01), precisa do responsável do projeto:** abrir as três páginas num navegador e guardar o texto (PDF ou colado em `docs/`); descarregar os ficheiros oficiais do logótipo «Powered by BGG» de `using_the_xml_api` sem os alterar; confirmar se o MeepleBoard é não comercial e se a aplicação está registada com token. Com os ficheiros, coloca-se o logótipo com ligação ao BoardGameGeek no detalhe do jogo e no Perfil (Sobre).
+**Âmbito (2026-10-14):** o MeepleBoard tem intenção de monetização e não é tratado como projeto só não comercial. O responsável tem licença do BGG; o âmbito aplicável confirma-se pelos termos e pela autorização que vai fornecer, não por excertos de pesquisa.
+
+**Configuração existente (verificada sem ler valores):**
+- `Program.cs` regista o cliente da XML API com `Bgg:BaseUrl` (`https://boardgamegeek.com/xmlapi2/`), envia `Authorization: Bearer` quando `Bgg:Token` existe e identifica-se como `MeepleBoard/1.0`.
+- Nenhum token configurado neste computador: `Bgg:Token` vazio em `appsettings.json`, ausente em `appsettings.Development.json`, nos user-secrets e nas variáveis de ambiente; `.env.example` não documenta a chave. A configuração do servidor de produção não está no repositório e não foi verificada.
+- O repositório não identifica a aplicação registada no BGG (nome ou ID).
+- Outra fonte de dados BGG: importação do catálogo a partir do ficheiro de rankings (`Bgg:CatalogLocalFilePath`, `Bgg:CatalogPageUrl`); deve estar coberta pela mesma autorização.
+- DeviceTests não contacta o BGG (`OfflineCatalog`).
+
+**Pendente (BGG-ATTR01):** confirmar o âmbito com os termos e a autorização fornecidos; configurar o token como segredo (user-secrets ou variável `Bgg__Token`, nunca em ficheiros versionados); colocar o ficheiro oficial «Powered by BGG», sem alterações e nas condições da autorização, junto dos dados BGG. Não fechar com base em excertos de pesquisa.
 
 ## Descrições traduzidas
 
