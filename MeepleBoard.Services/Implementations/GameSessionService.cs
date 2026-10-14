@@ -1,4 +1,4 @@
-using AutoMapper;
+﻿using AutoMapper;
 using MeepleBoard.Application.DTOs;
 using MeepleBoard.Domain.Entities;
 using MeepleBoard.Domain.Interfaces;
@@ -13,13 +13,15 @@ namespace MeepleBoard.Services.Implementations
         private readonly IUserRepository _userRepository;
         private readonly IMapper _mapper;
         private readonly IFriendshipRepository _friendships;
+        private readonly IGameRepository _games;
 
         public GameSessionService(
             IGameSessionRepository sessionRepository,
             IGameSessionPlayerRepository sessionPlayerRepository,
             IUserRepository userRepository,
-            IMapper mapper, IFriendshipRepository friendships)
+            IMapper mapper, IFriendshipRepository friendships, IGameRepository games)
         {
+            _games = games;
             _sessionRepository = sessionRepository;
             _sessionPlayerRepository = sessionPlayerRepository;
             _userRepository = userRepository;
@@ -82,6 +84,7 @@ namespace MeepleBoard.Services.Implementations
 
             var organizer = await _userRepository.GetByIdAsync(organizerId);
             if (organizer == null) throw new KeyNotFoundException("Organizer não encontrado.");
+            var plannedGameId = await KnownGameAsync(dto.PlannedGameId);
 
             var scheduledUtc = dto.ScheduledStartDate?.ToUniversalTime() ?? DateTime.UtcNow;
             var deadlineUtc = dto.ResponseDeadline?.ToUniversalTime();
@@ -93,6 +96,7 @@ namespace MeepleBoard.Services.Implementations
                 scheduledUtc,
                 deadlineUtc
             );
+            session.SetPlannedGame(plannedGameId);
 
             await _sessionRepository.AddAsync(session);
 
@@ -194,6 +198,26 @@ namespace MeepleBoard.Services.Implementations
             session.SetClosesAt(closesAtUtc, DateTime.UtcNow);
             await _sessionRepository.SaveChangesAsync();
             return (await GetByIdAsync(sessionId, organizerId))!;
+        }
+
+        public async Task<GameSessionDto> SetPlannedGameAsync(Guid sessionId, Guid organizerId, Guid? gameId)
+        {
+            if (sessionId == Guid.Empty) throw new ArgumentException("Sessão inválida.");
+            var session = await _sessionRepository.GetByIdWithPlayersForUpdateAsync(sessionId)
+                ?? throw new KeyNotFoundException("Sessão não encontrada.");
+            if (session.OrganizerId != organizerId)
+                throw new UnauthorizedAccessException("Apenas o organizador pode alterar o jogo previsto.");
+
+            session.SetPlannedGame(await KnownGameAsync(gameId));
+            await _sessionRepository.SaveChangesAsync();
+            return (await GetByIdAsync(sessionId, organizerId))!;
+        }
+
+        // Null or empty: no planned game. Otherwise it must exist in the catalogue.
+        private async Task<Guid?> KnownGameAsync(Guid? gameId)
+        {
+            if (gameId is null || gameId == Guid.Empty) return null;
+            return await _games.GetByIdAsync(gameId.Value) != null ? gameId : throw new ArgumentException("Jogo previsto não encontrado.");
         }
 
         /// <summary>

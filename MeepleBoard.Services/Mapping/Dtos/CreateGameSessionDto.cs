@@ -23,6 +23,9 @@ namespace MeepleBoard.Application.DTOs
         /// </summary>
         public DateTime? ResponseDeadline { get; set; }
 
+        /// <summary>Jogo previsto (opcional). Sem jogo, decidem à mesa.</summary>
+        public Guid? PlannedGameId { get; set; }
+
         /// <summary>
         /// IDs dos utilizadores a convidar inicialmente (Pending).
         /// </summary>

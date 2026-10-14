@@ -21,6 +21,9 @@ namespace MeepleBoard.Services.Interfaces
         /// <summary>Organizer escolhe outra hora de fim (até 48 h após o início real).</summary>
         Task<GameSessionDto> SetCloseTimeAsync(Guid sessionId, Guid organizerId, DateTime closesAtUtc);
 
+        /// <summary>Organizer define, altera ou remove o jogo previsto enquanto a sessão está aberta.</summary>
+        Task<GameSessionDto> SetPlannedGameAsync(Guid sessionId, Guid organizerId, Guid? gameId);
+
         /// <summary>
         /// Cancela a sessão manualmente (Cancelled). Só organizer.
         /// Só possível enquanto Upcoming.

@@ -38,6 +38,11 @@ public class GameSessionDto
 
     public string? Location { get; set; }
 
+    /// <summary>Jogo previsto (opcional); não limita os jogos registados.</summary>
+    public Guid? PlannedGameId { get; set; }
+    public string? PlannedGameName { get; set; }
+    public string? PlannedGameImageUrl { get; set; }
+
     /// <summary>Upcoming | Active | Closed | Cancelled</summary>
     public string Status { get; set; } = "Upcoming";
 

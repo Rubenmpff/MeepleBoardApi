@@ -337,6 +337,12 @@ namespace MeepleBoard.Infra.Data.Context
                     .HasForeignKey(x => x.OrganizerId)
                     .OnDelete(DeleteBehavior.Restrict);
 
+                // Apagar um jogo não apaga sessões: o jogo previsto passa a «por definir».
+                b.HasOne(x => x.PlannedGame)
+                    .WithMany()
+                    .HasForeignKey(x => x.PlannedGameId)
+                    .OnDelete(DeleteBehavior.SetNull);
+
                 b.HasMany(x => x.Players)
                     .WithOne(p => p.Session)
                     .HasForeignKey(p => p.SessionId)

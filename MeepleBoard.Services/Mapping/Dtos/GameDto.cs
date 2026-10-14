@@ -62,6 +62,13 @@ namespace MeepleBoard.Services.DTOs
         /// Complexidade média do jogo (weight do BGG, 1-5).
         /// </summary>
         public double? AverageWeight { get; set; }
+        /// <summary>Duração mínima e máxima em minutos, do BGG. Null quando o BGG não tem o dado.</summary>
+        public int? MinPlayTime { get; set; }
+        public int? MaxPlayTime { get; set; }
+        /// <summary>Idade mínima recomendada, do BGG. Null quando o BGG não tem o dado.</summary>
+        public int? MinAge { get; set; }
+        /// <summary>Tempo de jogo indicado pelo BGG (só na leitura do BGG; usado quando faltam mínimo e máximo).</summary>
+        public int? PlayingTime { get; set; }
         /// <summary>
         /// Indica se o jogo é cooperativo.
         /// Determinado pela mecânica "Cooperative Game" no BGG.

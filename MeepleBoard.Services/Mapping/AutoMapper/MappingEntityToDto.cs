@@ -84,6 +84,9 @@ namespace MeepleBoardApi.Services.Mapping.AutoMapper
                 .ForMember(d => d.AutoCloseAt, opt => opt.MapFrom(s => SessionUtc(s.AutoCloseAt)))
                 .ForMember(d => d.LatestCloseAt, opt => opt.MapFrom(s => SessionUtc(s.LatestCloseAt)))
                 .ForMember(d => d.CloseTimeChosen, opt => opt.MapFrom(s => s.ClosesAt != null))
+                .ForMember(d => d.PlannedGameId, opt => opt.MapFrom(s => s.PlannedGameId))
+                .ForMember(d => d.PlannedGameName, opt => opt.MapFrom(s => s.PlannedGame != null ? s.PlannedGame.Name : null))
+                .ForMember(d => d.PlannedGameImageUrl, opt => opt.MapFrom(s => s.PlannedGame != null && s.PlannedGame.ImageUrl != "" ? s.PlannedGame.ImageUrl : null))
                 .ForMember(d => d.Status, opt => opt.MapFrom(s => s.Status))
                 .ForMember(d => d.Players, opt => opt.MapFrom(s => s.Players))
                 .ForMember(d => d.Matches, opt => opt.MapFrom(s => s.Matches));

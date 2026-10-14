@@ -318,7 +318,7 @@ public class Fixture
         });
         MatchService = new(Matches, players, sessions, Empty<IGameSessionPlayerRepository>(), users, games, Journals, Empty<IBGGService>(), Empty<IGameService>(), Empty<INotificationService>(), mapper);
         CampaignService = new(Journals, Matches, users, games, Empty<INotificationService>(), Photos, Microsoft.Extensions.Logging.Abstractions.NullLogger<CampaignService>.Instance);
-        SessionService = new(sessions, Empty<IGameSessionPlayerRepository>(), users, mapper, Empty<IFriendshipRepository>());
+        SessionService = new(sessions, Empty<IGameSessionPlayerRepository>(), users, mapper, Empty<IFriendshipRepository>(), games);
     }
     Task Delete(Guid id) { Store.Remove(id); return Task.CompletedTask; }
     Task Add(Match match) { Store[match.Id] = match; return Task.CompletedTask; }

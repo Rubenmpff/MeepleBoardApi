@@ -88,6 +88,11 @@ public static class DeviceDatabase {
             var resourceExtras = migrations.CreateMigration(migrations.Migrations["20261014100853_AddGameResourceExpansionThumbnail"], review.Database.ProviderName!);
             if (resourceExtras.UpOperations.Count != 2 || resourceExtras.UpOperations.Any(op => op is not Microsoft.EntityFrameworkCore.Migrations.Operations.AddColumnOperation col || col.Table != "GameResources" || !col.IsNullable
                 || !(col.Name == "Expansion" && col.ColumnType == "nvarchar(100)" || col.Name == "ThumbnailUrl" && col.ColumnType == "nvarchar(500)"))) throw new Exception("Unexpected resource expansion/thumbnail migration changes");
+            var sheet = migrations.CreateMigration(migrations.Migrations["20261014164836_AddGameSheetAndSessionPlannedGame"], review.Database.ProviderName!);
+            var sheetColumns = sheet.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.AddColumnOperation>().Select(c => c.IsNullable ? c.Table + "." + c.Name + ":" + c.ColumnType : "NOT NULL").OrderBy(n => n).ToArray();
+            if (sheet.UpOperations.Count != 7 || !sheetColumns.SequenceEqual(new[] { "Games.AverageWeight:float", "Games.MaxPlayTime:int", "Games.MinAge:int", "Games.MinPlayTime:int", "GameSessions.PlannedGameId:uniqueidentifier" })
+                || sheet.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.CreateIndexOperation>().SingleOrDefault()?.Name != "IX_GameSessions_PlannedGameId"
+                || sheet.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.AddForeignKeyOperation>().SingleOrDefault() is not { Table: "GameSessions", PrincipalTable: "Games", OnDelete: ReferentialAction.SetNull }) throw new Exception("Unexpected game sheet/planned game migration changes");
             var sql = review.GetService<IMigrator>().GenerateScript("20260824063025_OptimizeGameSearchTokenKey");
             // EF drops only a possible default constraint on this exact column before widening it.
             const string approvedDefaultDrop = "IF @var IS NOT NULL EXEC(N'ALTER TABLE [MatchJournalEntries] DROP CONSTRAINT [' + @var + '];');";
@@ -95,10 +100,12 @@ public static class DeviceDatabase {
             // Referential actions on the new resource tables' foreign keys: no existing row is touched.
             string[] approvedResourceKeys = [
                 "REFERENCES [AspNetUsers] ([Id]) ON DELETE SET NULL", "REFERENCES [Games] ([Id]) ON DELETE CASCADE",
-                "REFERENCES [AspNetUsers] ([Id]) ON DELETE NO ACTION", "REFERENCES [GameResources] ([Id]) ON DELETE CASCADE"];
+                "REFERENCES [AspNetUsers] ([Id]) ON DELETE NO ACTION", "REFERENCES [GameResources] ([Id]) ON DELETE CASCADE",
+                // Deleting a game leaves sessions in place with no planned game.
+                "REFERENCES [Games] ([Id]) ON DELETE SET NULL"];
             var auditedSql = approvedResourceKeys.Aggregate(sql.Replace(approvedDefaultDrop, ""), (text, clause) => text.Replace(clause, ""));
             if (auditedSql.Contains("DROP ") || auditedSql.Contains("UPDATE [Matches]") || auditedSql.Contains("DELETE ")) throw new Exception("Unexpected destructive migration SQL");
-            Console.WriteLine("Migration audit passed: model matches snapshot; nullable CreatorId, one filtered index and nullable rating widened to float, four nullable outcome columns, two session close-time columns, two new resource tables, two nullable resource columns.");
+            Console.WriteLine("Migration audit passed: model matches snapshot; nullable CreatorId, one filtered index and nullable rating widened to float, four nullable outcome columns, two session close-time columns, two new resource tables, two nullable resource columns, four nullable game sheet columns and a nullable planned game (set null on delete).");
             if (Environment.GetCommandLineArgs().Contains("--audit-only")) return;
         }
         // All SQL access derives from the same validated exclusive test connection.
@@ -176,6 +183,31 @@ public static class DeviceDatabase {
         }
         await db.SaveChangesAsync();
         await SeedGameFriends(db, users, accounts, file);
+        await SeedWingspanSheetAndExpansions(db, accounts);
+    }
+
+    // Game page facts and expansions for Wingspan, reset on every start.
+    // Duration 40–70 min and age 10+ as the BGG page showed them on 14/10/2026 (user's screenshots); the BGG
+    // complexity is a community statistic and is not copied, so the page also shows a partial sheet.
+    // The two expansions are real Stonemaier products (names only); "participante" owns the European one.
+    static async Task SeedWingspanSheetAndExpansions(MeepleBoardDbContext db, List<TestAccount> accounts) {
+        var wingspan = await db.Games.SingleAsync(g => g.BGGId == 266192);
+        wingspan.SetBggSheet(40, 70, null, 10, null);
+        var viewer = accounts.Single(a => a.Email == "participante@meepleboard.test").Id;
+        foreach (var (name, owned) in new[] { ("Wingspan: European Expansion", true), ("Wingspan: Oceania Expansion", false) }) {
+            var expansion = await db.Games.SingleOrDefaultAsync(g => g.Name == name);
+            if (expansion == null) {
+                expansion = new Game(name, "", null);
+                Set(expansion, "IsApproved", true);
+                db.Games.Add(expansion);
+            }
+            Set(expansion, "BaseGameId", wingspan.Id);
+            var entry = await db.UserGameLibraries.SingleOrDefaultAsync(l => l.UserId == viewer && l.GameId == expansion.Id);
+            if (owned && entry == null) db.UserGameLibraries.Add(new UserGameLibrary(viewer, expansion.Id, GameLibraryStatus.Owned));
+            else if (owned && entry!.Status != GameLibraryStatus.Owned) entry.UpdateStatus(GameLibraryStatus.Owned);
+            else if (!owned && entry != null) db.UserGameLibraries.Remove(entry);
+        }
+        await db.SaveChangesAsync();
     }
 
     // «Amigos que têm este jogo» (Wingspan), seen by "participante": who may appear and who must not.

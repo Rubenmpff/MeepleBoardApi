@@ -255,6 +255,25 @@ namespace MeepleBoardApi.Controllers
             catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
         }
 
+        public sealed record PlannedGameRequest(Guid? GameId);
+
+        /// <summary>Organizer define, altera ou remove (gameId null) o jogo previsto; partidas, prazo e horas não mudam.</summary>
+        [HttpPut("{id:guid}/planned-game")]
+        public async Task<IActionResult> SetPlannedGame(Guid id, [FromBody] PlannedGameRequest request)
+        {
+            Guid authUserId;
+            try { authUserId = GetAuthUserId(); }
+            catch (UnauthorizedAccessException ex) { return Unauthorized(new { message = ex.Message }); }
+            try
+            {
+                return Ok(await _sessionService.SetPlannedGameAsync(id, authUserId, request.GameId));
+            }
+            catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message }); }
+            catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+            catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
+            catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+        }
+
         [HttpPost("{id:guid}/cancel")]
         [Authorize]
         public async Task<IActionResult> Cancel(Guid id)

@@ -23,6 +23,7 @@ namespace MeepleBoard.Infra.Data.Repositories
             return await _context.GameSessions
                 .AsNoTracking()
                 .Include(s => s.Organizer).Include(s => s.Players) // membership required for mine filtering
+                .Include(s => s.PlannedGame)
                                            // ⚠️ Não usar Include(s => s.Players) / Include(s => s.Matches) aqui
                 .OrderByDescending(s => s.StartDate)
                 .ToListAsync(ct);
@@ -36,6 +37,7 @@ namespace MeepleBoard.Infra.Data.Repositories
             return await _context.GameSessions
                 .AsNoTracking()
                 .Include(s => s.Organizer)
+                .Include(s => s.PlannedGame)
                 .Include(s => s.Players)
                     .ThenInclude(p => p.User)
                 .Include(s => s.Matches).ThenInclude(m => m.Game)

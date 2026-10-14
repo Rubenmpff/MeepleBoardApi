@@ -1153,6 +1153,15 @@ public class BGGService : IBGGService
                 minPlayers.HasValue &&
                 minPlayers.Value == 1;
 
+            int? IntValue(string element) =>
+                int.TryParse(
+                    item.Element(element)
+                        ?.Attribute("value")
+                        ?.Value,
+                    out var value)
+                    ? value
+                    : null;
+
             bool isCooperative =
                 item.Elements("link")
                     .Any(l =>
@@ -1226,6 +1235,10 @@ public class BGGService : IBGGService
                 MinPlayers = minPlayers,
                 MaxPlayers = maxPlayers,
                 AverageWeight = avgWeight,
+                MinPlayTime = IntValue("minplaytime"),
+                MaxPlayTime = IntValue("maxplaytime"),
+                PlayingTime = IntValue("playingtime"),
+                MinAge = IntValue("minage"),
                 UsersRatedCount = usersRatedCount,
                 SupportsSoloMode = supportsSoloMode,
                 IsCooperative = isCooperative,

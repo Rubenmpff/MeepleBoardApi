@@ -79,6 +79,13 @@ namespace MeepleBoard.Domain.Entities
         /// </summary>
         public bool ClosedAutomatically { get; private set; }
 
+        /// <summary>
+        /// Jogo previsto (opcional). Indica a intenção do organizador; não limita os jogos
+        /// registados na sessão, e alterá-lo não muda partidas, prazo nem horas.
+        /// </summary>
+        public Guid? PlannedGameId { get; private set; }
+        public virtual Game? PlannedGame { get; private set; }
+
         public static readonly TimeSpan DefaultDuration = TimeSpan.FromHours(24);
         public static readonly TimeSpan MaxDuration = TimeSpan.FromHours(48);
 
@@ -295,6 +302,17 @@ namespace MeepleBoard.Domain.Entities
                     throw new ArgumentException("O prazo de resposta tem de ser antes da data da sessão.");
                 ResponseDeadline = deadline;
             }
+        }
+
+        /// <summary>
+        /// Define, altera ou remove (null) o jogo previsto enquanto a sessão está aberta.
+        /// Só muda este campo: partidas, prazo de resposta e horas ficam como estão.
+        /// </summary>
+        public void SetPlannedGame(Guid? gameId)
+        {
+            if (Status is "Closed" or "Cancelled")
+                throw new InvalidOperationException("Só podes alterar o jogo previsto de uma sessão aberta.");
+            PlannedGameId = gameId == Guid.Empty ? null : gameId;
         }
 
         /// <summary>

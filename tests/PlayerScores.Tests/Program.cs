@@ -229,7 +229,7 @@ var ruleFriend = Guid.NewGuid();
         return Task.FromResult(acceptedFriend);
     });
     var mapper = new MapperConfiguration(c => c.AddProfile<MappingEntityToDto>()).CreateMapper();
-    return (new GameSessionService(sessionRepo, players, users, mapper, friends), sessions, links);
+    return (new GameSessionService(sessionRepo, players, users, mapper, friends, Stub.Create<IGameRepository>((method, _) => throw new Exception("Unexpected game dependency"))), sessions, links);
 }
 foreach (var ids in new List<Guid>?[] { null, new(), new() { ruleOwner }, new() { Guid.Empty, ruleOwner } }) {
     await Check("session without a distinct friend rejected before tracking writes", async () => {

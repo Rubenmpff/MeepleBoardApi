@@ -75,6 +75,15 @@ namespace MeepleBoard.Domain.Entities
 
         public bool IsCooperative { get; private set; } = false;
 
+        // Ficha do BGG: duração (minutos), idade mínima e complexidade (1–5). Null quando o BGG não tem o dado.
+        public int? MinPlayTime { get; private set; }
+
+        public int? MaxPlayTime { get; private set; }
+
+        public int? MinAge { get; private set; }
+
+        public double? AverageWeight { get; private set; }
+
         // ✅ Detetado a partir do BGG (mecânica "Legacy Game"/"Campaign / Battle Card Driven"
         // ou categoria "Campaign Games"). Usado para avisar o utilizador ao criar uma
         // campanha com um jogo que normalmente não é jogado em campanha.
@@ -337,6 +346,28 @@ namespace MeepleBoard.Domain.Entities
 
             if (updated)
                 SetUpdatedAt();
+        }
+
+        /// <summary>
+        /// Duração, idade e complexidade como o BGG as indica. O BGG usa 0 para «sem dado»:
+        /// nesses casos o campo fica vazio. Sem mínimo nem máximo, usa-se o tempo de jogo indicado.
+        /// </summary>
+        public void SetBggSheet(int? minPlayTime, int? maxPlayTime, int? playingTime, int? minAge, double? averageWeight)
+        {
+            static int? Known(int? value) => value is > 0 and < 100000 ? value : null;
+            var min = Known(minPlayTime);
+            var max = Known(maxPlayTime);
+            if (min == null && max == null) min = max = Known(playingTime);
+            if (min.HasValue && max.HasValue && min > max) (min, max) = (max, min);
+            var age = minAge is > 0 and < 100 ? minAge : null;
+            var weight = averageWeight is >= 1 and <= 5 ? Math.Round(averageWeight.Value, 2) : (double?)null;
+
+            if (MinPlayTime == min && MaxPlayTime == max && MinAge == age && AverageWeight == weight) return;
+            MinPlayTime = min;
+            MaxPlayTime = max;
+            MinAge = age;
+            AverageWeight = weight;
+            SetUpdatedAt();
         }
 
         private void SetUpdatedAt() => UpdatedAt = DateTime.UtcNow;

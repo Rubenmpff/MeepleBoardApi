@@ -133,6 +133,13 @@ namespace MeepleBoard.Services.Implementations
             game.SetCooperative(
                 bggGame.IsCooperative);
 
+            game.SetBggSheet(
+                bggGame.MinPlayTime,
+                bggGame.MaxPlayTime,
+                bggGame.PlayingTime,
+                bggGame.MinAge,
+                bggGame.AverageWeight);
+
             game.SetSupportsCampaign(
                 bggGame.SupportsCampaign);
 
@@ -1709,6 +1716,13 @@ namespace MeepleBoard.Services.Implementations
             game.SetCooperative(
                 bgg.IsCooperative);
 
+            game.SetBggSheet(
+                bgg.MinPlayTime,
+                bgg.MaxPlayTime,
+                bgg.PlayingTime,
+                bgg.MinAge,
+                bgg.AverageWeight);
+
             game.SetSupportsCampaign(
                 bgg.SupportsCampaign);
 
@@ -1887,6 +1901,13 @@ namespace MeepleBoard.Services.Implementations
 
             existingGame.SetCooperative(
                 game.IsCooperative);
+
+            existingGame.SetBggSheet(
+                game.MinPlayTime,
+                game.MaxPlayTime,
+                game.PlayingTime,
+                game.MinAge,
+                game.AverageWeight);
 
             existingGame.SetSupportsCampaign(
                 game.SupportsCampaign);

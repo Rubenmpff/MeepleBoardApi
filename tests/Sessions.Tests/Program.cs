@@ -95,6 +95,25 @@ await Sync("closing by hand after the due time keeps the due time", () => {
     fresh.CloseSession();
     Assert(fresh.EndDate >= now && !fresh.ClosedAutomatically, "early manual close");
 });
+await Sync("planned game: set, change and clear while open; never touches matches, deadline or times", () => {
+    var scheduled = now.AddHours(-2);
+    var s = Sessions.Create(scheduled, accepted: [scheduled.AddHours(-1)], deadline: scheduled.AddHours(-3));
+    var match = (Match)Activator.CreateInstance(typeof(Match), true)!; s.Matches.Add(match);
+    s.SetClosesAt(scheduled.AddHours(30), now);
+    var (deadline, closes, start) = (s.ResponseDeadline, s.AutoCloseAt, s.ScheduledStartDate);
+    Guid first = Guid.NewGuid(), second = Guid.NewGuid();
+    s.SetPlannedGame(first); Assert(s.PlannedGameId == first, "set");
+    s.SetPlannedGame(second); Assert(s.PlannedGameId == second, "change");
+    s.SetPlannedGame(null); Assert(s.PlannedGameId == null, "clear");
+    s.SetPlannedGame(Guid.Empty); Assert(s.PlannedGameId == null, "empty means none");
+    Assert(s.Matches.Single() == match && s.ResponseDeadline == deadline && s.AutoCloseAt == closes && s.ScheduledStartDate == start, "other fields changed");
+    var upcoming = Sessions.Create(now.AddHours(5));
+    upcoming.SetPlannedGame(first); Assert(upcoming.PlannedGameId == first, "upcoming session accepts a planned game");
+    var closed = Sessions.Create(now.AddDays(-3), accepted: [now.AddDays(-4)]); closed.AutoClose(now);
+    Throws<InvalidOperationException>(() => closed.SetPlannedGame(first), "closed session");
+    var cancelled = Sessions.Create(now.AddHours(5)); cancelled.CancelSession();
+    Throws<InvalidOperationException>(() => cancelled.SetPlannedGame(first), "cancelled session");
+});
 await Check("job closes due sessions, saves once and is idempotent", async () => {
     var due = Sessions.Create(now.AddDays(-2), accepted: [now.AddDays(-3)]);
     var running = Sessions.Create(now.AddHours(-1), accepted: [now.AddHours(-2)]);
@@ -108,9 +127,11 @@ await Check("job closes due sessions, saves once and is idempotent", async () =>
 var organizer = Guid.NewGuid(); var guest = Guid.NewGuid();
 var active = Sessions.Create(now.AddHours(-2), accepted: [now.AddHours(-3)], organizer: organizer, guest: guest);
 var waiting = Sessions.Create(now.AddHours(5), accepted: [now.AddHours(-1)], organizer: organizer, guest: guest);
-var repository = new Repository([active, waiting]);
+var finished = Sessions.Create(now.AddDays(-3), accepted: [now.AddDays(-4)], organizer: organizer, guest: guest); finished.AutoClose(now);
+var repository = new Repository([active, waiting, finished]);
+var knownGame = Guid.NewGuid();
 var mapper = new MapperConfiguration(c => c.AddProfile<MappingEntityToDto>()).CreateMapper();
-var service = new GameSessionService(repository, Stub.Create<IGameSessionPlayerRepository>(), Stub.Create<IUserRepository>(), mapper, Stub.Create<IFriendshipRepository>());
+var service = new GameSessionService(repository, Stub.Create<IGameSessionPlayerRepository>(), Stub.Create<IUserRepository>(), mapper, Stub.Create<IFriendshipRepository>(), Games.With(knownGame));
 var builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions { EnvironmentName = "Testing", Args = [] });
 builder.WebHost.UseKestrel().UseUrls("http://127.0.0.1:0");
 builder.Services.AddLogging();
@@ -146,6 +167,32 @@ await Check("guest, anonymous, beyond 48 h, not started and unknown are refused 
     await Put(waiting.Id, now.AddHours(10), organizer, HttpStatusCode.Conflict);
     await Put(Guid.NewGuid(), now.AddHours(10), organizer, HttpStatusCode.NotFound);
     Assert(active.AutoCloseAt == before && repository.Saves == 1, "refused requests changed state");
+});
+async Task<string> PutGame(Guid session, Guid? gameId, Guid? user, HttpStatusCode expected) {
+    using var request = new HttpRequestMessage(HttpMethod.Put, $"/MeepleBoard/session/{session}/planned-game") { Content = JsonContent.Create(new { gameId }) };
+    if (user.HasValue) request.Headers.Add("X-Fixture-User", user.Value.ToString());
+    using var response = await client.SendAsync(request);
+    var text = await response.Content.ReadAsStringAsync();
+    Assert(response.StatusCode == expected, $"expected {expected}, got {response.StatusCode}: {text}");
+    return text;
+}
+await Check("planned game endpoint: organizer sets and clears it; end time and matches unchanged", async () => {
+    var (end, saves) = (active.AutoCloseAt, repository.Saves);
+    using (var json = JsonDocument.Parse(await PutGame(active.Id, knownGame, organizer, HttpStatusCode.OK)))
+        Assert(json.RootElement.GetProperty("plannedGameId").GetGuid() == knownGame, "planned game not returned");
+    using (var json = JsonDocument.Parse(await PutGame(active.Id, null, organizer, HttpStatusCode.OK)))
+        Assert(json.RootElement.GetProperty("plannedGameId").ValueKind == JsonValueKind.Null, "planned game not cleared");
+    await PutGame(waiting.Id, knownGame, organizer, HttpStatusCode.OK);
+    Assert(active.AutoCloseAt == end && waiting.PlannedGameId == knownGame && repository.Saves == saves + 3, "unexpected changes");
+});
+await Check("planned game endpoint: guest, anonymous, unknown game, closed and unknown session are refused without changes", async () => {
+    var saves = repository.Saves;
+    await PutGame(waiting.Id, null, guest, HttpStatusCode.Forbidden);
+    await PutGame(waiting.Id, null, null, HttpStatusCode.Unauthorized);
+    await PutGame(waiting.Id, Guid.NewGuid(), organizer, HttpStatusCode.BadRequest);
+    await PutGame(finished.Id, knownGame, organizer, HttpStatusCode.Conflict);
+    await PutGame(Guid.NewGuid(), knownGame, organizer, HttpStatusCode.NotFound);
+    Assert(waiting.PlannedGameId == knownGame && finished.PlannedGameId == null && repository.Saves == saves, "refused requests changed state");
 });
 Console.WriteLine($"{passed} isolated session start/end tests passed.");
 await app.StopAsync();
@@ -188,6 +235,14 @@ public class Repository(List<GameSession> sessions) : IGameSessionRepository {
 public class Stub : DispatchProxy {
     protected override object? Invoke(MethodInfo? method, object?[]? args) => throw new NotSupportedException(method!.Name + " is not used by these tests.");
     public static T Create<T>() where T : class => DispatchProxy.Create<T, Stub>();
+}
+// Only GetByIdAsync is used: the planned game must exist in the catalogue.
+public class Games : DispatchProxy {
+    Guid known;
+    protected override object? Invoke(MethodInfo? method, object?[]? args) => method!.Name == "GetByIdAsync"
+        ? Task.FromResult((Guid)args![0]! == known ? (Game)Activator.CreateInstance(typeof(Game), true)! : null)
+        : throw new NotSupportedException(method.Name + " is not used by these tests.");
+    public static IGameRepository With(Guid known) { var proxy = DispatchProxy.Create<IGameRepository, Games>(); ((Games)(object)proxy).known = known; return proxy; }
 }
 public class FixtureAuthentication(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder) {
     protected override Task<AuthenticateResult> HandleAuthenticateAsync() => Task.FromResult(Guid.TryParse(Request.Headers["X-Fixture-User"], out var user)

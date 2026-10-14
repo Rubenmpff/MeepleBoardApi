@@ -213,6 +213,9 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.Property<double?>("AverageRating")
                         .HasColumnType("float");
 
+                    b.Property<double?>("AverageWeight")
+                        .HasColumnType("float");
+
                     b.Property<int?>("BGGId")
                         .HasColumnType("int");
 
@@ -243,10 +246,19 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.Property<bool>("IsCooperative")
                         .HasColumnType("bit");
 
+                    b.Property<int?>("MaxPlayTime")
+                        .HasColumnType("int");
+
                     b.Property<int?>("MaxPlayers")
                         .HasColumnType("int");
 
                     b.Property<int?>("MeepleBoardScore")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("MinAge")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("MinPlayTime")
                         .HasColumnType("int");
 
                     b.Property<int?>("MinPlayers")
@@ -541,6 +553,9 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.Property<Guid>("OrganizerId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("PlannedGameId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime?>("ResponseDeadline")
                         .HasColumnType("datetime2");
 
@@ -553,6 +568,8 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("OrganizerId");
+
+                    b.HasIndex("PlannedGameId");
 
                     b.ToTable("GameSessions");
                 });
@@ -1209,7 +1226,14 @@ namespace MeepleBoard.Infra.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("MeepleBoard.Domain.Entities.Game", "PlannedGame")
+                        .WithMany()
+                        .HasForeignKey("PlannedGameId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("Organizer");
+
+                    b.Navigation("PlannedGame");
                 });
 
             modelBuilder.Entity("MeepleBoard.Domain.Entities.GameSessionPlayer", b =>
