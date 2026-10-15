@@ -85,6 +85,7 @@ node tools/DeviceTestApi/verify-game-friends.cjs                     # amigos co
 node tools/DeviceTestApi/verify-game-page.cjs                        # ficha, expansões e jogo previsto, SQL real
 node tools/DeviceTestApi/verify-planned-game-journey.cjs             # sessão com jogo previsto e partida de outro jogo (deixa uma sessão a decorrer)
 node tools/DeviceTestApi/verify-company-companions.cjs               # Companhia: só amigos com partidas em conjunto, só leitura
+tools/DeviceTestApi/fetch-bgg-sample.sh                              # amostra XML do BGG com Bgg__Token (se definida); guarda só o XML em .device-tests/
 node tools/DeviceTestApi/verify-game-resources.cjs                   # semeia (idempotente) e verifica com SQL real
 node tools/DeviceTestApi/verify-game-resources.cjs --recheck         # depois de reiniciar a API
 ```
