@@ -1,4 +1,5 @@
 ﻿using MeepleBoard.Domain.Entities;
+using MeepleBoard.Domain.Enums;
 using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Infra.Data.Context;
 using Microsoft.Data.SqlClient;
@@ -143,19 +144,48 @@ namespace MeepleBoard.Infra.Data.Repositories
             return await _context.SaveChangesAsync(cancellationToken);
         }
 
-        // 🔹 Remove um usuário pelo ID
-        public async Task<int> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+        public async Task<AccountDeletionResult> AnonymizeAsync(Guid userId, string deletedUserName, CancellationToken cancellationToken = default)
         {
-            var user =
-                await _context.Users.FindAsync(
-                    new object[] { id },
-                    cancellationToken);
+            // Retries (EnableRetryOnFailure) replay the whole unit, so nothing is ever saved half-way.
+            var strategy = _context.Database.CreateExecutionStrategy();
+            return await strategy.ExecuteAsync(async () =>
+            {
+                _context.ChangeTracker.Clear();
+                await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+                var user = await _context.Users.SingleOrDefaultAsync(u => u.Id == userId, cancellationToken)
+                    ?? throw new KeyNotFoundException("Utilizador não encontrado.");
 
-            if (user == null) return 0;
+                // The person's diary: notes, photos, ratings and publications (their reports go with the publications).
+                var entries = await _context.MatchJournalEntries.Where(e => e.UserId == userId).ToListAsync(cancellationToken);
+                var photos = entries.SelectMany(e => e.PhotoUrls).Distinct().ToList();
+                var games = await _context.MatchJournalEntries.Where(e => e.UserId == userId && e.PersonalRating != null)
+                    .Select(e => e.Match!.GameId)
+                    // Legacy ratings kept on the match itself count as the creator's.
+                    .Union(_context.Matches.Where(m => m.CreatorId == userId && m.PersonalRating != null).Select(m => m.GameId))
+                    .Distinct().ToListAsync(cancellationToken);
+                _context.MatchJournalEntries.RemoveRange(entries);
+                await _context.Matches.Where(m => m.CreatorId == userId && (m.PersonalRating != null || m.Notes != null))
+                    .ExecuteUpdateAsync(s => s.SetProperty(m => m.PersonalRating, (double?)null).SetProperty(m => m.Notes, (string?)null), cancellationToken);
 
-            _context.Users.Remove(user);
+                // Personal links that only made sense with the person.
+                await _context.UserGameLibraries.Where(l => l.UserId == userId).ExecuteDeleteAsync(cancellationToken);
+                await _context.Friendships.Where(f => f.UserAId == userId || f.UserBId == userId || f.InitiatorId == userId).ExecuteDeleteAsync(cancellationToken);
+                await _context.GameSessionPlayers.Where(p => p.UserId == userId && p.Status != GameSessionInviteStatus.Accepted).ExecuteDeleteAsync(cancellationToken);
 
-            return await _context.SaveChangesAsync(cancellationToken);
+                // Sign-in closed for good.
+                await _context.RefreshTokens.Where(t => t.UserId == userId).ExecuteDeleteAsync(cancellationToken);
+                await _context.EmailResendLogs.Where(l => l.UserId == userId).ExecuteDeleteAsync(cancellationToken);
+                await _context.UserLogins.Where(l => l.UserId == userId).ExecuteDeleteAsync(cancellationToken);
+                await _context.UserTokens.Where(t => t.UserId == userId).ExecuteDeleteAsync(cancellationToken);
+                await _context.UserClaims.Where(c => c.UserId == userId).ExecuteDeleteAsync(cancellationToken);
+                await _context.UserRoles.Where(r => r.UserId == userId).ExecuteDeleteAsync(cancellationToken);
+
+                user.Anonymize(deletedUserName);
+                await _context.SaveChangesAsync(cancellationToken);
+                foreach (var gameId in games) await GameRepository.RecomputeMeepleBoardRating(_context, gameId, cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return new AccountDeletionResult(games, photos);
+            });
         }
 
         // 🔹 Salva as mudanças no banco

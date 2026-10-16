@@ -101,9 +101,9 @@ namespace MeepleBoardApi.Controllers
         public async Task<ActionResult> Delete(Guid id, CancellationToken cancellationToken)
         {
             if (id == Guid.Empty) return BadRequest("O ID do usuário não pode ser vazio.");
-            var existingUser = await _userService.GetByIdAsync(id, cancellationToken);
-            if (existingUser == null) return NotFound("Usuário não encontrado.");
-            await _userService.DeleteAsync(id, cancellationToken);
+            // Anonymises the account (see UserService.DeleteAsync); an account already deleted is not found.
+            try { await _userService.DeleteAsync(id, cancellationToken); }
+            catch (KeyNotFoundException) { return NotFound("Usuário não encontrado."); }
             return NoContent();
         }
 

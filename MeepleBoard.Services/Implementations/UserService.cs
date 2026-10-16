@@ -3,7 +3,9 @@ using MeepleBoard.Domain.Entities;
 using MeepleBoard.Domain.Enums;
 using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Services.DTOs;
+using MeepleBoard.Services.ExternalServices.Interfaces;
 using MeepleBoard.Services.Interfaces;
+using Microsoft.Extensions.Logging;
 
 namespace MeepleBoard.Services.Implementations
 {
@@ -13,11 +15,14 @@ namespace MeepleBoard.Services.Implementations
         private readonly IMatchRepository _matchRepository;
         private readonly IMapper _mapper;
 
-        private readonly IGameRepository? _gameRepository;
+        private readonly IPhotoStorageService? _photoStorageService;
+        private readonly ILogger<UserService>? _logger;
 
-        public UserService(IUserRepository userRepository, IMatchRepository matchRepository, IMapper mapper, IGameRepository? gameRepository = null)
+        public UserService(IUserRepository userRepository, IMatchRepository matchRepository, IMapper mapper,
+            IPhotoStorageService? photoStorageService = null, ILogger<UserService>? logger = null)
         {
-            _gameRepository = gameRepository;
+            _photoStorageService = photoStorageService;
+            _logger = logger;
             _userRepository = userRepository;
             _matchRepository = matchRepository;
             _mapper = mapper;
@@ -92,13 +97,19 @@ namespace MeepleBoard.Services.Implementations
             if (id == Guid.Empty) throw new ArgumentException("ID inválido.");
 
             var user = await _userRepository.GetByIdAsync(id, cancellationToken);
-            if (user == null) throw new KeyNotFoundException("Usuário não encontrado.");
+            if (user == null || user.DeletedAt.HasValue) throw new KeyNotFoundException("Usuário não encontrado.");
 
-            // Ratings go with the account: recalculate the games they counted in.
-            var ratedGames = _gameRepository != null ? await _gameRepository.GetGameIdsRatedByUserAsync(id, cancellationToken) : [];
-            await _userRepository.DeleteAsync(id, cancellationToken);
-            await _userRepository.CommitAsync(cancellationToken);
-            foreach (var gameId in ratedGames) await _gameRepository!.RecomputeMeepleBoardRatingAsync(gameId, cancellationToken);
+            // Anonymised, not removed: shared matches keep their players. Ratings go with the account and the
+            // games they counted in are recalculated in the same transaction.
+            var result = await _userRepository.AnonymizeAsync(id, $"Conta eliminada {id.ToString("N")[..8]}", cancellationToken);
+
+            // Storage is outside the transaction: a failure leaves an unreachable file, never a half-deleted account.
+            if (_photoStorageService == null) return;
+            foreach (var photoUrl in result.PhotoUrls)
+            {
+                try { await _photoStorageService.DeleteAsync(photoUrl, cancellationToken); }
+                catch (Exception ex) { _logger?.LogWarning(ex, "Falha ao apagar foto {PhotoUrl} de uma conta eliminada.", photoUrl); }
+            }
         }
 
         /// <summary>

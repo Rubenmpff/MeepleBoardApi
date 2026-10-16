@@ -31,8 +31,13 @@ namespace MeepleBoard.Domain.Interfaces
         // 🔹 Atualiza os dados de um usuário (agora retorna o número de registros afetados)
         Task<int> UpdateAsync(User user, CancellationToken cancellationToken = default);
 
-        // 🔹 Remove um usuário pelo ID (agora retorna número de registros afetados)
-        Task<int> DeleteAsync(Guid userId, CancellationToken cancellationToken = default);
+        /// <summary>
+        /// Deletes an account by anonymising it, all or nothing in one transaction: personal data, sign-in, library,
+        /// friendships, pending invitations and the person's diary (notes, photos, ratings, publications) go; shared
+        /// matches, sessions and campaigns keep the anonymised player. Games whose MeepleBoard rating counted the
+        /// person are recalculated inside the same transaction.
+        /// </summary>
+        Task<AccountDeletionResult> AnonymizeAsync(Guid userId, string deletedUserName, CancellationToken cancellationToken = default);
 
         // 🔹 Salva as mudanças no banco
         Task<int> CommitAsync(CancellationToken cancellationToken = default);
@@ -41,4 +46,7 @@ namespace MeepleBoard.Domain.Interfaces
         // Não carrega a entidade — é um UPDATE direto, só quando o valor está desatualizado.
         Task TouchLastActiveAsync(Guid userId, CancellationToken cancellationToken = default);
     }
+
+    /// <summary>What an account deletion left to do outside the database: photos to remove from storage.</summary>
+    public sealed record AccountDeletionResult(IReadOnlyList<Guid> RecalculatedGameIds, IReadOnlyList<string> PhotoUrls);
 }

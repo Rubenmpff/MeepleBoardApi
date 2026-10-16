@@ -103,6 +103,9 @@ public static class DeviceDatabase {
             if (ratings2.UpOperations.Count != 7 || !ratingColumns.SequenceEqual(new[] { "Games.MeepleBoardRaters:int:False:0", "Games.MeepleBoardRatingsCount:int:False:0" })
                 || !ratingTables.SequenceEqual(new[] { "ExperienceReports", "MatchExperiencePublications" })
                 || ratings2.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.CreateIndexOperation>().Count() != 3) throw new Exception("Unexpected rating counts/experience migration changes");
+            var deletion = migrations.CreateMigration(migrations.Migrations["20261016201449_AddUserDeletedAt"], review.Database.ProviderName!);
+            if (deletion.UpOperations.Count != 1 || deletion.UpOperations[0] is not Microsoft.EntityFrameworkCore.Migrations.Operations.AddColumnOperation { Table: "AspNetUsers", Name: "DeletedAt", IsNullable: true, ColumnType: "datetime2" })
+                throw new Exception("Unexpected account deletion migration changes");
             var sql = review.GetService<IMigrator>().GenerateScript("20260824063025_OptimizeGameSearchTokenKey");
             // EF drops only a possible default constraint on this exact column before widening it.
             const string approvedDefaultDrop = "IF @var IS NOT NULL EXEC(N'ALTER TABLE [MatchJournalEntries] DROP CONSTRAINT [' + @var + '];');";
@@ -159,7 +162,21 @@ public static class DeviceDatabase {
             if (name == "admin" && !await users.IsInRoleAsync(user, "Admin")) await users.AddToRoleAsync(user, "Admin");
             account.Id = user.Id;
         }
+        // «eliminar» is disposable and kept apart (other verifiers sign in with every account in accounts.json):
+        // verify-account-deletion deletes it, and it comes back, new and empty, on the next start. Nobody's friend.
+        accounts.RemoveAll(a => a.Email == "eliminar@meepleboard.test");
         await File.WriteAllTextAsync(file, JsonSerializer.Serialize(accounts, new JsonSerializerOptions { WriteIndented = true }));
+        var disposableFile = Path.Combine(dataPath, "disposable-account.json");
+        var disposable = File.Exists(disposableFile) ? JsonSerializer.Deserialize<TestAccount>(await File.ReadAllTextAsync(disposableFile))!
+            : new TestAccount("eliminar@meepleboard.test", "aA1!" + Convert.ToBase64String(RandomNumberGenerator.GetBytes(18)), Guid.Empty);
+        var disposableUser = await users.FindByEmailAsync(disposable.Email);
+        if (disposableUser == null) {
+            disposableUser = new User("Teste-eliminar", disposable.Email, "Local") { EmailConfirmed = true };
+            var r = await users.CreateAsync(disposableUser, disposable.Password); if (!r.Succeeded) throw new Exception("Disposable account creation failed: " + string.Join(",", r.Errors.Select(e => e.Code)));
+            await users.AddToRoleAsync(disposableUser, "User");
+        }
+        disposable.Id = disposableUser.Id;
+        await File.WriteAllTextAsync(disposableFile, JsonSerializer.Serialize(disposable, new JsonSerializerOptions { WriteIndented = true }));
         // Fictitious games carry no description: the app labels descriptions of games with a BGG id as original BGG text,
         // so an invented sentence would be attributed to BGG. Older rows are cleared on start.
         foreach (var fictitious in await db.Games.Where(g => g.BGGId >= 990001 && g.BGGId <= 990003 && g.Description != "").ToListAsync()) Set(fictitious, "Description", "");

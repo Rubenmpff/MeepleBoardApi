@@ -65,6 +65,9 @@ namespace MeepleBoard.Domain.Entities
         /// </summary>
         public DateTime? LastActiveAt { get; private set; }
 
+        /// <summary>When the account was deleted. The row stays, anonymised, so shared matches keep their players.</summary>
+        public DateTime? DeletedAt { get; private set; }
+
         [JsonIgnore]
         public virtual ICollection<MatchPlayer> Matches { get; private set; }
 
@@ -127,6 +130,36 @@ namespace MeepleBoard.Domain.Entities
                 ContributesDurationStats = enabled;
                 SetUpdatedAt();
             }
+        }
+
+        /// <summary>
+        /// Account deletion: everything that identifies or reaches the person goes (name, email, phone, password,
+        /// picture, push token), sign-in is closed for good, and the row keeps a neutral unique name so shared
+        /// matches, sessions and campaigns keep their players and results.
+        /// </summary>
+        public void Anonymize(string deletedUserName)
+        {
+            if (string.IsNullOrWhiteSpace(deletedUserName)) throw new ArgumentException("O nome da conta eliminada é obrigatório.");
+            if (DeletedAt.HasValue) throw new InvalidOperationException("A conta já foi eliminada.");
+            UserName = deletedUserName;
+            NormalizedUserName = deletedUserName.ToUpperInvariant();
+            Email = null;
+            NormalizedEmail = null;
+            EmailConfirmed = false;
+            PhoneNumber = null;
+            PhoneNumberConfirmed = false;
+            PasswordHash = null;
+            TwoFactorEnabled = false;
+            SecurityStamp = Guid.NewGuid().ToString();
+            ConcurrencyStamp = Guid.NewGuid().ToString();
+            LockoutEnabled = true;
+            LockoutEnd = DateTimeOffset.MaxValue;
+            ProfilePictureUrl = null;
+            ExpoPushToken = null;
+            LibraryPrivacy = LibraryPrivacy.Private;
+            ContributesDurationStats = false;
+            DeletedAt = DateTime.UtcNow;
+            SetUpdatedAt();
         }
 
         public void SetLibraryPrivacy(LibraryPrivacy privacy)

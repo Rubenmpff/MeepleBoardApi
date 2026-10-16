@@ -17,7 +17,8 @@ public class UserCleanupJob
     {
         var threshold = DateTime.UtcNow.AddDays(-7);
         var users = _userManager.Users
-            .Where(u => !u.EmailConfirmed && u.CreatedAt < threshold)
+            // Deleted accounts stay anonymised (shared matches keep their players); they are never removed here.
+            .Where(u => !u.EmailConfirmed && u.CreatedAt < threshold && u.DeletedAt == null)
             .ToList();
 
         _logger.LogInformation($"🔎 Encontrados {users.Count} usuários não confirmados para remoção.");

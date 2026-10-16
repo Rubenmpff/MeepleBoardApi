@@ -187,6 +187,7 @@ namespace MeepleBoard.Infra.Data.Repositories
             var normalized = query.Trim();
             var users = await _context.Users.AsNoTracking()
                 .Where(u => u.Id != currentUserId
+                         && u.DeletedAt == null
                          && u.UserName != null
                          && EF.Functions.Like(u.UserName, $"%{normalized}%"))
                 .OrderBy(u => u.UserName)

@@ -277,7 +277,11 @@ namespace MeepleBoard.Infra.Data.Repositories
         /// Eligible: ratings of official matches, one per experience — diary entries of people still among the match
         /// players, plus old ratings stored only on matches without diary entries. Individual ratings are only read.
         /// </summary>
-        public async Task<bool> RecomputeMeepleBoardRatingAsync(Guid gameId, CancellationToken cancellationToken = default)
+        public Task<bool> RecomputeMeepleBoardRatingAsync(Guid gameId, CancellationToken cancellationToken = default)
+            => RecomputeMeepleBoardRating(_context, gameId, cancellationToken);
+
+        /// <summary>The one MeepleBoard rating rule; shared with account deletion so it runs inside that transaction.</summary>
+        internal static async Task<bool> RecomputeMeepleBoardRating(MeepleBoardDbContext _context, Guid gameId, CancellationToken cancellationToken)
         {
             var before = await _context.Games.AsNoTracking().Where(g => g.Id == gameId)
                 .Select(g => new { g.MeepleBoardScore, g.MeepleBoardRatingsCount, g.MeepleBoardRaters }).FirstOrDefaultAsync(cancellationToken)
@@ -298,11 +302,6 @@ namespace MeepleBoard.Infra.Data.Repositories
             if (affected == 0) throw new KeyNotFoundException("Jogo não encontrado.");
             return before.MeepleBoardScore != score || before.MeepleBoardRatingsCount != all.Count || before.MeepleBoardRaters != raters;
         }
-
-        /// <summary>Games where this person has diary ratings, so they can be recalculated after the account changes.</summary>
-        public async Task<IReadOnlyList<Guid>> GetGameIdsRatedByUserAsync(Guid userId, CancellationToken cancellationToken = default)
-            => await _context.MatchJournalEntries.AsNoTracking().Where(e => e.UserId == userId && e.PersonalRating.HasValue)
-                .Select(e => e.Match!.GameId).Distinct().ToListAsync(cancellationToken);
 
         public async Task UpdateMeepleBoardScoreAsync(Guid gameId, int? score, CancellationToken cancellationToken = default)
         {
