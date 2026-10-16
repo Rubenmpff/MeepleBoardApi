@@ -226,6 +226,19 @@ await Check("the creator adds and removes a player; failures carry no internal d
     var missing = await Expect(HttpMethod.Delete, $"/MeepleBoard/matches/{f.Match.Id}/players/{f.Outsider}", f.Author, HttpStatusCode.NotFound);
     Assert(!missing.Contains("Exception") && !missing.Contains(" at "), "no stack or exception text");
 });
+// Experiences: every route needs an account; moderation is for administrators (participant rules: service checks, see Experiences).
+var publication = $"/MeepleBoard/campaigns/matches/{f.Match.Id}/journal/publication";
+var someExperience = Guid.NewGuid();
+var experienceRoutes = new (HttpMethod Method, string Path, object? Body, bool Admin)[] {
+    (HttpMethod.Get, publication, null, false), (HttpMethod.Put, publication, new { showRating = true, comment = (string?)null, publishComment = false }, false),
+    (HttpMethod.Post, publication + "/withdraw-rating", null, false), (HttpMethod.Get, $"/MeepleBoard/game/{f.Game.Id}/experiences", null, false),
+    (HttpMethod.Post, $"/MeepleBoard/experiences/{someExperience}/reports", new { reason = "Spam", detail = (string?)null }, false),
+    (HttpMethod.Get, "/MeepleBoard/admin/experiences/reported", null, true), (HttpMethod.Post, $"/MeepleBoard/admin/experiences/{someExperience}/hide", new { reason = "Spam" }, true),
+};
+foreach (var (method, path, body, _) in experienceRoutes)
+    await Check($"visitor is refused: {method} {path}", async () => { await Expect(method, path, null, HttpStatusCode.Unauthorized, body); });
+foreach (var (method, path, body, _) in experienceRoutes.Where(r => r.Admin))
+    await Check($"moderation is for administrators: {method} {path}", async () => { await Expect(method, path, f.Peer, HttpStatusCode.Forbidden, body); });
 await Check("creation persists authenticated creator and journal notes without match copy", async () => {
     var text = await Expect(HttpMethod.Post, "/MeepleBoard/matches", f.Author, HttpStatusCode.Created, new {
         gameId = f.Game.Id, gameName = f.Game.Name, matchDate = DateTime.UtcNow.AddMinutes(-1), isSoloGame = true,
