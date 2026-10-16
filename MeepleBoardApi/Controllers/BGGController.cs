@@ -1,10 +1,13 @@
 ﻿using MeepleBoard.Services.DTOs;
 using MeepleBoard.Services.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace MeepleBoardApi.Controllers
 {
+    // Every route calls BoardGameGeek, so only signed-in accounts may use them.
     [ApiController]
+    [Authorize]
     [Route("MeepleBoard/BGG")]
     public class BGGController : ControllerBase
     {

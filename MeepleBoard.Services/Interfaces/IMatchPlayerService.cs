@@ -16,8 +16,10 @@ namespace MeepleBoard.Services.Interfaces
 
         Task<int> GetTotalWinsByUserInPeriodAsync(Guid userId, DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default);
 
-        Task RemovePlayerFromMatchAsync(Guid matchId, Guid playerId, CancellationToken cancellationToken = default);
+        /// <summary>Only the match creator may change who played; anyone else gets UnauthorizedAccessException.</summary>
+        Task RemovePlayerFromMatchAsync(Guid matchId, Guid playerId, Guid actorId, CancellationToken cancellationToken = default);
 
-        Task AddPlayerToMatchAsync(Guid matchId, Guid playerId, CancellationToken cancellationToken = default);
+        /// <summary>Only the match creator may change who played; anyone else gets UnauthorizedAccessException.</summary>
+        Task AddPlayerToMatchAsync(Guid matchId, Guid playerId, Guid actorId, CancellationToken cancellationToken = default);
     }
 }

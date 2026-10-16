@@ -38,6 +38,8 @@ builder.Services.AddSingleton(f.Photos);
 builder.Services.AddSingleton<IMatchService>(f.MatchService);
 builder.Services.AddSingleton<ICampaignService>(f.CampaignService);
 builder.Services.AddSingleton<IGameSessionService>(f.SessionService);
+builder.Services.AddSingleton<IMatchPlayerService>(f.PlayerService);
+builder.Services.AddSingleton<IUserService>(f.UserService);
 await using var app = builder.Build();
 app.UseAuthentication(); app.UseAuthorization(); app.MapControllers();
 await app.StartAsync();
@@ -47,6 +49,7 @@ async Task<HttpResponseMessage> Request(HttpMethod method, string path, Guid? us
 {
     using var req = new HttpRequestMessage(method, path);
     if (user.HasValue) req.Headers.Add("X-Fixture-User", user.Value.ToString());
+    if (user == f.Admin) req.Headers.Add("X-Fixture-Role", "Admin");
     if (body != null) req.Content = JsonContent.Create(body);
     return await client.SendAsync(req);
 }
@@ -184,6 +187,45 @@ await Check("a misconfigured public upload is rejected before journal persistenc
     Assert(response.StatusCode == HttpStatusCode.Conflict && f.Own.PhotoUrls.Count == before);
     f.PublicUpload = false;
 });
+// Routes that had no authentication: visitors are refused; managing accounts and creating games is for administrators.
+var openBefore = new (HttpMethod Method, string Path, object? Body)[] {
+    (HttpMethod.Get, "/MeepleBoard/users", null), (HttpMethod.Get, $"/MeepleBoard/users/{f.Peer}", null),
+    (HttpMethod.Post, "/MeepleBoard/users", new { userName = "x", email = "x@example.invalid" }),
+    (HttpMethod.Put, $"/MeepleBoard/users/{f.Peer}", new { id = f.Peer, userName = "x", email = "x@example.invalid" }),
+    (HttpMethod.Delete, $"/MeepleBoard/users/{f.Peer}", null),
+    (HttpMethod.Post, $"/MeepleBoard/matches/{f.Match.Id}/players", new { userId = f.Outsider }),
+    (HttpMethod.Delete, $"/MeepleBoard/matches/{f.Match.Id}/players/{f.Peer}", null),
+    (HttpMethod.Post, "/MeepleBoard/game", new { name = "Visitor game" }), (HttpMethod.Get, "/MeepleBoard/game/search?name=Visitor", null),
+    (HttpMethod.Post, "/MeepleBoard/game/import/1", null), (HttpMethod.Get, "/MeepleBoard/BGG/hot", null),
+    (HttpMethod.Get, "/MeepleBoard/BGG/search?name=Visitor", null), (HttpMethod.Get, "/MeepleBoard/BGG/1", null),
+    (HttpMethod.Post, "/MeepleBoard/BGG/by-ids", new[] { 1 }),
+};
+foreach (var (method, path, body) in openBefore)
+    await Check($"visitor is refused: {method} {path}", async () => { await Expect(method, path, null, HttpStatusCode.Unauthorized, body); });
+foreach (var (method, path, body) in openBefore.Where(r => r.Path.StartsWith("/MeepleBoard/users") || (r.Method == HttpMethod.Post && r.Path == "/MeepleBoard/game")))
+    await Check($"a signed-in non-administrator is refused: {method} {path}", async () => { await Expect(method, path, f.Peer, HttpStatusCode.Forbidden, body); });
+await Check("an administrator reaches account management; the own account routes stay open to every signed-in account", async () => {
+    await Expect(HttpMethod.Get, "/MeepleBoard/users", f.Admin, HttpStatusCode.NoContent);
+    await Expect(HttpMethod.Get, "/MeepleBoard/users/me", f.Peer, HttpStatusCode.NotFound);
+});
+foreach (var user in new[] { f.Peer, f.Outsider, f.SessionMember })
+    await Check("only the creator changes who played: " + user, async () => {
+        await Expect(HttpMethod.Post, $"/MeepleBoard/matches/{f.Match.Id}/players", user, HttpStatusCode.Forbidden, new { userId = f.Outsider });
+        await Expect(HttpMethod.Delete, $"/MeepleBoard/matches/{f.Match.Id}/players/{f.Peer}", user, HttpStatusCode.Forbidden);
+        Assert(f.Match.MatchPlayers.Count == 2 && f.Match.MatchPlayers.Any(p => p.UserId == f.Peer), "players unchanged");
+    });
+await Check("a legacy match without a known creator is never changed", async () => {
+    await Expect(HttpMethod.Post, $"/MeepleBoard/matches/{f.Legacy.Id}/players", f.Author, HttpStatusCode.Forbidden, new { userId = f.Outsider });
+    Assert(f.Legacy.MatchPlayers.Count == 2);
+});
+await Check("the creator adds and removes a player; failures carry no internal detail", async () => {
+    await Expect(HttpMethod.Post, $"/MeepleBoard/matches/{f.Match.Id}/players", f.Author, HttpStatusCode.Created, new { userId = f.Outsider });
+    Assert(f.Match.MatchPlayers.Any(p => p.UserId == f.Outsider), "added");
+    await Expect(HttpMethod.Delete, $"/MeepleBoard/matches/{f.Match.Id}/players/{f.Outsider}", f.Author, HttpStatusCode.NoContent);
+    Assert(f.Match.MatchPlayers.Count == 2 && !f.Match.MatchPlayers.Any(p => p.UserId == f.Outsider), "removed");
+    var missing = await Expect(HttpMethod.Delete, $"/MeepleBoard/matches/{f.Match.Id}/players/{f.Outsider}", f.Author, HttpStatusCode.NotFound);
+    Assert(!missing.Contains("Exception") && !missing.Contains(" at "), "no stack or exception text");
+});
 await Check("creation persists authenticated creator and journal notes without match copy", async () => {
     var text = await Expect(HttpMethod.Post, "/MeepleBoard/matches", f.Author, HttpStatusCode.Created, new {
         gameId = f.Game.Id, gameName = f.Game.Name, matchDate = DateTime.UtcNow.AddMinutes(-1), isSoloGame = true,
@@ -236,12 +278,13 @@ public class FixtureAuthentication(IOptionsMonitor<AuthenticationSchemeOptions> 
 {
     protected override Task<AuthenticateResult> HandleAuthenticateAsync() => Task.FromResult(
         Guid.TryParse(Request.Headers["X-Fixture-User"], out var user)
-        ? AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, user.ToString())], Scheme.Name)), Scheme.Name))
+        ? AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim(ClaimTypes.NameIdentifier, user.ToString()) }.Concat(Request.Headers["X-Fixture-Role"].Where(r => !string.IsNullOrEmpty(r)).Select(r => new Claim(ClaimTypes.Role, r!))), Scheme.Name)), Scheme.Name))
         : AuthenticateResult.NoResult());
 }
 public class Fixture
 {
-    public Guid Author = Guid.NewGuid(), Peer = Guid.NewGuid(), Outsider = Guid.NewGuid(), SessionMember = Guid.NewGuid(), CampaignMember = Guid.NewGuid();
+    public Guid Admin = Guid.NewGuid(), Author = Guid.NewGuid(), Peer = Guid.NewGuid(), Outsider = Guid.NewGuid(), SessionMember = Guid.NewGuid(), CampaignMember = Guid.NewGuid();
     public Game Game = new("Isolated test game", "", null);
     public Match Match, Legacy;
     public MatchJournalEntry Own, PeerEntry;
@@ -255,6 +298,8 @@ public class Fixture
     public MatchService MatchService;
     public CampaignService CampaignService;
     public GameSessionService SessionService;
+    public MatchPlayerService PlayerService;
+    public IUserService UserService;
     public int PhotosDeleted;
     public bool PublicUpload;
     public Fixture()
@@ -319,8 +364,20 @@ public class Fixture
         MatchService = new(Matches, players, sessions, Empty<IGameSessionPlayerRepository>(), users, games, Journals, Empty<IBGGService>(), Empty<IGameService>(), Empty<INotificationService>(), mapper);
         CampaignService = new(Journals, Matches, users, games, Empty<INotificationService>(), Photos, Microsoft.Extensions.Logging.Abstractions.NullLogger<CampaignService>.Instance);
         SessionService = new(sessions, Empty<IGameSessionPlayerRepository>(), users, mapper, Empty<IFriendshipRepository>(), games);
+        var lineup = Stub.Create<IMatchPlayerRepository>((m, args) => m.Name switch {
+            "ExistsAsync" => Task.FromResult(Store[(Guid)args![1]!].MatchPlayers.Any(p => p.UserId == (Guid)args[0]!)),
+            "GetByMatchAndPlayerAsync" => Task.FromResult(Store[(Guid)args![0]!].MatchPlayers.FirstOrDefault(p => p.UserId == (Guid)args[1]!)),
+            "AddAsync" => AddPlayer((MatchPlayer)args![0]!),
+            "DeleteAsync" => RemovePlayer((MatchPlayer)args![0]!),
+            _ => Default(m.ReturnType)
+        });
+        var knownUsers = Stub.Create<IUserRepository>((m, args) => m.Name == "GetByIdAsync" ? Task.FromResult<User?>(new User("Fixture user", "fixture@example.invalid", "Local")) : Default(m.ReturnType));
+        PlayerService = new(lineup, knownUsers, Matches, mapper, Microsoft.Extensions.Logging.Abstractions.NullLogger<MatchPlayerService>.Instance, games);
+        UserService = Empty<IUserService>();
     }
     Task Delete(Guid id) { Store.Remove(id); return Task.CompletedTask; }
+    Task AddPlayer(MatchPlayer player) { Store[player.MatchId].MatchPlayers.Add(player); return Task.CompletedTask; }
+    Task RemovePlayer(MatchPlayer player) { Store[player.MatchId].MatchPlayers.Remove(player); return Task.CompletedTask; }
     Task Add(Match match) { Store[match.Id] = match; return Task.CompletedTask; }
     Task AddEntry(MatchJournalEntry entry) { Entries.Add(entry); return Task.CompletedTask; }
     Task PhotoDeleted() { PhotosDeleted++; return Task.CompletedTask; }

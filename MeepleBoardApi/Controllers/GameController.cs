@@ -127,6 +127,8 @@ namespace MeepleBoardApi.Controllers
         /// Procura um jogo pelo nome na base local e, se necessário,
         /// executa uma importação explícita do BGG.
         /// </summary>
+        // May import from BGG and write to the catalogue, so it needs an account.
+        [Authorize]
         [HttpGet("search")]
         [ProducesResponseType(typeof(GameDto), 200)]
         [ProducesResponseType(404)]
@@ -158,6 +160,7 @@ namespace MeepleBoardApi.Controllers
         /// <summary>
         /// Importa explicitamente um jogo pelo BGG ID.
         /// </summary>
+        [Authorize]
         [HttpPost("import/{bggId:int}")]
         [ProducesResponseType(typeof(GameDto), 200)]
         [ProducesResponseType(404)]
@@ -396,8 +399,9 @@ namespace MeepleBoardApi.Controllers
         }
 
         /// <summary>
-        /// Regista manualmente um novo jogo.
+        /// Regista manualmente um novo jogo. Fica aprovado de imediato, por isso só administradores.
         /// </summary>
+        [Authorize(Roles = "Admin")]
         [HttpPost]
         [ProducesResponseType(typeof(Guid), 201)]
         [ProducesResponseType(400)]

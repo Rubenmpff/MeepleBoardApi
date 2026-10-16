@@ -63,3 +63,22 @@ Resultados: 58 testes HTTP e uma verificação offline do modelo/migração pass
 ## iPhone
 
 Usar backend atualizado, esquema preparado numa base descartável e armazenamento de teste protegido. Verificar registo com zero; resumo/avaliações/tags/fotografias entre participantes e notas apenas próprias; bloqueio a membros sem participação; edição refletida no histórico; troca rápida de encontros sem misturar rascunhos; fotografias após logout; restrições do legado; navegação, teclado e PT/EN.
+
+## Rotas sem autenticação — corrigidas a 2026-10-16
+
+A revisão técnica encontrou rotas sem `[Authorize]`. Em DeviceTests, um pedido anónimo a `GET /MeepleBoard/users` devolvia 200, com emails.
+
+| Rota | Antes | Agora |
+| --- | --- | --- |
+| `UserController`: listar, consultar por id, criar, editar, apagar | qualquer visitante | só administradores; `me`, `push-token`, `library-privacy` e `duration-sharing` continuam para qualquer conta autenticada |
+| `POST`/`DELETE /matches/{id}/players` | qualquer visitante; erros 500 com a mensagem interna | conta autenticada e só quem registou a partida (a mesma regra de editar/apagar; partidas antigas sem autor nunca); sem mensagens internas |
+| `POST /game` (o jogo fica aprovado de imediato) | qualquer visitante | só administradores |
+| `GET /game/search` (pode importar do BGG e gravar) e `POST /game/import/{bggId}` | qualquer visitante | conta autenticada |
+| `BGGController` (todas as rotas chamam o BGG) | qualquer visitante | conta autenticada |
+
+As leituras do catálogo (`GET /game`, rankings, sugestões, ficha do jogo) continuam públicas. A app usa todas estas rotas com sessão iniciada, por isso não precisou de alterações.
+
+**Verificação:**
+
+- `tests/Authorization.Tests`: 85 testes HTTP e 1 verificação offline. São novos 26: 14 rotas recusadas a visitantes; 6 recusadas a contas sem perfil de administrador; administrador e rota própria; só o criador altera jogadores, com escrita real; partida antiga sem autor.
+- Em DeviceTests, os mesmos pedidos anónimos dão agora 401. Os verificadores `verify-ratings-experiences`, `verify-game-page` e `verify-durations` passam.

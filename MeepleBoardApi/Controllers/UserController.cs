@@ -7,8 +7,10 @@ using System.Security.Claims;
 
 namespace MeepleBoardApi.Controllers
 {
+    // Every route needs a signed-in account; managing other accounts (list, read, create, edit, delete) is for administrators.
     [Route("MeepleBoard/users")]
     [ApiController]
+    [Authorize]
     public class UserController : ControllerBase
     {
         private readonly IUserService _userService;
@@ -18,6 +20,7 @@ namespace MeepleBoardApi.Controllers
             _userService = userService ?? throw new ArgumentNullException(nameof(userService));
         }
 
+        [Authorize(Roles = "Admin")]
         [HttpGet]
         public async Task<ActionResult<IEnumerable<UserDto>>> GetAll(CancellationToken cancellationToken)
         {
@@ -26,6 +29,7 @@ namespace MeepleBoardApi.Controllers
             return Ok(users);
         }
 
+        [Authorize(Roles = "Admin")]
         [HttpGet("{id:guid}")]
         public async Task<ActionResult<UserDto>> GetById(Guid id, CancellationToken cancellationToken)
         {
@@ -69,6 +73,7 @@ namespace MeepleBoardApi.Controllers
             catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         }
 
+        [Authorize(Roles = "Admin")]
         [HttpPost]
         public async Task<ActionResult> Create([FromBody] UserDto userDto, CancellationToken cancellationToken)
         {
@@ -78,6 +83,7 @@ namespace MeepleBoardApi.Controllers
             return CreatedAtAction(nameof(GetById), new { id = userDto.Id }, userDto);
         }
 
+        [Authorize(Roles = "Admin")]
         [HttpPut("{id:guid}")]
         public async Task<ActionResult> Update(Guid id, [FromBody] UserDto userDto, CancellationToken cancellationToken)
         {
@@ -90,6 +96,7 @@ namespace MeepleBoardApi.Controllers
             return NoContent();
         }
 
+        [Authorize(Roles = "Admin")]
         [HttpDelete("{id:guid}")]
         public async Task<ActionResult> Delete(Guid id, CancellationToken cancellationToken)
         {

@@ -79,12 +79,13 @@ namespace MeepleBoard.Services.Implementations
         }
 
         // 🔹 Adiciona um jogador a uma partida
-        public async Task AddPlayerToMatchAsync(Guid matchId, Guid playerId, CancellationToken cancellationToken = default)
+        public async Task AddPlayerToMatchAsync(Guid matchId, Guid playerId, Guid actorId, CancellationToken cancellationToken = default)
         {
             // Verifica se a partida existe
             var match = await _matchRepository.GetByIdAsync(matchId, cancellationToken);
             if (match == null)
                 throw new KeyNotFoundException("Partida não encontrada.");
+            EnsureCreator(match, actorId);
 
             // Verifica se o usuário existe
             await ValidateUserExistsAsync(playerId, cancellationToken);
@@ -103,12 +104,13 @@ namespace MeepleBoard.Services.Implementations
         }
 
         // 🔹 Remove um jogador de uma partida
-        public async Task RemovePlayerFromMatchAsync(Guid matchId, Guid playerId, CancellationToken cancellationToken = default)
+        public async Task RemovePlayerFromMatchAsync(Guid matchId, Guid playerId, Guid actorId, CancellationToken cancellationToken = default)
         {
             // Verifica se a partida existe
             var match = await _matchRepository.GetByIdAsync(matchId, cancellationToken);
             if (match == null)
                 throw new KeyNotFoundException("Partida não encontrada.");
+            EnsureCreator(match, actorId);
 
             // Verifica se o jogador está na partida
             var matchPlayer = await _matchPlayerRepository.GetByMatchAndPlayerAsync(matchId, playerId, cancellationToken);
@@ -120,6 +122,13 @@ namespace MeepleBoard.Services.Implementations
             await _matchPlayerRepository.CommitAsync(cancellationToken);
             // A removed player's diary rating stops counting (the entry itself is kept).
             if (_gameRepository != null) await _gameRepository.RecomputeMeepleBoardRatingAsync(match.GameId, cancellationToken);
+        }
+
+        // Same rule as editing or deleting a match: only its known creator; a legacy match without one is never inferred.
+        private static void EnsureCreator(Match match, Guid actorId)
+        {
+            if (actorId == Guid.Empty || match.CreatorId != actorId)
+                throw new UnauthorizedAccessException("Só quem registou a partida pode alterar os jogadores.");
         }
 
         // 🔹 Método auxiliar: Garante que o usuário existe antes de buscar estatísticas

@@ -1,11 +1,14 @@
-﻿using MeepleBoard.Services.DTOs;
+﻿using MeepleBoard.CrossCutting.Security;
+using MeepleBoard.Services.DTOs;
 using MeepleBoard.Services.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace MeepleBoardApi.Controllers
 {
     [Route("MeepleBoard/matches")]
     [ApiController]
+    [Authorize]
     public class MatchPlayerController : ControllerBase
     {
         private readonly IMatchPlayerService _matchPlayerService;
@@ -40,20 +43,20 @@ namespace MeepleBoardApi.Controllers
 
             try
             {
-                await _matchPlayerService.AddPlayerToMatchAsync(matchId, playerDto.UserId, cancellationToken);
+                await _matchPlayerService.AddPlayerToMatchAsync(matchId, playerDto.UserId, User.GetUserId(), cancellationToken);
                 return CreatedAtAction(nameof(AddPlayer), new { matchId, playerId = playerDto.UserId }, "Jogador adicionado à partida com sucesso.");
             }
             catch (KeyNotFoundException ex)
             {
                 return NotFound(ex.Message);
             }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
             catch (InvalidOperationException ex)
             {
                 return Conflict(ex.Message);
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, $"Erro interno ao adicionar jogador: {ex.Message}");
             }
         }
 
@@ -75,16 +78,16 @@ namespace MeepleBoardApi.Controllers
 
             try
             {
-                await _matchPlayerService.RemovePlayerFromMatchAsync(matchId, playerId, cancellationToken);
+                await _matchPlayerService.RemovePlayerFromMatchAsync(matchId, playerId, User.GetUserId(), cancellationToken);
                 return NoContent();
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
             }
             catch (KeyNotFoundException ex)
             {
                 return NotFound(ex.Message);
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, $"Erro interno ao remover jogador: {ex.Message}");
             }
         }
     }
