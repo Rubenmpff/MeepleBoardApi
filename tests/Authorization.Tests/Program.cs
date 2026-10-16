@@ -40,6 +40,7 @@ builder.Services.AddSingleton<ICampaignService>(f.CampaignService);
 builder.Services.AddSingleton<IGameSessionService>(f.SessionService);
 builder.Services.AddSingleton<IMatchPlayerService>(f.PlayerService);
 builder.Services.AddSingleton<IUserService>(f.UserService);
+builder.Services.AddSingleton<IExperienceService>(f.ExperienceService);
 await using var app = builder.Build();
 app.UseAuthentication(); app.UseAuthorization(); app.MapControllers();
 await app.StartAsync();
@@ -239,6 +240,25 @@ foreach (var (method, path, body, _) in experienceRoutes)
     await Check($"visitor is refused: {method} {path}", async () => { await Expect(method, path, null, HttpStatusCode.Unauthorized, body); });
 foreach (var (method, path, body, _) in experienceRoutes.Where(r => r.Admin))
     await Check($"moderation is for administrators: {method} {path}", async () => { await Expect(method, path, f.Peer, HttpStatusCode.Forbidden, body); });
+foreach (var user in new[] { f.Outsider, f.SessionMember, f.CampaignMember })
+    await Check("only players of the match manage a publication: " + user, async () => {
+        await Expect(HttpMethod.Get, publication, user, HttpStatusCode.Forbidden);
+        await Expect(HttpMethod.Put, publication, user, HttpStatusCode.Forbidden, new { showRating = true, comment = (string?)null, publishComment = false });
+        await Expect(HttpMethod.Post, publication + "/withdraw-rating", user, HttpStatusCode.Forbidden);
+        Assert(f.Publications.Count == 0, "nothing published");
+    });
+await Check("a publication for a match that does not exist is not found", async () => {
+    await Expect(HttpMethod.Put, $"/MeepleBoard/campaigns/matches/{Guid.NewGuid()}/journal/publication", f.Author, HttpStatusCode.NotFound, new { showRating = true, comment = (string?)null, publishComment = false });
+});
+await Check("each player publishes only their own experience; the rating shown is the closed one", async () => {
+    var mine = await Expect(HttpMethod.Put, publication, f.Author, HttpStatusCode.OK, new { showRating = true, comment = (string?)null, publishComment = false });
+    using (var json = JsonDocument.Parse(mine)) Assert(json.RootElement.GetProperty("showRating").GetBoolean() && json.RootElement.GetProperty("rating").GetDouble() == 8, "author's rating published");
+    var peer = await Expect(HttpMethod.Get, publication, f.Peer, HttpStatusCode.OK);
+    using (var json = JsonDocument.Parse(peer)) Assert(!json.RootElement.GetProperty("showRating").GetBoolean() && json.RootElement.GetProperty("rating").GetDouble() == 0, "the peer's own, untouched");
+    Assert(f.Publications.Single().JournalEntryId == f.Own.Id, "stored on the author's entry only");
+    await Expect(HttpMethod.Post, publication + "/withdraw-rating", f.Author, HttpStatusCode.OK);
+    Assert(f.Publications.Count == 0 && f.Own.PersonalRating == 8, "withdrawn; the rating itself unchanged");
+});
 await Check("creation persists authenticated creator and journal notes without match copy", async () => {
     var text = await Expect(HttpMethod.Post, "/MeepleBoard/matches", f.Author, HttpStatusCode.Created, new {
         gameId = f.Game.Id, gameName = f.Game.Name, matchDate = DateTime.UtcNow.AddMinutes(-1), isSoloGame = true,
@@ -313,6 +333,8 @@ public class Fixture
     public GameSessionService SessionService;
     public MatchPlayerService PlayerService;
     public IUserService UserService;
+    public ExperienceService ExperienceService;
+    public List<MatchExperiencePublication> Publications = new();
     public int PhotosDeleted;
     public bool PublicUpload;
     public Fixture()
@@ -338,6 +360,7 @@ public class Fixture
         var cm = new CampaignMatch(Campaign.Id, Match.Id, 1, "isolated encounter"); Set(cm, "Match", Match); Campaign.CampaignMatches.Add(cm);
         Matches = Stub.Create<IMatchRepository>((m, args) => m.Name switch {
             "GetByIdAsync" => new ValueTask<Match?>(Store.GetValueOrDefault((Guid)args![0]!)),
+            "ExistsAsync" => Task.FromResult(Store.ContainsKey((Guid)args![0]!)),
             "GetByUserIdAsync" => Task.FromResult<IReadOnlyList<Match>>(Store.Values.Where(x => x.MatchPlayers.Any(p => p.UserId == (Guid)args![0]!)).ToList()),
             "GetPageForUserAsync" => Task.FromResult<IReadOnlyList<Match>>(Store.Values.Where(x => x.MatchPlayers.Any(p => p.UserId == (Guid)args![0]!)).Skip((int)args![1]! * (int)args![2]!).Take((int)args![2]!).ToList()),
             "GetMatchHistoryByGameForUserAsync" => Task.FromResult<IReadOnlyList<Match>>(Store.Values.Where(x => x.GameId == (Guid)args![0]! && x.MatchPlayers.Any(p => p.UserId == (Guid)args![1]!)).ToList()),
@@ -387,8 +410,17 @@ public class Fixture
         var knownUsers = Stub.Create<IUserRepository>((m, args) => m.Name == "GetByIdAsync" ? Task.FromResult<User?>(new User("Fixture user", "fixture@example.invalid", "Local")) : Default(m.ReturnType));
         PlayerService = new(lineup, knownUsers, Matches, mapper, Microsoft.Extensions.Logging.Abstractions.NullLogger<MatchPlayerService>.Instance, games);
         UserService = Empty<IUserService>();
+        var publications = Stub.Create<IExperienceRepository>((m, args) => m.Name switch {
+            "GetByEntryForUpdateAsync" => Task.FromResult(Publications.FirstOrDefault(p => p.JournalEntryId == (Guid)args![0]!)),
+            "AddAsync" => AddPublication((MatchExperiencePublication)args![0]!),
+            "Remove" => Publications.Remove((MatchExperiencePublication)args![0]!),
+            "CountPublishedSinceAsync" => Task.FromResult(0),
+            _ => Default(m.ReturnType)
+        });
+        ExperienceService = new(publications, Matches, lineup, Journals);
     }
     Task Delete(Guid id) { Store.Remove(id); return Task.CompletedTask; }
+    Task AddPublication(MatchExperiencePublication publication) { Publications.Add(publication); return Task.CompletedTask; }
     Task AddPlayer(MatchPlayer player) { Store[player.MatchId].MatchPlayers.Add(player); return Task.CompletedTask; }
     Task RemovePlayer(MatchPlayer player) { Store[player.MatchId].MatchPlayers.Remove(player); return Task.CompletedTask; }
     Task Add(Match match) { Store[match.Id] = match; return Task.CompletedTask; }

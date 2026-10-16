@@ -1,5 +1,6 @@
 using MeepleBoard.CrossCutting.Security;
-using MeepleBoard.Services.Experiences;
+using MeepleBoard.Services.DTOs;
+using MeepleBoard.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -12,7 +13,7 @@ namespace MeepleBoardApi.Controllers
     [ApiController]
     [Authorize]
     [Route("MeepleBoard")]
-    public class ExperiencesController(ExperienceService experiences) : ControllerBase
+    public class ExperiencesController(IExperienceService experiences) : ControllerBase
     {
         async Task<ActionResult> Run(Func<Task<ActionResult>> action)
         {

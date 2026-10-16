@@ -80,5 +80,5 @@ As leituras do catálogo (`GET /game`, rankings, sugestões, ficha do jogo) cont
 
 **Verificação:**
 
-- `tests/Authorization.Tests`: 94 testes HTTP e 1 verificação offline. Inclui as rotas das experiências: 7 recusadas a visitantes e a moderação recusada a contas sem perfil de administrador. As regras de participante das experiências são testadas quando o serviço tiver interface (reorganização A3); até lá, cobre-as o `verify-ratings-experiences`. São novos 26: 14 rotas recusadas a visitantes; 6 recusadas a contas sem perfil de administrador; administrador e rota própria; só o criador altera jogadores, com escrita real; partida antiga sem autor.
+- `tests/Authorization.Tests`: 99 testes HTTP e 1 verificação offline. Inclui as rotas das experiências: 7 recusadas a visitantes, a moderação recusada a contas sem perfil de administrador, e as regras de participante com o `ExperienceService` real (só os jogadores da partida gerem a publicação, cada um a sua; partida inexistente dá 404; retirar não muda a avaliação).
 - Em DeviceTests, os mesmos pedidos anónimos dão agora 401. Os verificadores `verify-ratings-experiences`, `verify-game-page` e `verify-durations` passam.

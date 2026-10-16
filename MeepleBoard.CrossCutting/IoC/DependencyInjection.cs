@@ -118,6 +118,10 @@ namespace MeepleBoard.CrossCutting.IoC
                 IGameResourceRepository,
                 GameResourceRepository>();
 
+            services.AddScoped<
+                IExperienceRepository,
+                ExperienceRepository>();
+
             return services;
         }
 
@@ -135,7 +139,6 @@ namespace MeepleBoard.CrossCutting.IoC
 
             services.AddScoped<StatisticsService>();
             services.AddScoped<MeepleBoard.Services.GameDurations.GameDurationService>();
-            services.AddScoped<MeepleBoard.Services.Experiences.ExperienceService>();
 
             services.AddScoped<
                 IUserService,
@@ -188,6 +191,10 @@ namespace MeepleBoard.CrossCutting.IoC
             services.AddScoped<
                 IGameResourceService,
                 GameResourceService>();
+
+            services.AddScoped<
+                IExperienceService,
+                ExperienceService>();
 
             /* =========================================================
                SERVIÇOS EXTERNOS
