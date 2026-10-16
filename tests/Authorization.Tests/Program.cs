@@ -14,7 +14,7 @@ using MeepleBoard.Services.ExternalServices.Interfaces;
 using MeepleBoard.Services.DTOs;
 using MeepleBoard.Services.DTOs.MatchJournal;
 using MeepleBoardApi.Controllers;
-using MeepleBoardApi.Services.Mapping.AutoMapper;
+using MeepleBoard.Services.Mapping.AutoMapper;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;

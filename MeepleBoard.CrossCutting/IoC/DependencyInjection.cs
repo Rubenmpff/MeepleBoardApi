@@ -11,7 +11,7 @@ using MeepleBoard.Services.Implementations;
 using MeepleBoard.Services.Interfaces;
 using MeepleBoard.Services.Job;
 using MeepleBoard.Services.Validator;
-using MeepleBoardApi.Services.Mapping.AutoMapper;
+using MeepleBoard.Services.Mapping.AutoMapper;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;

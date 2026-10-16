@@ -1,5 +1,4 @@
-﻿using MeepleBoard.Application.DTOs;
-using MeepleBoard.Domain.Enums;
+﻿using MeepleBoard.Domain.Enums;
 using MeepleBoard.Services.DTOs;
 
 public class GameSessionDto

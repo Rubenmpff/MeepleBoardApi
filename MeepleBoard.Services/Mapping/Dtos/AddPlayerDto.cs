@@ -1,4 +1,4 @@
-﻿namespace MeepleBoard.Application.DTOs
+﻿namespace MeepleBoard.Services.DTOs
 {
     public class AddPlayerDto
     {

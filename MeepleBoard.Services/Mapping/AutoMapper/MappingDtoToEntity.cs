@@ -1,9 +1,8 @@
 ﻿using AutoMapper;
-using MeepleBoard.Application.DTOs;
 using MeepleBoard.Domain.Entities;
 using MeepleBoard.Services.DTOs;
 
-namespace MeepleBoardApi.Services.Mapping.AutoMapper
+namespace MeepleBoard.Services.Mapping.AutoMapper
 {
     public class MappingDtoToEntity : Profile
     {

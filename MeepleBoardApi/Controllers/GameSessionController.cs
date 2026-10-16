@@ -1,4 +1,4 @@
-﻿using MeepleBoard.Application.DTOs;
+﻿using MeepleBoard.Services.DTOs;
 using MeepleBoard.CrossCutting.Security;
 using MeepleBoard.Services.Interfaces;
 using MeepleBoard.Services.Mapping.Dtos;

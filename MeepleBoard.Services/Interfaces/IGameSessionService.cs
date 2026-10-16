@@ -1,4 +1,4 @@
-﻿using MeepleBoard.Application.DTOs;
+﻿using MeepleBoard.Services.DTOs;
 
 namespace MeepleBoard.Services.Interfaces
 {

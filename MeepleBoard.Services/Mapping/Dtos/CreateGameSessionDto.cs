@@ -1,6 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 
-namespace MeepleBoard.Application.DTOs
+namespace MeepleBoard.Services.DTOs
 {
     public class CreateGameSessionDto
     {

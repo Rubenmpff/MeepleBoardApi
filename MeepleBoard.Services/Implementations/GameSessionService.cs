@@ -1,5 +1,5 @@
 ﻿using AutoMapper;
-using MeepleBoard.Application.DTOs;
+using MeepleBoard.Services.DTOs;
 using MeepleBoard.Domain.Entities;
 using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Services.Interfaces;

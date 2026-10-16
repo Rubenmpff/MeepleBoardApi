@@ -13,7 +13,7 @@ using MeepleBoard.Services.Implementations;
 using MeepleBoard.Services.Interfaces;
 using MeepleBoard.Services.Job;
 using MeepleBoardApi.Controllers;
-using MeepleBoardApi.Services.Mapping.AutoMapper;
+using MeepleBoard.Services.Mapping.AutoMapper;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;

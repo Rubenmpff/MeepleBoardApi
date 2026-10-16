@@ -1,6 +1,6 @@
 ﻿using AutoMapper;
 
-namespace MeepleBoardApi.Services.Mapping.AutoMapper
+namespace MeepleBoard.Services.Mapping.AutoMapper
 {
     public class AutoMapperConfig : Profile
     {

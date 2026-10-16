@@ -9,7 +9,7 @@ using MeepleBoard.Services.DTOs;
 using MeepleBoard.Services.Implementations;
 using MeepleBoard.Services.Interfaces;
 using MeepleBoard.Services.Mapping.Dtos;
-using MeepleBoardApi.Services.Mapping.AutoMapper;
+using MeepleBoard.Services.Mapping.AutoMapper;
 
 var passed = 0;
 async Task Check(string name, Func<Task> body) { await body(); Console.WriteLine($"PASS {name}"); passed++; }
@@ -235,7 +235,7 @@ foreach (var ids in new List<Guid>?[] { null, new(), new() { ruleOwner }, new() 
     await Check("session without a distinct friend rejected before tracking writes", async () => {
         var f = SessionRules();
         try {
-            await f.Service.CreateAsync(new MeepleBoard.Application.DTOs.CreateGameSessionDto { Name = "Test session", PlayerIds = ids! }, ruleOwner);
+            await f.Service.CreateAsync(new MeepleBoard.Services.DTOs.CreateGameSessionDto { Name = "Test session", PlayerIds = ids! }, ruleOwner);
             throw new Exception("Expected missing friend rejection");
         } catch (ArgumentException ex) {
             Assert(ex.Message == "Seleciona pelo menos um amigo para criar a sessão");
@@ -246,13 +246,13 @@ foreach (var ids in new List<Guid>?[] { null, new(), new() { ruleOwner }, new() 
 await Check("nonfriend session invite rejected before writes", async () => {
     var f = SessionRules(false);
     try {
-        await f.Service.CreateAsync(new MeepleBoard.Application.DTOs.CreateGameSessionDto { Name = "Test session", PlayerIds = new() { ruleFriend } }, ruleOwner);
+        await f.Service.CreateAsync(new MeepleBoard.Services.DTOs.CreateGameSessionDto { Name = "Test session", PlayerIds = new() { ruleFriend } }, ruleOwner);
         throw new Exception("Expected nonfriend rejection");
     } catch (ArgumentException) { Assert(f.Sessions.Count == 0 && f.Links.Count == 0); }
 });
 await Check("friendship allows creation with pending invitation and deduplicates without counting organizer", async () => {
     var f = SessionRules();
-    var dto = await f.Service.CreateAsync(new MeepleBoard.Application.DTOs.CreateGameSessionDto {
+    var dto = await f.Service.CreateAsync(new MeepleBoard.Services.DTOs.CreateGameSessionDto {
         Name = "Test session", ScheduledStartDate = DateTime.UtcNow.AddDays(1), PlayerIds = new() { ruleOwner, ruleFriend, ruleFriend }
     }, ruleOwner);
     Assert(f.Sessions.Count == 1 && f.Links.Count == 2);

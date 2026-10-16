@@ -1,6 +1,6 @@
 ﻿using MeepleBoard.Domain.Enums;
 
-namespace MeepleBoard.Application.DTOs
+namespace MeepleBoard.Services.DTOs
 {
     public class GameSessionPlayerDto
     {
