@@ -42,6 +42,9 @@ namespace MeepleBoard.Services.DTOs
         [Range(0, int.MaxValue, ErrorMessage = "A duração da partida não pode ser negativa.")]
         public int? DurationInMinutes { get; init; }
 
+        /// <summary>"Measured", "Estimated", "Unknown", or null for matches recorded before the question existed.</summary>
+        public string? DurationMethod { get; init; }
+
         [MaxLength(200, ErrorMessage = "O local da partida deve ter no máximo 200 caracteres.")]
         public string? Location { get; init; }
 

@@ -162,5 +162,15 @@ namespace MeepleBoard.Services.Implementations
             await _userRepository.UpdateAsync(user, cancellationToken);
             await _userRepository.CommitAsync(cancellationToken);
         }
+
+        /// <summary>Only the account itself turns its contribution to community duration statistics on or off.</summary>
+        public async Task UpdateDurationSharingAsync(Guid userId, bool enabled, CancellationToken cancellationToken = default)
+        {
+            if (userId == Guid.Empty) throw new ArgumentException("Invalid id.");
+            var user = await _userRepository.GetByIdAsync(userId, cancellationToken) ?? throw new KeyNotFoundException("User not found.");
+            user.SetContributesDurationStats(enabled);
+            await _userRepository.UpdateAsync(user, cancellationToken);
+            await _userRepository.CommitAsync(cancellationToken);
+        }
     }
 }

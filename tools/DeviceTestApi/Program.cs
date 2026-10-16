@@ -93,6 +93,10 @@ public static class DeviceDatabase {
             if (sheet.UpOperations.Count != 7 || !sheetColumns.SequenceEqual(new[] { "Games.AverageWeight:float", "Games.MaxPlayTime:int", "Games.MinAge:int", "Games.MinPlayTime:int", "GameSessions.PlannedGameId:uniqueidentifier" })
                 || sheet.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.CreateIndexOperation>().SingleOrDefault()?.Name != "IX_GameSessions_PlannedGameId"
                 || sheet.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.AddForeignKeyOperation>().SingleOrDefault() is not { Table: "GameSessions", PrincipalTable: "Games", OnDelete: ReferentialAction.SetNull }) throw new Exception("Unexpected game sheet/planned game migration changes");
+            var durations = migrations.CreateMigration(migrations.Migrations["20261016083156_AddDurationMethodAndSharing"], review.Database.ProviderName!);
+            if (durations.UpOperations.Count != 2 || durations.UpOperations.Any(op => op is not Microsoft.EntityFrameworkCore.Migrations.Operations.AddColumnOperation col
+                || !(col.Table == "Matches" && col.Name == "DurationMethod" && col.IsNullable && col.ColumnType == "int"
+                    || col.Table == "AspNetUsers" && col.Name == "ContributesDurationStats" && !col.IsNullable && col.ColumnType == "bit" && Equals(col.DefaultValue, false)))) throw new Exception("Unexpected duration method/sharing migration changes");
             var sql = review.GetService<IMigrator>().GenerateScript("20260824063025_OptimizeGameSearchTokenKey");
             // EF drops only a possible default constraint on this exact column before widening it.
             const string approvedDefaultDrop = "IF @var IS NOT NULL EXEC(N'ALTER TABLE [MatchJournalEntries] DROP CONSTRAINT [' + @var + '];');";
@@ -105,7 +109,7 @@ public static class DeviceDatabase {
                 "REFERENCES [Games] ([Id]) ON DELETE SET NULL"];
             var auditedSql = approvedResourceKeys.Aggregate(sql.Replace(approvedDefaultDrop, ""), (text, clause) => text.Replace(clause, ""));
             if (auditedSql.Contains("DROP ") || auditedSql.Contains("UPDATE [Matches]") || auditedSql.Contains("DELETE ")) throw new Exception("Unexpected destructive migration SQL");
-            Console.WriteLine("Migration audit passed: model matches snapshot; nullable CreatorId, one filtered index and nullable rating widened to float, four nullable outcome columns, two session close-time columns, two new resource tables, two nullable resource columns, four nullable game sheet columns and a nullable planned game (set null on delete).");
+            Console.WriteLine("Migration audit passed: model matches snapshot; nullable CreatorId, one filtered index and nullable rating widened to float, four nullable outcome columns, two session close-time columns, two new resource tables, two nullable resource columns, four nullable game sheet columns, a nullable planned game (set null on delete), a nullable duration method and an off-by-default duration sharing preference.");
             if (Environment.GetCommandLineArgs().Contains("--audit-only")) return;
         }
         // All SQL access derives from the same validated exclusive test connection.

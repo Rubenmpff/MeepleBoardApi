@@ -38,6 +38,15 @@ namespace MeepleBoard.Services.DTOs
         /// Quem pode ver a coleção de jogos deste utilizador (Private, FriendsOnly, Public).
         /// </summary>
         public LibraryPrivacy LibraryPrivacy { get; set; } = LibraryPrivacy.Public;
+
+        /// <summary>Whether the user's matches may count towards community duration statistics (off by default).</summary>
+        public bool ContributesDurationStats { get; set; }
+    }
+
+    /// <summary>Turns the authenticated user's contribution to community duration statistics on or off.</summary>
+    public class UpdateDurationSharingDto
+    {
+        public bool Enabled { get; set; }
     }
 
     /// <summary>DTO usado para o utilizador autenticado alterar a privacidade da sua coleção.</summary>

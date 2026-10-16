@@ -53,6 +53,12 @@ namespace MeepleBoard.Domain.Entities
         public LibraryPrivacy LibraryPrivacy { get; private set; } = LibraryPrivacy.Public;
 
         /// <summary>
+        /// Whether this person lets the durations of their matches count towards the community duration
+        /// statistics. Off by default; a match counts only when every participant has it on.
+        /// </summary>
+        public bool ContributesDurationStats { get; private set; }
+
+        /// <summary>
         /// Última vez que este utilizador fez um pedido autenticado à API.
         /// Usado só para o indicador "online" nos ecrãs de Amigos — não é uma
         /// presença em tempo real, é uma aproximação por pedido HTTP.
@@ -114,6 +120,15 @@ namespace MeepleBoard.Domain.Entities
         /// <summary>
         /// Define quem pode ver a coleção de jogos deste utilizador.
         /// </summary>
+        public void SetContributesDurationStats(bool enabled)
+        {
+            if (ContributesDurationStats != enabled)
+            {
+                ContributesDurationStats = enabled;
+                SetUpdatedAt();
+            }
+        }
+
         public void SetLibraryPrivacy(LibraryPrivacy privacy)
         {
             if (LibraryPrivacy != privacy)

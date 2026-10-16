@@ -119,6 +119,23 @@ namespace MeepleBoardApi.Controllers
             }
             catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         }
+
+        /// <summary>
+        /// Turns the authenticated user's contribution to community duration statistics on or off.
+        /// Only for the caller's own account; a match counts only when every participant has it on.
+        /// </summary>
+        [Authorize]
+        [HttpPatch("me/duration-sharing")]
+        public async Task<ActionResult> UpdateDurationSharing([FromBody] UpdateDurationSharingDto dto, CancellationToken cancellationToken)
+        {
+            if (dto == null) return BadRequest(new { message = "Os dados são obrigatórios." });
+            try
+            {
+                await _userService.UpdateDurationSharingAsync(User.GetUserId(), dto.Enabled, cancellationToken);
+                return NoContent();
+            }
+            catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        }
     }
 
     public class UpdatePushTokenDto

@@ -44,6 +44,9 @@ namespace MeepleBoard.Services.Interfaces
         Task<MatchDto> CreateAsync(CreateMatchDto dto, Guid authenticatedUserId, CancellationToken cancellationToken = default);
 
         Task<MatchDto> AddAsync(MatchDto matchDto, CancellationToken cancellationToken = default);
+
+        /// <summary>Corrects the duration and its method; only the match creator may do it.</summary>
+        Task UpdateDurationAsync(Guid matchId, Guid userId, int? minutes, string? method, CancellationToken cancellationToken = default);
         Task<int> UpdateAsync(MatchDto matchDto, Guid userId, CancellationToken cancellationToken = default);
         Task<bool> DeleteAsync(Guid id, Guid userId, CancellationToken cancellationToken = default);
     }

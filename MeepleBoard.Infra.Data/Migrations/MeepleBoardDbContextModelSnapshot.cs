@@ -635,6 +635,9 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.Property<int?>("DurationInMinutes")
                         .HasColumnType("int");
 
+                    b.Property<int?>("DurationMethod")
+                        .HasColumnType("int");
+
                     b.Property<Guid>("GameId")
                         .HasColumnType("uniqueidentifier");
 
@@ -832,6 +835,9 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.Property<string>("ConcurrencyStamp")
                         .IsConcurrencyToken()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("ContributesDurationStats")
+                        .HasColumnType("bit");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");

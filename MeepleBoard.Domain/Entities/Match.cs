@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using MeepleBoard.Domain.Enums;
 
 namespace MeepleBoard.Domain.Entities
 {
@@ -200,6 +201,7 @@ namespace MeepleBoard.Domain.Entities
             {
                 Location = location;
                 ScoreSummary = scoreSummary;
+                if (DurationInMinutes != duration) DurationMethod = null;
                 DurationInMinutes = duration;
                 UpdateTimestamp();
             }
@@ -300,6 +302,25 @@ namespace MeepleBoard.Domain.Entities
         }
 
         public void SetDuration(int? duration) => DurationInMinutes = duration;
+
+        /// <summary>How the duration was obtained; null for matches recorded before the question existed.</summary>
+        public DurationMethod? DurationMethod { get; private set; }
+
+        /// <summary>
+        /// Records the duration together with how it was obtained. Measured or estimated needs a positive
+        /// number of minutes; «Não sei» has none. Without a method (older clients) only the minutes change.
+        /// </summary>
+        public void SetDuration(int? minutes, DurationMethod? method)
+        {
+            if (method is Enums.DurationMethod.Measured or Enums.DurationMethod.Estimated && (minutes is null or < 1))
+                throw new ArgumentException("Uma duração medida ou estimada tem de ser superior a zero.");
+            if (method == Enums.DurationMethod.Unknown && minutes.HasValue)
+                throw new ArgumentException("«Não sei» não tem minutos.");
+            if (DurationInMinutes == minutes && DurationMethod == method) return;
+            DurationInMinutes = minutes;
+            DurationMethod = method;
+            UpdateTimestamp();
+        }
 
         public void SetLocation(string? location)
         {

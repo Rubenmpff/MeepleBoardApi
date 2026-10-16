@@ -1,5 +1,6 @@
 ﻿using AutoMapper;
 using MeepleBoard.Domain.Entities;
+using MeepleBoard.Domain.Enums;
 using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Services.DTOs;
 using MeepleBoard.Services.Interfaces;
@@ -317,6 +318,7 @@ namespace MeepleBoard.Services.Implementations
             var match = new Match(game.Id, dto.MatchDate, dto.GameSessionId);
             match.SetCreator(authenticatedUserId);
             match.UpdateMatchDetails(dto.Location, dto.ScoreSummary, dto.DurationInMinutes);
+            if (dto.DurationMethod != null) match.SetDuration(dto.DurationInMinutes, ParseDurationMethod(dto.DurationMethod));
             match.SetSoloGame(dto.IsSoloGame);
 
             if (outcomes != null) match.SetExplicitResult(dto.GameMode!, dto.Result!, dto.SharedVictoryAllowed == true, outcomes);
@@ -426,9 +428,27 @@ namespace MeepleBoard.Services.Implementations
             match.SetGameId(matchDto.GameId);
             match.SetMatchDate(matchDto.MatchDate);
             match.UpdateMatchDetails(matchDto.Location, matchDto.ScoreSummary, matchDto.DurationInMinutes);
+            if (matchDto.DurationMethod != null) match.SetDuration(matchDto.DurationInMinutes, ParseDurationMethod(matchDto.DurationMethod));
             await _matchRepository.UpdateAsync(match, cancellationToken);
             return await _matchRepository.SaveChangesAsync(cancellationToken);
         }
+
+        /// <summary>
+        /// Corrects only the duration and how it was obtained. Same permission as editing the match: its creator.
+        /// Community statistics read the current value, so the correction applies on the next read.
+        /// </summary>
+        public async Task UpdateDurationAsync(Guid matchId, Guid userId, int? minutes, string? method, CancellationToken cancellationToken = default)
+        {
+            var match = await _matchRepository.GetByIdAsync(matchId, cancellationToken) ?? throw new KeyNotFoundException("Partida não encontrada.");
+            RequireCreator(match, userId);
+            match.SetDuration(minutes, method == null ? null : ParseDurationMethod(method));
+            await _matchRepository.UpdateAsync(match, cancellationToken);
+            await _matchRepository.SaveChangesAsync(cancellationToken);
+        }
+
+        private static DurationMethod ParseDurationMethod(string value) =>
+            Enum.TryParse<DurationMethod>(value, true, out var method) && Enum.IsDefined(method) ? method
+                : throw new ArgumentException("Método de duração inválido.");
 
         public async Task<bool> DeleteAsync(
             Guid id, Guid userId, CancellationToken cancellationToken = default)

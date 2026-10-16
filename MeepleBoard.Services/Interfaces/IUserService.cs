@@ -16,5 +16,6 @@ namespace MeepleBoard.Services.Interfaces
         Task UpdatePushTokenAsync(Guid userId, string expoPushToken, CancellationToken cancellationToken = default);
 
         Task UpdateLibraryPrivacyAsync(Guid userId, LibraryPrivacy privacy, CancellationToken cancellationToken = default);
+        Task UpdateDurationSharingAsync(Guid userId, bool enabled, CancellationToken cancellationToken = default);
     }
 }

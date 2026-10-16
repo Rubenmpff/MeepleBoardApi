@@ -179,6 +179,22 @@ namespace MeepleBoardApi.Controllers
             catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         }
 
+        /// <summary>Corrects the duration of a match (minutes and how they were obtained). Creator only.</summary>
+        [HttpPatch("{id:guid}/duration")]
+        [Authorize]
+        public async Task<ActionResult> UpdateDuration(Guid id, [FromBody] UpdateMatchDurationDto dto, CancellationToken cancellationToken)
+        {
+            if (dto == null) return BadRequest(new { message = "Os dados são obrigatórios." });
+            try
+            {
+                await _matchService.UpdateDurationAsync(id, User.GetUserId(), dto.DurationInMinutes, dto.DurationMethod, cancellationToken);
+                return NoContent();
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
+            catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        }
+
         [HttpDelete("{id:guid}")]
         [Authorize]
         public async Task<ActionResult> Delete(Guid id, CancellationToken cancellationToken)
@@ -192,5 +208,12 @@ namespace MeepleBoardApi.Controllers
             }
             catch (UnauthorizedAccessException) { return Forbid(); }
         }
+    }
+
+    public class UpdateMatchDurationDto
+    {
+        public int? DurationInMinutes { get; set; }
+        /// <summary>"Measured", "Estimated" or "Unknown".</summary>
+        public string? DurationMethod { get; set; }
     }
 }

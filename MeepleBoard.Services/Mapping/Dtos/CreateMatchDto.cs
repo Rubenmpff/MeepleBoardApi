@@ -31,6 +31,9 @@ namespace MeepleBoard.Services.Mapping.Dtos
 
         public int? DurationInMinutes { get; init; }
 
+        /// <summary>"Measured", "Estimated" or "Unknown" («Não sei»); absent from older clients.</summary>
+        public string? DurationMethod { get; init; }
+
         public string? Location { get; init; }
 
         public string? ScoreSummary { get; init; }
