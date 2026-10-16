@@ -7,8 +7,9 @@ namespace MeepleBoard.Services.Experiences
     public sealed record PublicationDto(bool Rated, double? Rating, bool ShowRating, string? Comment, bool CommentPublished, bool Edited,
         DateTime? PublishedAt, bool Hidden, string? HiddenReason);
     public sealed record SetPublicationDto(bool ShowRating, string? Comment, bool PublishComment);
+    /// <summary>OwnMatchId is set only on the reader's own experience, so they can manage it; never for anyone else.</summary>
     public sealed record ExperienceDto(Guid Id, string AuthorName, bool IsMine, double? Rating, string? Comment, string Mode, int Players,
-        string Month, bool Edited, bool CanReport);
+        string Month, bool Edited, bool CanReport, Guid? OwnMatchId);
     public sealed record ExperiencePageDto(IReadOnlyList<ExperienceDto> Items, int Total);
     public sealed record ReportDto(string Reason, string? Detail);
     public sealed record ReportedExperienceDto(Guid Id, string AuthorName, string GameName, double? Rating, string? Comment,
@@ -100,10 +101,10 @@ namespace MeepleBoard.Services.Experiences
                     p.Id, Author = p.JournalEntry!.User!.UserName, Mine = p.JournalEntry.UserId == viewerId,
                     Rating = p.RatingPublishedAt != null ? p.JournalEntry.PersonalRating : null,
                     Comment = p.CommentPublishedAt != null ? p.Comment : null, Edited = p.CommentPublishedAt != null && p.CommentEditedAt != null,
-                    p.JournalEntry.Match!.GameMode, p.JournalEntry.Match.IsSoloGame, Players = p.JournalEntry.Match.MatchPlayers.Count, p.JournalEntry.Match.MatchDate
+                    p.JournalEntry.MatchId, p.JournalEntry.Match!.GameMode, p.JournalEntry.Match.IsSoloGame, Players = p.JournalEntry.Match.MatchPlayers.Count, p.JournalEntry.Match.MatchDate
                 }).ToListAsync(ct);
             return new ExperiencePageDto(rows.Select(r => new ExperienceDto(r.Id, r.Author ?? "—", r.Mine, r.Rating, r.Comment,
-                r.GameMode ?? (r.IsSoloGame ? "SOLO" : "UNKNOWN"), r.Players, r.MatchDate.ToString("yyyy-MM"), r.Edited, r.Comment != null && !r.Mine)).ToList(), total);
+                r.GameMode ?? (r.IsSoloGame ? "SOLO" : "UNKNOWN"), r.Players, r.MatchDate.ToString("yyyy-MM"), r.Edited, r.Comment != null && !r.Mine, r.Mine ? r.MatchId : null)).ToList(), total);
         }
 
         public async Task ReportAsync(Guid publicationId, Guid reporterId, ReportDto dto, CancellationToken ct = default)
