@@ -1,5 +1,6 @@
-using MeepleBoard.Services.GameDurations;
 using MeepleBoard.CrossCutting.Security;
+using MeepleBoard.Services.DTOs;
+using MeepleBoard.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -12,7 +13,7 @@ namespace MeepleBoardApi.Controllers
     [ApiController]
     [Authorize]
     [Route("MeepleBoard/game/{gameId:guid}/durations")]
-    public class GameDurationsController(GameDurationService durations) : ControllerBase
+    public class GameDurationsController(IGameDurationService durations) : ControllerBase
     {
         [HttpGet]
         public async Task<ActionResult<GameDurationsDto>> Get(Guid gameId, CancellationToken cancellationToken)

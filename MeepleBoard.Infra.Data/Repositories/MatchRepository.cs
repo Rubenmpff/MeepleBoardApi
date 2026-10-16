@@ -239,6 +239,15 @@ namespace MeepleBoard.Infra.Data.Repositories
             Guid gameId, CancellationToken cancellationToken = default)
             => _context.Matches.AsNoTracking().CountAsync(m => m.GameId == gameId, cancellationToken);
 
+        public async Task<IReadOnlyList<DurationRow>> GetDurationRowsForGameAsync(Guid gameId, Guid viewerId, CancellationToken cancellationToken = default)
+            // Mode: the explicit mode; matches recorded before it existed use their stored solo flag (never a catalogue guess).
+            => await _context.Matches.AsNoTracking().Where(m => m.GameId == gameId)
+                .Select(m => new DurationRow(m.Id, m.CreatorId, m.DurationInMinutes, m.DurationMethod,
+                    m.GameMode != null ? m.GameMode == "SOLO" : m.IsSoloGame, m.MatchPlayers.Count,
+                    m.MatchPlayers.Any(p => p.UserId == viewerId),
+                    m.MatchPlayers.Any() && m.MatchPlayers.All(p => p.User!.ContributesDurationStats)))
+                .ToListAsync(cancellationToken);
+
         public Task<bool> ExistsAsync(Guid id, CancellationToken cancellationToken = default)
             => _context.Matches.AnyAsync(m => m.Id == id, cancellationToken);
 

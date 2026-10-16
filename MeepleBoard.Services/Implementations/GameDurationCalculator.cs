@@ -1,12 +1,9 @@
 using MeepleBoard.Domain.Enums;
+using MeepleBoard.Domain.Interfaces;
+using MeepleBoard.Services.DTOs;
 
-namespace MeepleBoard.Services.GameDurations
+namespace MeepleBoard.Services.Implementations
 {
-    /// <summary>One match of a game, as the duration statistics need it. Never leaves the server.</summary>
-    public sealed record DurationRow(
-        Guid MatchId, Guid? CreatorId, int? Minutes, DurationMethod? Method, bool Solo, int Players,
-        bool ViewerPlayed, bool EveryoneShares);
-
     /// <summary>
     /// Duration statistics of a game: «A tua média» (the viewer's matches) and «Média MeepleBoard» (matches every
     /// participant shares), by mode and by number of players. Each match counts once. Unknown durations, «Não sei»
@@ -112,25 +109,5 @@ namespace MeepleBoard.Services.GameDurations
         }
 
         static int Round(double minutes, int step) => (int)(Math.Round(minutes / step, MidpointRounding.AwayFromZero) * step);
-    }
-
-    /// <summary>
-    /// Indicators of one group. Community groups below the minimum protection carry only Available = false.
-    /// Community values are rounded to 5 minutes and very distant values are only counted.
-    /// </summary>
-    public sealed record DurationStatsDto(
-        bool Available, int Count = 0, int Measured = 0, int Estimated = 0, int NotStated = 0,
-        int? Mean = null, int? Median = null, int? Q1 = null, int? Q3 = null, int Distant = 0, List<int>? DistantValues = null,
-        int? ExcludedUnknown = null, int? ExcludedMissing = null, int? ExcludedZero = null)
-    {
-        public static readonly DurationStatsDto Insufficient = new(false);
-    }
-
-    public sealed record DurationBucketDto(int Players, DurationStatsDto Stats);
-    public sealed record DurationSideDto(DurationStatsDto Solo, DurationStatsDto Multiplayer, List<DurationBucketDto> ByPlayers);
-    public sealed record GameDurationsDto(DurationSideDto Personal, DurationSideDto Community)
-    {
-        /// <summary>The viewer's own preference, shown in «Ver detalhes».</summary>
-        public bool ViewerContributes { get; init; }
     }
 }

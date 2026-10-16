@@ -144,6 +144,9 @@ namespace MeepleBoard.Infra.Data.Repositories
             return await _context.SaveChangesAsync(cancellationToken);
         }
 
+        public Task<bool> ContributesDurationStatsAsync(Guid userId, CancellationToken cancellationToken = default)
+            => _context.Users.AsNoTracking().Where(u => u.Id == userId).Select(u => u.ContributesDurationStats).FirstOrDefaultAsync(cancellationToken);
+
         public async Task<AccountDeletionResult> AnonymizeAsync(Guid userId, string deletedUserName, CancellationToken cancellationToken = default)
         {
             // Retries (EnableRetryOnFailure) replay the whole unit, so nothing is ever saved half-way.

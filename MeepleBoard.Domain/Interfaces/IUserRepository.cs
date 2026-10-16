@@ -45,6 +45,9 @@ namespace MeepleBoard.Domain.Interfaces
         // 🔹 Atualiza a última atividade do utilizador (indicador "online" nos Amigos).
         // Não carrega a entidade — é um UPDATE direto, só quando o valor está desatualizado.
         Task TouchLastActiveAsync(Guid userId, CancellationToken cancellationToken = default);
+
+        /// <summary>Only the duration-sharing preference (false for an unknown account), without loading the account.</summary>
+        Task<bool> ContributesDurationStatsAsync(Guid userId, CancellationToken cancellationToken = default);
     }
 
     /// <summary>What an account deletion left to do outside the database: photos to remove from storage.</summary>

@@ -1,4 +1,5 @@
 ﻿using MeepleBoard.Domain.Entities;
+using MeepleBoard.Domain.Enums;
 
 namespace MeepleBoard.Domain.Interfaces
 {
@@ -34,5 +35,13 @@ namespace MeepleBoard.Domain.Interfaces
         Task UpdateAsync(Match match, CancellationToken cancellationToken = default);
         Task DeleteAsync(Guid id, Guid? gameId = null, CancellationToken cancellationToken = default);
         Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+
+        /// <summary>Every match of a game, read now (nothing cached), as the duration statistics need it.</summary>
+        Task<IReadOnlyList<DurationRow>> GetDurationRowsForGameAsync(Guid gameId, Guid viewerId, CancellationToken cancellationToken = default);
     }
+
+    /// <summary>One match of a game, as the duration statistics need it. Never leaves the server.</summary>
+    public sealed record DurationRow(
+        Guid MatchId, Guid? CreatorId, int? Minutes, DurationMethod? Method, bool Solo, int Players,
+        bool ViewerPlayed, bool EveryoneShares);
 }

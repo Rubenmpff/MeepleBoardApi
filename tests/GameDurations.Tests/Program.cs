@@ -1,7 +1,9 @@
 // Duration statistics of a game: the calculator's rules and the match entity's duration method. No database.
 using MeepleBoard.Domain.Entities;
 using MeepleBoard.Domain.Enums;
-using MeepleBoard.Services.GameDurations;
+using MeepleBoard.Domain.Interfaces;
+using MeepleBoard.Services.DTOs;
+using MeepleBoard.Services.Implementations;
 using static MeepleBoard.Domain.Enums.DurationMethod;
 
 var passed = 0;
