@@ -12,7 +12,6 @@ namespace MeepleBoard.Domain.Interfaces
         Task<IReadOnlyList<Game>> GetAllAsync(int pageIndex = 0, int pageSize = 10, CancellationToken cancellationToken = default);
         Task AddAsync(Game game, CancellationToken cancellationToken = default);
         Task UpdateAsync(Game game, CancellationToken cancellationToken = default);
-        Task UpdateMeepleBoardScoreAsync(Guid gameId, int? score, CancellationToken cancellationToken = default);
         /// <summary>Recalculates and stores the MeepleBoard rating and its counts from the current eligible ratings.</summary>
         Task<bool> RecomputeMeepleBoardRatingAsync(Guid gameId, CancellationToken cancellationToken = default);
         Task<int> CountRankedAboveAsync(int score, CancellationToken cancellationToken = default);
@@ -39,9 +38,6 @@ namespace MeepleBoard.Domain.Interfaces
         // 🔥 Utilizados no Job de sincronização com o BGG
         Task<IReadOnlyList<Game>> GetRecentlyPlayedAsync(int limit, CancellationToken cancellationToken = default);
         Task<IReadOnlyList<Game>> GetMostSearchedAsync(int limit, CancellationToken cancellationToken = default);
-
-        // 🏆 Ranking interno (MeepleBoardScore) — média das avaliações pessoais (diário) de todas as partidas deste jogo
-        Task<double?> GetAveragePersonalRatingAsync(Guid gameId, CancellationToken cancellationToken = default);
 
         // 🏆 Jogos ordenados pelo ranking interno (MeepleBoardScore), com paginação.
         // Só devolve jogos aprovados e já com pelo menos 1 avaliação (score != null).

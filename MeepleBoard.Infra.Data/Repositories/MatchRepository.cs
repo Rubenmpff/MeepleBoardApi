@@ -90,7 +90,8 @@ namespace MeepleBoard.Infra.Data.Repositories
         // ── Projecção: ratings por jogo/utilizador ───────────────────────────
         // ✅ Retorna lista de doubles — double? não funciona como tipo genérico EF Core
         //
-        // Une duas fontes (mesma lógica do GameRepository.GetAveragePersonalRatingAsync):
+        // Une duas fontes (as mesmas da média MeepleBoard, GameRepository.RecomputeMeepleBoardRatingAsync, mas sem
+        // excluir partidas não oficiais: «A tua média» inclui todas):
         //   1. MatchJournalEntry — a fonte normal, a avaliação do utilizador no diário
         //   2. Match.PersonalRating (legado) — só para partidas sem NENHUMA entrada
         //      de diário ainda, para não perder avaliações antigas órfãs

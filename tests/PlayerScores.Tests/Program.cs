@@ -318,7 +318,6 @@ class Fixture {
         });
         var games = Proxy<IGameRepository>((m, a) => m.Name switch {
             "GetByIdAsync" => Task.FromResult<Game?>(Game),
-            "GetAveragePersonalRatingAsync" => Task.FromResult<double?>(Entries.Where(e => e.PersonalRating.HasValue).Average(e => e.PersonalRating)),
             // Registration recalculates the game's MeepleBoard rating through the single routine.
             "RecomputeMeepleBoardRatingAsync" => Task.FromResult(true),
             "UpdateAsync" => Task.CompletedTask,

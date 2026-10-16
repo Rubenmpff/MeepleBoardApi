@@ -509,9 +509,9 @@ namespace MeepleBoard.Services.Implementations
             .ThenBy(cm => cm.MatchDate)
             .ToList() ?? new();
 
-            // Une as avaliações de todos os membros (MatchJournalEntry) com o valor
-            // legado (Match.PersonalRating) só para partidas sem nenhuma entrada de
-            // diário ainda — mesma lógica do GameRepository.GetAveragePersonalRatingAsync.
+            // Média da campanha: todas as avaliações do diário das partidas da campanha (de qualquer participante,
+            // oficiais ou não) e, nas partidas sem nenhuma entrada de diário, o valor legado Match.PersonalRating.
+            // É própria da campanha e não segue as exclusões da média MeepleBoard.
             var allRatings = c.CampaignMatches?
                 .SelectMany(cm =>
                 {

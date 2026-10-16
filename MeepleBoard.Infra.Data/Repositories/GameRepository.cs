@@ -303,14 +303,6 @@ namespace MeepleBoard.Infra.Data.Repositories
             return before.MeepleBoardScore != score || before.MeepleBoardRatingsCount != all.Count || before.MeepleBoardRaters != raters;
         }
 
-        public async Task UpdateMeepleBoardScoreAsync(Guid gameId, int? score, CancellationToken cancellationToken = default)
-        {
-            // Update only the aggregate: never attach the detached match/journal graph.
-            var affected = await _context.Games.Where(g => g.Id == gameId)
-                .ExecuteUpdateAsync(s => s.SetProperty(g => g.MeepleBoardScore, score), cancellationToken);
-            if (affected == 0) throw new KeyNotFoundException("Jogo não encontrado.");
-        }
-
         public async Task DeleteAsync(Game game, CancellationToken cancellationToken = default)
         {
             _context.Games.Remove(game);
@@ -346,30 +338,6 @@ namespace MeepleBoard.Infra.Data.Repositories
                 .Select(g => g.First().Game!)
                 .Take(limit)
                 .ToListAsync(cancellationToken);
-        }
-
-        // 🏆 Média de todas as avaliações pessoais (diário) das partidas deste jogo.
-        // Devolve null se ainda não houver nenhuma avaliação.
-        public async Task<double?> GetAveragePersonalRatingAsync(Guid gameId, CancellationToken cancellationToken = default)
-        {
-            // Fonte principal: avaliações por jogador (MatchJournalEntry) — o fluxo normal.
-            var journalRatings = _context.MatchJournalEntries
-                .AsNoTracking()
-                .Where(e => e.PersonalRating.HasValue && e.Match!.GameId == gameId)
-                .Select(e => (double)e.PersonalRating!.Value);
-
-            // Fonte secundária (legado): partidas registadas antes de existir o espelho
-            // automático para o diário, onde a avaliação ficou só em Match.PersonalRating
-            // sem nenhum MatchJournalEntry associado. Assim que uma partida tiver pelo
-            // menos 1 entrada no diário, deixa de contar aqui (evita duplicar a mesma nota).
-            var legacyMatchRatings = _context.Matches
-                .AsNoTracking()
-                .Where(m => m.GameId == gameId && m.PersonalRating.HasValue && !m.JournalEntries.Any())
-                .Select(m => m.PersonalRating!.Value);
-
-            var ratings = await journalRatings.Concat(legacyMatchRatings).ToListAsync(cancellationToken);
-
-            return ratings.Count > 0 ? ratings.Average() : (double?)null;
         }
 
         /// <summary>Ranked games with a higher MeepleBoard mean: the position is this plus one, so ties share it.</summary>
