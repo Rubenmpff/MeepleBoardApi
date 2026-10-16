@@ -272,6 +272,38 @@ namespace MeepleBoard.Infra.Data.Repositories
             await _context.SaveChangesAsync(cancellationToken);
         }
 
+        /// <summary>
+        /// Recalculates the MeepleBoard rating of a game from the current data and stores the mean (0–100) and its counts.
+        /// Eligible: ratings of official matches, one per experience — diary entries of people still among the match
+        /// players, plus old ratings stored only on matches without diary entries. Individual ratings are only read.
+        /// </summary>
+        public async Task<bool> RecomputeMeepleBoardRatingAsync(Guid gameId, CancellationToken cancellationToken = default)
+        {
+            var before = await _context.Games.AsNoTracking().Where(g => g.Id == gameId)
+                .Select(g => new { g.MeepleBoardScore, g.MeepleBoardRatingsCount, g.MeepleBoardRaters }).FirstOrDefaultAsync(cancellationToken)
+                ?? throw new KeyNotFoundException("Jogo não encontrado.");
+            var journal = await _context.MatchJournalEntries.AsNoTracking()
+                .Where(e => e.PersonalRating.HasValue && e.Match!.GameId == gameId && e.Match.IsOfficialMode && e.Match.MatchPlayers.Any(p => p.UserId == e.UserId))
+                .Select(e => new { Value = (double)e.PersonalRating!.Value, Who = (Guid?)e.UserId }).ToListAsync(cancellationToken);
+            var legacy = await _context.Matches.AsNoTracking()
+                .Where(m => m.GameId == gameId && m.IsOfficialMode && m.PersonalRating.HasValue && !m.JournalEntries.Any())
+                .Select(m => new { Value = m.PersonalRating!.Value, Who = m.CreatorId }).ToListAsync(cancellationToken);
+            var all = journal.Concat(legacy).ToList();
+            int? score = all.Count > 0 ? (int)Math.Round(all.Average(r => r.Value) * 10) : null; // same rounding as before
+            var raters = all.Select(r => r.Who ?? Guid.Empty).Distinct().Count();
+            var affected = await _context.Games.Where(g => g.Id == gameId).ExecuteUpdateAsync(s => s
+                .SetProperty(g => g.MeepleBoardScore, score)
+                .SetProperty(g => g.MeepleBoardRatingsCount, all.Count)
+                .SetProperty(g => g.MeepleBoardRaters, raters), cancellationToken);
+            if (affected == 0) throw new KeyNotFoundException("Jogo não encontrado.");
+            return before.MeepleBoardScore != score || before.MeepleBoardRatingsCount != all.Count || before.MeepleBoardRaters != raters;
+        }
+
+        /// <summary>Games where this person has diary ratings, so they can be recalculated after the account changes.</summary>
+        public async Task<IReadOnlyList<Guid>> GetGameIdsRatedByUserAsync(Guid userId, CancellationToken cancellationToken = default)
+            => await _context.MatchJournalEntries.AsNoTracking().Where(e => e.UserId == userId && e.PersonalRating.HasValue)
+                .Select(e => e.Match!.GameId).Distinct().ToListAsync(cancellationToken);
+
         public async Task UpdateMeepleBoardScoreAsync(Guid gameId, int? score, CancellationToken cancellationToken = default)
         {
             // Update only the aggregate: never attach the detached match/journal graph.
@@ -341,17 +373,25 @@ namespace MeepleBoard.Infra.Data.Repositories
             return ratings.Count > 0 ? ratings.Average() : (double?)null;
         }
 
+        /// <summary>Ranked games with a higher MeepleBoard mean: the position is this plus one, so ties share it.</summary>
+        public async Task<int> CountRankedAboveAsync(int score, CancellationToken cancellationToken = default)
+            => await _context.Games.AsNoTracking().CountAsync(g => g.IsApproved && g.MeepleBoardScore > score
+                && g.MeepleBoardRatingsCount >= Game.RankingMinRatings && g.MeepleBoardRaters >= Game.RankingMinRaters, cancellationToken);
+
         public async Task<(IReadOnlyList<Game> Items, int TotalCount)> GetRankedByMeepleBoardScoreAsync(
             int pageIndex, int pageSize, CancellationToken cancellationToken = default)
         {
             var query = _context.Games
                 .AsNoTracking()
-                .Where(g => g.IsApproved && g.MeepleBoardScore != null);
+                .Where(g => g.IsApproved && g.MeepleBoardScore != null
+                    && g.MeepleBoardRatingsCount >= Game.RankingMinRatings && g.MeepleBoardRaters >= Game.RankingMinRaters);
 
             var total = await query.CountAsync(cancellationToken);
 
+            // Same mean = same position (computed by the caller); counts and name only order the tie.
             var items = await query
                 .OrderByDescending(g => g.MeepleBoardScore)
+                .ThenByDescending(g => g.MeepleBoardRatingsCount)
                 .ThenBy(g => g.Name)
                 .Skip(pageIndex * pageSize)
                 .Take(pageSize)

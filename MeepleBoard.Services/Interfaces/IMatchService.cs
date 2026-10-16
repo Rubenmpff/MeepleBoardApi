@@ -19,7 +19,7 @@ namespace MeepleBoard.Services.Interfaces
 
         /// <summary>
         /// Avaliação pessoal média do utilizador para um jogo (010).
-        /// Só conta partidas oficiais (IsOfficialMode = true).
+        /// Conta todas as tuas avaliações desse jogo, incluindo partidas em modo não oficial.
         /// </summary>
         Task<double?> GetUserRatingForGameAsync(Guid gameId, Guid userId, CancellationToken cancellationToken = default);
 

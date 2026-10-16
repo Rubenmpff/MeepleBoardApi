@@ -24,6 +24,11 @@ namespace MeepleBoard.Services.DTOs
         public int TotalMatches { get; set; }
         [Range(0, 100, ErrorMessage = "O score deve estar entre 0 e 100.")]
         public int? MeepleBoardScore { get; set; }
+        /// <summary>Ratings and distinct people behind the MeepleBoard rating (official matches, one per experience).</summary>
+        public int MeepleBoardRatingsCount { get; set; }
+        public int MeepleBoardRaters { get; set; }
+        /// <summary>Position in the MeepleBoard ranking; games with the same mean share it. Only in ranking responses.</summary>
+        public int? MeepleBoardRank { get; set; }
         /// <summary>
         /// Só preenchido na resposta do ranking PESSOAL (/game/rankings/mine) —
         /// a média das TUAS avaliações deste jogo, não misturada com a dos outros.

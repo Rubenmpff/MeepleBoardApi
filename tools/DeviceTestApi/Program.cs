@@ -97,6 +97,12 @@ public static class DeviceDatabase {
             if (durations.UpOperations.Count != 2 || durations.UpOperations.Any(op => op is not Microsoft.EntityFrameworkCore.Migrations.Operations.AddColumnOperation col
                 || !(col.Table == "Matches" && col.Name == "DurationMethod" && col.IsNullable && col.ColumnType == "int"
                     || col.Table == "AspNetUsers" && col.Name == "ContributesDurationStats" && !col.IsNullable && col.ColumnType == "bit" && Equals(col.DefaultValue, false)))) throw new Exception("Unexpected duration method/sharing migration changes");
+            var ratings2 = migrations.CreateMigration(migrations.Migrations["20261016183656_AddRatingCountsAndExperiencePublications"], review.Database.ProviderName!);
+            var ratingColumns = ratings2.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.AddColumnOperation>().Select(c => $"{c.Table}.{c.Name}:{c.ColumnType}:{c.IsNullable}:{c.DefaultValue}").OrderBy(n => n).ToArray();
+            var ratingTables = ratings2.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.CreateTableOperation>().Select(t => t.Name).OrderBy(n => n).ToArray();
+            if (ratings2.UpOperations.Count != 7 || !ratingColumns.SequenceEqual(new[] { "Games.MeepleBoardRaters:int:False:0", "Games.MeepleBoardRatingsCount:int:False:0" })
+                || !ratingTables.SequenceEqual(new[] { "ExperienceReports", "MatchExperiencePublications" })
+                || ratings2.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.CreateIndexOperation>().Count() != 3) throw new Exception("Unexpected rating counts/experience migration changes");
             var sql = review.GetService<IMigrator>().GenerateScript("20260824063025_OptimizeGameSearchTokenKey");
             // EF drops only a possible default constraint on this exact column before widening it.
             const string approvedDefaultDrop = "IF @var IS NOT NULL EXEC(N'ALTER TABLE [MatchJournalEntries] DROP CONSTRAINT [' + @var + '];');";
@@ -106,10 +112,12 @@ public static class DeviceDatabase {
                 "REFERENCES [AspNetUsers] ([Id]) ON DELETE SET NULL", "REFERENCES [Games] ([Id]) ON DELETE CASCADE",
                 "REFERENCES [AspNetUsers] ([Id]) ON DELETE NO ACTION", "REFERENCES [GameResources] ([Id]) ON DELETE CASCADE",
                 // Deleting a game leaves sessions in place with no planned game.
-                "REFERENCES [Games] ([Id]) ON DELETE SET NULL"];
+                "REFERENCES [Games] ([Id]) ON DELETE SET NULL",
+                // A publication goes with its diary entry; reports go with the publication.
+                "REFERENCES [MatchJournalEntries] ([Id]) ON DELETE CASCADE", "REFERENCES [MatchExperiencePublications] ([Id]) ON DELETE CASCADE"];
             var auditedSql = approvedResourceKeys.Aggregate(sql.Replace(approvedDefaultDrop, ""), (text, clause) => text.Replace(clause, ""));
             if (auditedSql.Contains("DROP ") || auditedSql.Contains("UPDATE [Matches]") || auditedSql.Contains("DELETE ")) throw new Exception("Unexpected destructive migration SQL");
-            Console.WriteLine("Migration audit passed: model matches snapshot; nullable CreatorId, one filtered index and nullable rating widened to float, four nullable outcome columns, two session close-time columns, two new resource tables, two nullable resource columns, four nullable game sheet columns, a nullable planned game (set null on delete), a nullable duration method and an off-by-default duration sharing preference.");
+            Console.WriteLine("Migration audit passed: model matches snapshot; nullable CreatorId, one filtered index and nullable rating widened to float, four nullable outcome columns, two session close-time columns, two new resource tables, two nullable resource columns, four nullable game sheet columns, a nullable planned game (set null on delete), a nullable duration method, an off-by-default duration sharing preference, two rating counts and the experience publication and report tables.");
             if (Environment.GetCommandLineArgs().Contains("--audit-only")) return;
         }
         // All SQL access derives from the same validated exclusive test connection.

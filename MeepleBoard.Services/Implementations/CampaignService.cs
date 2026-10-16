@@ -334,10 +334,7 @@ namespace MeepleBoard.Services.Implementations
             // deste jogo, escalada para 0–100 (mesma escala do campo).
             if (match.Game != null)
             {
-                var avgRating = await _gameRepository.GetAveragePersonalRatingAsync(match.GameId, ct);
-                var score = avgRating.HasValue ? (int?)Math.Round(avgRating.Value * 10) : null;
-                match.Game.SetMeepleBoardScore(score);
-                await _gameRepository.UpdateMeepleBoardScoreAsync(match.GameId, score, ct);
+                await _gameRepository.RecomputeMeepleBoardRatingAsync(match.GameId, ct);
             }
 
             // ── Notificar outros jogadores da partida ──────────────────────

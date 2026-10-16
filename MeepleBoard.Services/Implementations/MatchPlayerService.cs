@@ -12,6 +12,7 @@ namespace MeepleBoard.Services.Implementations
         private readonly IMatchPlayerRepository _matchPlayerRepository;
         private readonly IUserRepository _userRepository;
         private readonly IMatchRepository _matchRepository;
+        private readonly IGameRepository? _gameRepository;
         private readonly IMapper _mapper;
         private readonly ILogger<MatchPlayerService> _logger;
 
@@ -20,8 +21,10 @@ namespace MeepleBoard.Services.Implementations
             IUserRepository userRepository,
             IMatchRepository matchRepository,
             IMapper mapper,
-            ILogger<MatchPlayerService> logger)
+            ILogger<MatchPlayerService> logger,
+            IGameRepository? gameRepository = null)
         {
+            _gameRepository = gameRepository;
             _matchPlayerRepository = matchPlayerRepository;
             _userRepository = userRepository;
             _matchRepository = matchRepository;
@@ -95,6 +98,8 @@ namespace MeepleBoard.Services.Implementations
             var matchPlayer = new MatchPlayer(matchId, playerId);
             await _matchPlayerRepository.AddAsync(matchPlayer, cancellationToken);
             await _matchPlayerRepository.CommitAsync(cancellationToken);
+            // A player who comes back makes an existing diary rating eligible again.
+            if (_gameRepository != null) await _gameRepository.RecomputeMeepleBoardRatingAsync(match.GameId, cancellationToken);
         }
 
         // 🔹 Remove um jogador de uma partida
@@ -113,6 +118,8 @@ namespace MeepleBoard.Services.Implementations
             // Remove o jogador da partida
             await _matchPlayerRepository.DeleteAsync(matchPlayer, cancellationToken);
             await _matchPlayerRepository.CommitAsync(cancellationToken);
+            // A removed player's diary rating stops counting (the entry itself is kept).
+            if (_gameRepository != null) await _gameRepository.RecomputeMeepleBoardRatingAsync(match.GameId, cancellationToken);
         }
 
         // 🔹 Método auxiliar: Garante que o usuário existe antes de buscar estatísticas

@@ -102,13 +102,12 @@ namespace MeepleBoard.Infra.Data.Repositories
                     e.UserId == userId &&
                     e.PersonalRating.HasValue &&
                     e.Match!.GameId == gameId &&
-                    e.Match!.IsOfficialMode)
+                    e.Match.MatchPlayers.Any(p => p.UserId == userId))
                 .Select(e => (double)e.PersonalRating!.Value);
 
             var legacyMatchRatings = _context.Matches
                 .Where(m =>
                     m.GameId == gameId &&
-                    m.IsOfficialMode &&
                     m.PersonalRating != null &&
                     !m.JournalEntries.Any() &&
                     m.MatchPlayers.Any(mp => mp.UserId == userId))

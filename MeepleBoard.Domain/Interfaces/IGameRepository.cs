@@ -13,6 +13,10 @@ namespace MeepleBoard.Domain.Interfaces
         Task AddAsync(Game game, CancellationToken cancellationToken = default);
         Task UpdateAsync(Game game, CancellationToken cancellationToken = default);
         Task UpdateMeepleBoardScoreAsync(Guid gameId, int? score, CancellationToken cancellationToken = default);
+        /// <summary>Recalculates and stores the MeepleBoard rating and its counts from the current eligible ratings.</summary>
+        Task<bool> RecomputeMeepleBoardRatingAsync(Guid gameId, CancellationToken cancellationToken = default);
+        Task<IReadOnlyList<Guid>> GetGameIdsRatedByUserAsync(Guid userId, CancellationToken cancellationToken = default);
+        Task<int> CountRankedAboveAsync(int score, CancellationToken cancellationToken = default);
         Task DeleteAsync(Game game, CancellationToken cancellationToken = default);
         Task<int> CommitAsync(CancellationToken cancellationToken = default);
 

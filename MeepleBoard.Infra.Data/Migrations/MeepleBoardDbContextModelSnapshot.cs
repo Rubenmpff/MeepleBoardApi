@@ -200,6 +200,49 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.ToTable("EmailResendLogs");
                 });
 
+            modelBuilder.Entity("MeepleBoard.Domain.Entities.ExperienceReport", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Detail")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("Outcome")
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<Guid>("PublicationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<Guid>("ReporterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ResolvedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReporterId");
+
+                    b.HasIndex("PublicationId", "ReporterId");
+
+                    b.ToTable("ExperienceReports");
+                });
+
             modelBuilder.Entity("MeepleBoard.Domain.Entities.Game", b =>
                 {
                     b.Property<Guid>("Id")
@@ -250,6 +293,12 @@ namespace MeepleBoard.Infra.Data.Migrations
                         .HasColumnType("int");
 
                     b.Property<int?>("MaxPlayers")
+                        .HasColumnType("int");
+
+                    b.Property<int>("MeepleBoardRaters")
+                        .HasColumnType("int");
+
+                    b.Property<int>("MeepleBoardRatingsCount")
                         .HasColumnType("int");
 
                     b.Property<int?>("MeepleBoardScore")
@@ -705,6 +754,52 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.HasIndex("WinnerId");
 
                     b.ToTable("Matches");
+                });
+
+            modelBuilder.Entity("MeepleBoard.Domain.Entities.MatchExperiencePublication", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("CommentEditedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("CommentPublishedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("HiddenAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("HiddenById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("HiddenReason")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<Guid>("JournalEntryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("RatingPublishedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("JournalEntryId")
+                        .IsUnique();
+
+                    b.ToTable("MatchExperiencePublications");
                 });
 
             modelBuilder.Entity("MeepleBoard.Domain.Entities.MatchJournalEntry", b =>
@@ -1177,6 +1272,25 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("MeepleBoard.Domain.Entities.ExperienceReport", b =>
+                {
+                    b.HasOne("MeepleBoard.Domain.Entities.MatchExperiencePublication", "Publication")
+                        .WithMany("Reports")
+                        .HasForeignKey("PublicationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("MeepleBoard.Domain.Entities.User", "Reporter")
+                        .WithMany()
+                        .HasForeignKey("ReporterId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Publication");
+
+                    b.Navigation("Reporter");
+                });
+
             modelBuilder.Entity("MeepleBoard.Domain.Entities.Game", b =>
                 {
                     b.HasOne("MeepleBoard.Domain.Entities.Game", "BaseGame")
@@ -1284,6 +1398,17 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.Navigation("GameSession");
 
                     b.Navigation("Winner");
+                });
+
+            modelBuilder.Entity("MeepleBoard.Domain.Entities.MatchExperiencePublication", b =>
+                {
+                    b.HasOne("MeepleBoard.Domain.Entities.MatchJournalEntry", "JournalEntry")
+                        .WithMany()
+                        .HasForeignKey("JournalEntryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("JournalEntry");
                 });
 
             modelBuilder.Entity("MeepleBoard.Domain.Entities.MatchJournalEntry", b =>
@@ -1440,6 +1565,11 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.Navigation("JournalEntries");
 
                     b.Navigation("MatchPlayers");
+                });
+
+            modelBuilder.Entity("MeepleBoard.Domain.Entities.MatchExperiencePublication", b =>
+                {
+                    b.Navigation("Reports");
                 });
 
             modelBuilder.Entity("MeepleBoard.Domain.Entities.User", b =>

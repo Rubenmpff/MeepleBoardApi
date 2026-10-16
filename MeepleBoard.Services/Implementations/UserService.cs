@@ -13,8 +13,11 @@ namespace MeepleBoard.Services.Implementations
         private readonly IMatchRepository _matchRepository;
         private readonly IMapper _mapper;
 
-        public UserService(IUserRepository userRepository, IMatchRepository matchRepository, IMapper mapper)
+        private readonly IGameRepository? _gameRepository;
+
+        public UserService(IUserRepository userRepository, IMatchRepository matchRepository, IMapper mapper, IGameRepository? gameRepository = null)
         {
+            _gameRepository = gameRepository;
             _userRepository = userRepository;
             _matchRepository = matchRepository;
             _mapper = mapper;
@@ -91,8 +94,11 @@ namespace MeepleBoard.Services.Implementations
             var user = await _userRepository.GetByIdAsync(id, cancellationToken);
             if (user == null) throw new KeyNotFoundException("Usuário não encontrado.");
 
+            // Ratings go with the account: recalculate the games they counted in.
+            var ratedGames = _gameRepository != null ? await _gameRepository.GetGameIdsRatedByUserAsync(id, cancellationToken) : [];
             await _userRepository.DeleteAsync(id, cancellationToken);
             await _userRepository.CommitAsync(cancellationToken);
+            foreach (var gameId in ratedGames) await _gameRepository!.RecomputeMeepleBoardRatingAsync(gameId, cancellationToken);
         }
 
         /// <summary>

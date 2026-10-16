@@ -135,6 +135,7 @@ namespace MeepleBoard.CrossCutting.IoC
 
             services.AddScoped<StatisticsService>();
             services.AddScoped<MeepleBoard.Services.GameDurations.GameDurationService>();
+            services.AddScoped<MeepleBoard.Services.Experiences.ExperienceService>();
 
             services.AddScoped<
                 IUserService,

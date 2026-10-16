@@ -44,6 +44,8 @@ namespace MeepleBoard.Infra.Data.Context
         // ── Recursos dos jogos (links externos) ──────────────────────────────
         public DbSet<GameResource> GameResources { get; set; }
         public DbSet<GameResourceReport> GameResourceReports { get; set; }
+        public DbSet<MatchExperiencePublication> MatchExperiencePublications { get; set; }
+        public DbSet<ExperienceReport> ExperienceReports { get; set; }
 
         protected override void OnModelCreating(
             ModelBuilder modelBuilder)
@@ -354,6 +356,20 @@ namespace MeepleBoard.Infra.Data.Context
                 b.HasOne(r => r.Game).WithMany().HasForeignKey(r => r.GameId).OnDelete(DeleteBehavior.Cascade);
                 b.HasOne(r => r.SuggestedBy).WithMany().HasForeignKey(r => r.SuggestedById).OnDelete(DeleteBehavior.SetNull);
                 b.HasIndex(r => new { r.GameId, r.Status });
+            });
+
+            // One publication per diary entry, removed with it; reports go with the publication.
+            modelBuilder.Entity<MatchExperiencePublication>(b =>
+            {
+                b.HasOne(p => p.JournalEntry).WithMany().HasForeignKey(p => p.JournalEntryId).OnDelete(DeleteBehavior.Cascade);
+                b.HasIndex(p => p.JournalEntryId).IsUnique();
+            });
+
+            modelBuilder.Entity<ExperienceReport>(b =>
+            {
+                b.HasOne(r => r.Publication).WithMany(p => p.Reports).HasForeignKey(r => r.PublicationId).OnDelete(DeleteBehavior.Cascade);
+                b.HasOne(r => r.Reporter).WithMany().HasForeignKey(r => r.ReporterId).OnDelete(DeleteBehavior.Restrict);
+                b.HasIndex(r => new { r.PublicationId, r.ReporterId });
             });
 
             modelBuilder.Entity<GameResourceReport>(b =>

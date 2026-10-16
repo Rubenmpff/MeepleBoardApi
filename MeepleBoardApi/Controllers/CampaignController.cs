@@ -245,6 +245,8 @@ namespace MeepleBoardApi.Controllers
                 var entry = await _campaignService.UpsertJournalEntryAsync(matchId, dto, userId, ct);
                 return Ok(entry);
             }
+            // A saved rating is closed: changing it is refused.
+            catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
             catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
             catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
             catch (UnauthorizedAccessException) { return Forbid(); }

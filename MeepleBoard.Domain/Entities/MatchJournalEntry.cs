@@ -105,11 +105,17 @@ namespace MeepleBoard.Domain.Entities
                 throw new ArgumentException("A avaliação deve estar entre 0 e 10, em meios pontos.");
         }
 
+        /// <summary>
+        /// Notes and tags can always change. The rating is given once per experience: once saved it is closed —
+        /// a different value is refused, and sending none keeps the saved one.
+        /// </summary>
         public void Update(double? personalRating, string? notes, string? tags)
         {
             ValidateRating(personalRating);
+            if (PersonalRating.HasValue && personalRating.HasValue && personalRating != PersonalRating)
+                throw new InvalidOperationException("A tua avaliação desta partida já foi guardada e não pode ser alterada.");
 
-            PersonalRating = personalRating;
+            PersonalRating ??= personalRating;
             Notes = notes?.Trim();
             Tags = tags?.Trim();
             Touch();

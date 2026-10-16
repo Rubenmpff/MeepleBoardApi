@@ -362,10 +362,7 @@ namespace MeepleBoard.Services.Implementations
                 await _campaignRepository.AddJournalEntryAsync(entry, cancellationToken);
                 await _campaignRepository.SaveChangesAsync(cancellationToken);
 
-                var avgRating = await _gameRepository.GetAveragePersonalRatingAsync(game.Id, cancellationToken);
-                var score = avgRating.HasValue ? (int?)Math.Round(avgRating.Value * 10) : null;
-                game.SetMeepleBoardScore(score);
-                await _gameRepository.UpdateAsync(game, cancellationToken);
+                await _gameRepository.RecomputeMeepleBoardRatingAsync(game.Id, cancellationToken);
             }
 
             // ✅ Recarrega com GetByIdAsync — tem todos os includes necessários
@@ -425,12 +422,20 @@ namespace MeepleBoard.Services.Implementations
             } else if (match.Result == null) {
                 match.SetSoloGame(matchDto.IsSoloGame); match.SetWinner(matchDto.WinnerId);
             }
+            var previousGameId = match.GameId;
             match.SetGameId(matchDto.GameId);
             match.SetMatchDate(matchDto.MatchDate);
             match.UpdateMatchDetails(matchDto.Location, matchDto.ScoreSummary, matchDto.DurationInMinutes);
             if (matchDto.DurationMethod != null) match.SetDuration(matchDto.DurationInMinutes, ParseDurationMethod(matchDto.DurationMethod));
             await _matchRepository.UpdateAsync(match, cancellationToken);
-            return await _matchRepository.SaveChangesAsync(cancellationToken);
+            var saved = await _matchRepository.SaveChangesAsync(cancellationToken);
+            // Moving the match to another game moves its ratings with it.
+            if (previousGameId != match.GameId)
+            {
+                await _gameRepository.RecomputeMeepleBoardRatingAsync(previousGameId, cancellationToken);
+                await _gameRepository.RecomputeMeepleBoardRatingAsync(match.GameId, cancellationToken);
+            }
+            return saved;
         }
 
         /// <summary>
@@ -456,8 +461,11 @@ namespace MeepleBoard.Services.Implementations
             var match = await _matchRepository.GetByIdAsync(id, cancellationToken);
             if (match == null) return false;
             RequireCreator(match, userId);
+            var gameId = match.GameId;
             await _matchRepository.DeleteAsync(id, cancellationToken: cancellationToken);
             await _matchRepository.SaveChangesAsync(cancellationToken);
+            // Its ratings leave the game's MeepleBoard rating at once.
+            await _gameRepository.RecomputeMeepleBoardRatingAsync(gameId, cancellationToken);
             return true;
         }
 

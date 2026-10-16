@@ -209,31 +209,11 @@ namespace MeepleBoard.Services.Implementations
                     int.MaxValue,
                     ct);
 
+            // Same routine as every change: official matches only, one rating per experience; ratings are only read.
             var updated = 0;
-
             foreach (var game in allGames)
             {
-                var avg =
-                    await _gameRepository
-                        .GetAveragePersonalRatingAsync(
-                            game.Id,
-                            ct);
-
-                var newScore =
-                    avg.HasValue
-                        ? (int?)Math.Round(avg.Value * 10)
-                        : null;
-
-                if (game.MeepleBoardScore != newScore)
-                {
-                    game.SetMeepleBoardScore(newScore);
-
-                    await _gameRepository.UpdateAsync(
-                        game,
-                        ct);
-
-                    updated++;
-                }
+                if (await _gameRepository.RecomputeMeepleBoardRatingAsync(game.Id, ct)) updated++;
             }
 
             _logger.LogInformation(
@@ -275,8 +255,14 @@ namespace MeepleBoard.Services.Implementations
                         pageSize,
                         ct);
 
+            var dtos = _mapper.Map<IReadOnlyList<GameDto>>(items);
+            // Same mean, same position: 1 + games with a higher mean (counts and name only order the tie).
+            if (source != "bgg")
+                foreach (var dto in dtos.Where(d => d.MeepleBoardScore.HasValue))
+                    dto.MeepleBoardRank = 1 + await _gameRepository.CountRankedAboveAsync(dto.MeepleBoardScore!.Value, ct);
+
             return new PagedResponse<GameDto>(
-                _mapper.Map<IReadOnlyList<GameDto>>(items),
+                dtos,
                 total,
                 pageSize,
                 pageIndex);

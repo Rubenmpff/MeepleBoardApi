@@ -69,6 +69,15 @@ namespace MeepleBoard.Domain.Entities
 
         public int? MeepleBoardScore { get; private set; }
 
+        /// <summary>Ratings behind <see cref="MeepleBoardScore"/>: one per experience (participant and official match).</summary>
+        public int MeepleBoardRatingsCount { get; private set; }
+
+        /// <summary>Distinct people behind those ratings (old ratings without a known author count as one).</summary>
+        public int MeepleBoardRaters { get; private set; }
+
+        /// <summary>The ranking needs at least this many ratings from this many distinct people (official matches).</summary>
+        public const int RankingMinRatings = 5, RankingMinRaters = 3;
+
         public int? MinPlayers { get; private set; }
 
         public int? MaxPlayers { get; private set; }
