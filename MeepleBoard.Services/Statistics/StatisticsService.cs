@@ -1,5 +1,6 @@
 using MeepleBoard.Infra.Data.Context;
 using Microsoft.EntityFrameworkCore;
+using MeepleBoard.Services.Calculators;
 namespace MeepleBoard.Services.Statistics;
 
 public sealed partial class StatisticsService(MeepleBoardDbContext db)

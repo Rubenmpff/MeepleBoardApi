@@ -2,7 +2,7 @@ using MeepleBoard.Domain.Enums;
 using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Services.DTOs;
 
-namespace MeepleBoard.Services.Implementations
+namespace MeepleBoard.Services.Calculators
 {
     /// <summary>
     /// Duration statistics of a game: «A tua média» (the viewer's matches) and «Média MeepleBoard» (matches every

@@ -3,7 +3,7 @@ using MeepleBoard.Domain.Entities;
 using MeepleBoard.Domain.Enums;
 using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Services.DTOs;
-using MeepleBoard.Services.Implementations;
+using MeepleBoard.Services.Calculators;
 using static MeepleBoard.Domain.Enums.DurationMethod;
 
 var passed = 0;

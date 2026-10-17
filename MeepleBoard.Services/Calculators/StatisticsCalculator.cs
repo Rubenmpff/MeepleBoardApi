@@ -1,4 +1,6 @@
-namespace MeepleBoard.Services.Statistics;
+using MeepleBoard.Services.Statistics;
+
+namespace MeepleBoard.Services.Calculators;
 
 public static class StatisticsCalculator
 {
