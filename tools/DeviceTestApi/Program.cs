@@ -54,6 +54,7 @@ if (!args.Contains("--verify") && !args.Contains("--audit-only")) builder.Servic
 await using var app = builder.Build();
 app.UseCors(); app.UseAuthentication(); app.UseAuthorization(); app.MapControllers();
 app.MapGet("/device-test/health", () => new { environment = "DeviceTests", database = "MeepleBoard_DeviceTests", externalDelivery = false });
+SessionCloseFixture.Map(app, dataPath);
 await DeviceDatabase.Prepare(app.Services, dataPath, connection);
 if (args.Contains("--audit-only")) return;
 Console.WriteLine("DeviceTests ready on port 5099; synthetic accounts: " + Path.Combine(dataPath, "accounts.json"));
@@ -177,6 +178,8 @@ public static class DeviceDatabase {
         }
         disposable.Id = disposableUser.Id;
         await File.WriteAllTextAsync(disposableFile, JsonSerializer.Serialize(disposable, new JsonSerializerOptions { WriteIndented = true }));
+        // Two more of their own for verify-session-close (disposable sessions only); nobody's friends.
+        await SessionCloseFixture.EnsureAccounts(users, dataPath);
         // Accounts deleted before the neutral marker kept a Portuguese name; they get the marker on start.
         foreach (var old in await db.Users.Where(u => u.DeletedAt != null && u.UserName!.StartsWith("Conta eliminada ")).ToListAsync()) {
             old.UserName = User.DeletedUserName(old.Id); old.NormalizedUserName = old.UserName.ToUpperInvariant();
