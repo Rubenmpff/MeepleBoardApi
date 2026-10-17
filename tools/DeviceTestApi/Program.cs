@@ -55,6 +55,7 @@ await using var app = builder.Build();
 app.UseCors(); app.UseAuthentication(); app.UseAuthorization(); app.MapControllers();
 app.MapGet("/device-test/health", () => new { environment = "DeviceTests", database = "MeepleBoard_DeviceTests", externalDelivery = false });
 SessionCloseFixture.Map(app, dataPath);
+AccountDeletionFixture.Map(app, dataPath);
 await DeviceDatabase.Prepare(app.Services, dataPath, connection);
 if (args.Contains("--audit-only")) return;
 Console.WriteLine("DeviceTests ready on port 5099; synthetic accounts: " + Path.Combine(dataPath, "accounts.json"));
@@ -180,6 +181,8 @@ public static class DeviceDatabase {
         await File.WriteAllTextAsync(disposableFile, JsonSerializer.Serialize(disposable, new JsonSerializerOptions { WriteIndented = true }));
         // Two more of their own for verify-session-close (disposable sessions only); nobody's friends.
         await SessionCloseFixture.EnsureAccounts(users, dataPath);
+        // And two for verify-own-account-deletion (the person deleted each run is created fresh by the fixture).
+        await AccountDeletionFixture.EnsureAccounts(users, dataPath);
         // Accounts deleted before the neutral marker kept a Portuguese name; they get the marker on start.
         foreach (var old in await db.Users.Where(u => u.DeletedAt != null && u.UserName!.StartsWith("Conta eliminada ")).ToListAsync()) {
             old.UserName = User.DeletedUserName(old.Id); old.NormalizedUserName = old.UserName.ToUpperInvariant();
@@ -305,6 +308,8 @@ public class OfflineEmail(string directory) : IEmailService {
     }
     public Task SendConfirmationEmailAsync(string recipientEmail, string recipientName, string confirmationLink) => Store(recipientEmail, "confirmation", confirmationLink);
     public Task SendPasswordResetEmailAsync(string recipientEmail, string recipientName, string resetLink) => Store(recipientEmail, "password-reset", resetLink);
+    public Task SendAccountDeletionLinkAsync(string recipientEmail, string recipientName, string confirmationLink) => Store(recipientEmail, "account-deletion", confirmationLink);
+    public Task SendAccountDeletedAsync(string recipientEmail, string recipientName) => Store(recipientEmail, "account-deleted", "");
 }
 // Runs the production SessionAutoCloseJob every minute; state is in SQL, so restarts resume correctly.
 public class DeviceSessionAutoClose(IServiceScopeFactory scopes, ILogger<DeviceSessionAutoClose> logger) : BackgroundService {
@@ -319,13 +324,20 @@ public class DeviceSessionAutoClose(IServiceScopeFactory scopes, ILogger<DeviceS
         } while (await timer.WaitForNextTickAsync(stoppingToken));
     }
 }
+// Jobs are not run here; each one is recorded (type and arguments) so verifiers can see what production would retry.
 public class DisabledBackgroundJobs : Hangfire.IBackgroundJobClient {
-    public string Create(Hangfire.Common.Job job, Hangfire.States.IState state) => "device-test-jobs-disabled";
+    public static readonly System.Collections.Concurrent.ConcurrentQueue<string> Recorded = new();
+    public string Create(Hangfire.Common.Job job, Hangfire.States.IState state) { Recorded.Enqueue(job.Type.Name + ":" + string.Join(",", job.Args)); return "device-test-jobs-disabled"; }
     public bool ChangeState(string jobId, Hangfire.States.IState state, string expectedState) => false;
 }
 public class OfflineNotifications : INotificationService {
     public Task SendAsync(string token, string title, string body, object? data = null, CancellationToken ct = default) => Task.CompletedTask;
-    public Task SendToManyAsync(IEnumerable<string> tokens, string title, string body, object? data = null, CancellationToken ct = default) => Task.CompletedTask;
+    // A verifier may make the next bulk send fail, to check that nothing depends on it.
+    public static int FailNextBulk; public static int BulkSent;
+    public Task SendToManyAsync(IEnumerable<string> tokens, string title, string body, object? data = null, CancellationToken ct = default) {
+        if (Interlocked.Exchange(ref FailNextBulk, 0) == 1) throw new HttpRequestException("Simulated push failure (DeviceTests).");
+        Interlocked.Increment(ref BulkSent); return Task.CompletedTask;
+    }
     public Task NotifyMatchCreatedAsync(Guid id, string name, IEnumerable<string> tokens, CancellationToken ct = default) => Task.CompletedTask;
     public Task NotifyJournalEntryAddedAsync(Guid id, string name, string evaluator, IEnumerable<string> tokens, CancellationToken ct = default) => Task.CompletedTask;
     public Task NotifyMatchJournalClosedAsync(Guid id, string name, IEnumerable<string> tokens, CancellationToken ct = default) => Task.CompletedTask;
@@ -341,7 +353,13 @@ public class LocalPhotos(string directory) : IPhotoStorageService {
         Directory.CreateDirectory(directory); var reference = Prefix + Guid.NewGuid() + ".jpg";
         using var file = File.Create(FileFor(reference)); await stream.CopyToAsync(file, ct); return reference;
     }
-    public Task DeleteAsync(string reference, CancellationToken ct = default) { File.Delete(FileFor(reference)); return Task.CompletedTask; }
+    // A verifier may make the next N deletions fail, as Cloudinary might.
+    public static int FailNextDeletes;
+    public Task DeleteAsync(string reference, CancellationToken ct = default) {
+        if (Interlocked.Decrement(ref FailNextDeletes) >= 0) throw new IOException("Simulated storage failure (DeviceTests).");
+        Interlocked.Exchange(ref FailNextDeletes, 0);
+        File.Delete(FileFor(reference)); return Task.CompletedTask;
+    }
     public async Task<(byte[] Content, string ContentType)> ReadProtectedAsync(string reference, CancellationToken ct = default) {
         var bytes = await File.ReadAllBytesAsync(FileFor(reference), ct);
         return (bytes, bytes.Length > 4 && bytes[0] == 137 && bytes[1] == 80 ? "image/png" : "image/jpeg");
