@@ -208,8 +208,10 @@ namespace MeepleBoard.Domain.Entities
         // ── Métodos de negócio ─────────────────────────────────────────────────
 
         /// <summary>
-        /// Encerra a sessão com sucesso (Closed).
-        /// Só pode ser chamado quando a sessão está Active.
+        /// O organizador termina a sessão a decorrer (Closed), guardando a hora efetiva.
+        /// Repetir não muda nada. Depois da hora de fim automática, guarda essa hora.
+        /// Uma sessão agendada não se termina: cancela-se (CancelSession).
+        /// Requer os jogadores carregados: o estado depende de quem aceitou.
         /// </summary>
         public void CloseSession()
         {
@@ -221,6 +223,9 @@ namespace MeepleBoard.Domain.Entities
 
             // Past its automatic end: keep the time it actually ended.
             if (AutoClose(DateTime.UtcNow)) return;
+
+            if (Status != "Active")
+                throw new InvalidOperationException("Esta sessão ainda não começou. Para a desmarcar, usa Cancelar sessão.");
 
             EndDate = DateTime.UtcNow;
         }

@@ -34,10 +34,12 @@ namespace MeepleBoard.Services.Job
         {
             var now = DateTime.UtcNow;
             var open = await _sessionRepository.GetOpenForUpdateAsync(cancellationToken);
-            var closed = open.Count(session => session.AutoClose(now));
+            var closed = 0;
+            // Each close is a conditional update: a session the organizer ended meanwhile keeps that end.
+            foreach (var session in open)
+                if (session.AutoClose(now) && await _sessionRepository.SaveCloseAsync(session, cancellationToken)) closed++;
             if (closed == 0) return 0;
 
-            await _sessionRepository.SaveChangesAsync(cancellationToken);
             _logger.LogInformation("SessionAutoCloseJob: {Count} sessão(ões) terminada(s) automaticamente.", closed);
             return closed;
         }

@@ -71,6 +71,20 @@ namespace MeepleBoard.Infra.Data.Repositories
                 .ToListAsync(ct);
         }
 
+        public async Task<bool> SaveCloseAsync(GameSession session, CancellationToken ct = default)
+        {
+            if (session.EndDate is not { } end) throw new InvalidOperationException("A sessão não foi terminada.");
+            var automatic = session.ClosedAutomatically;
+            // One conditional UPDATE: the first close wins; a later one changes nothing.
+            var rows = await _context.GameSessions
+                .Where(s => s.Id == session.Id && s.EndDate == null && !s.IsCancelled)
+                .ExecuteUpdateAsync(u => u.SetProperty(s => s.EndDate, end).SetProperty(s => s.ClosedAutomatically, automatic), ct);
+            var entry = _context.Entry(session);
+            if (rows == 1) { entry.State = EntityState.Unchanged; return true; }
+            await entry.ReloadAsync(ct);
+            return false;
+        }
+
         public async Task AddAsync(GameSession session, CancellationToken ct = default)
         {
             if (session == null) throw new ArgumentNullException(nameof(session));

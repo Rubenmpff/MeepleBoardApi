@@ -123,12 +123,52 @@ await Check("job closes due sessions, saves once and is idempotent", async () =>
     Assert(await job.ExecuteAsync() == 0 && repo.Saves == 1, "second run must not save again");
 });
 
+await Sync("terminating: only a running session; a scheduled or cancelled one is refused; repeating keeps the time", () => {
+    var scheduled = Sessions.Create(now.AddHours(3), accepted: [now.AddHours(-1)]);
+    Throws<InvalidOperationException>(() => scheduled.CloseSession(), "scheduled session (cancel instead)");
+    Assert(scheduled.EndDate == null && scheduled.Status == "Upcoming", "a refused close changed the session");
+    var noGuest = Sessions.Create(now.AddHours(-1));
+    Throws<InvalidOperationException>(() => noGuest.CloseSession(), "past its start but nobody accepted: never ran");
+    var cancelled = Sessions.Create(now.AddHours(3)); cancelled.CancelSession();
+    Throws<InvalidOperationException>(() => cancelled.CloseSession(), "cancelled session");
+    var running = Sessions.Create(now.AddHours(-1), accepted: [now.AddHours(-2)]);
+    var match = (Match)Activator.CreateInstance(typeof(Match), true)!; running.Matches.Add(match);
+    running.CloseSession(); var end = running.EndDate;
+    running.CloseSession();
+    Assert(running.EndDate == end && !running.ClosedAutomatically && running.Status == "Closed", "repeat changed the end");
+    Assert(running.Matches.Single() == match && running.Players.Count == 2, "matches or players changed");
+    Throws<InvalidOperationException>(() => running.CancelSession(), "an ended session is not cancelled");
+});
+await Check("manual and automatic close: whichever is stored first stays; the other changes nothing", async () => {
+    var manualFirst = Sessions.Create(now.AddHours(-2), accepted: [now.AddHours(-3)]);
+    var autoFirst = Sessions.Create(now.AddDays(-2), accepted: [now.AddDays(-3)]);
+    var repo = new Repository([manualFirst, autoFirst]);
+    var sessions = new GameSessionService(repo, Stub.Create<IGameSessionPlayerRepository>(), Stub.Create<IUserRepository>(), new MapperConfiguration(c => c.AddProfile<MappingEntityToDto>()).CreateMapper(), Stub.Create<IFriendshipRepository>(), Games.With(Guid.Empty));
+    await sessions.CloseSessionAsync(manualFirst.Id, manualFirst.OrganizerId);
+    var manualEnd = manualFirst.EndDate;
+    var job = new SessionAutoCloseJob(repo, NullLogger<SessionAutoCloseJob>.Instance);
+    Assert(await job.ExecuteAsync() == 1 && autoFirst.EndDate == autoFirst.AutoCloseAt && autoFirst.ClosedAutomatically, "job closes the due one");
+    Assert(manualFirst.EndDate == manualEnd && !manualFirst.ClosedAutomatically, "job changed a manual end");
+    var saves = repo.Saves;
+    await sessions.CloseSessionAsync(autoFirst.Id, autoFirst.OrganizerId);
+    await sessions.CloseSessionAsync(manualFirst.Id, manualFirst.OrganizerId);
+    Assert(autoFirst.EndDate == autoFirst.AutoCloseAt && autoFirst.ClosedAutomatically && manualFirst.EndDate == manualEnd && repo.Saves == saves, "repeated closes wrote or changed the end");
+    // Lost race: the database already holds the other close; the service keeps it and reports success.
+    var raced = Sessions.Create(now.AddHours(-2), accepted: [now.AddHours(-3)]);
+    var racing = new Repository([raced]) { StoredByOther = (raced.ScheduledStartDate.AddHours(24), true) };
+    var other = new GameSessionService(racing, Stub.Create<IGameSessionPlayerRepository>(), Stub.Create<IUserRepository>(), new MapperConfiguration(c => c.AddProfile<MappingEntityToDto>()).CreateMapper(), Stub.Create<IFriendshipRepository>(), Games.With(Guid.Empty));
+    await other.CloseSessionAsync(raced.Id, raced.OrganizerId);
+    Assert(raced.EndDate == raced.ScheduledStartDate.AddHours(24) && raced.ClosedAutomatically, "the stored close was not kept");
+});
+
 // HTTP: PUT /MeepleBoard/session/{id}/close-time
 var organizer = Guid.NewGuid(); var guest = Guid.NewGuid();
 var active = Sessions.Create(now.AddHours(-2), accepted: [now.AddHours(-3)], organizer: organizer, guest: guest);
 var waiting = Sessions.Create(now.AddHours(5), accepted: [now.AddHours(-1)], organizer: organizer, guest: guest);
 var finished = Sessions.Create(now.AddDays(-3), accepted: [now.AddDays(-4)], organizer: organizer, guest: guest); finished.AutoClose(now);
-var repository = new Repository([active, waiting, finished]);
+var toEnd = Sessions.Create(now.AddHours(-1), accepted: [now.AddHours(-2)], organizer: organizer, guest: guest);
+var toCancel = Sessions.Create(now.AddDays(2), accepted: [now.AddHours(-1)], organizer: organizer, guest: guest);
+var repository = new Repository([active, waiting, finished, toEnd, toCancel]);
 var knownGame = Guid.NewGuid();
 var mapper = new MapperConfiguration(c => c.AddProfile<MappingEntityToDto>()).CreateMapper();
 var service = new GameSessionService(repository, Stub.Create<IGameSessionPlayerRepository>(), Stub.Create<IUserRepository>(), mapper, Stub.Create<IFriendshipRepository>(), Games.With(knownGame));
@@ -194,6 +234,41 @@ await Check("planned game endpoint: guest, anonymous, unknown game, closed and u
     await PutGame(Guid.NewGuid(), knownGame, organizer, HttpStatusCode.NotFound);
     Assert(waiting.PlannedGameId == knownGame && finished.PlannedGameId == null && repository.Saves == saves, "refused requests changed state");
 });
+async Task<string> Post(Guid session, string action, Guid? user, HttpStatusCode expected) {
+    using var request = new HttpRequestMessage(HttpMethod.Post, $"/MeepleBoard/session/{session}/{action}");
+    if (user.HasValue) request.Headers.Add("X-Fixture-User", user.Value.ToString());
+    using var response = await client.SendAsync(request);
+    var text = await response.Content.ReadAsStringAsync();
+    Assert(response.StatusCode == expected, $"{action}: expected {expected}, got {response.StatusCode}: {text}");
+    return text;
+}
+await Check("terminate endpoint: guest 403, anonymous 401, unknown 404, scheduled or cancelled 409, without changes", async () => {
+    var saves = repository.Saves;
+    await Post(toEnd.Id, "close", guest, HttpStatusCode.Forbidden);
+    await Post(toEnd.Id, "close", null, HttpStatusCode.Unauthorized);
+    await Post(Guid.NewGuid(), "close", organizer, HttpStatusCode.NotFound);
+    Assert((await Post(waiting.Id, "close", organizer, HttpStatusCode.Conflict)).Contains("Cancelar sessão"), "the refusal points to cancelling");
+    Assert(toEnd.EndDate == null && waiting.EndDate == null && waiting.Status == "Upcoming" && repository.Saves == saves, "refused requests changed state");
+});
+await Check("organizer terminates a running session once; repeating returns 200 with the same end", async () => {
+    var saves = repository.Saves;
+    await Post(toEnd.Id, "close", organizer, HttpStatusCode.OK);
+    var end = toEnd.EndDate;
+    Assert(end != null && end >= now && !toEnd.ClosedAutomatically && toEnd.Status == "Closed" && toEnd.Players.Count == 2, "not ended by hand");
+    await Post(toEnd.Id, "close", organizer, HttpStatusCode.OK);
+    await Post(finished.Id, "close", organizer, HttpStatusCode.OK);
+    Assert(toEnd.EndDate == end && finished.ClosedAutomatically && repository.Saves == saves + 1, "repeat wrote or changed the end");
+});
+await Check("cancel endpoint: guest 403, anonymous 401, unknown 404, running or ended 409; organizer cancels a scheduled one", async () => {
+    await Post(toCancel.Id, "cancel", guest, HttpStatusCode.Forbidden);
+    await Post(toCancel.Id, "cancel", null, HttpStatusCode.Unauthorized);
+    await Post(Guid.NewGuid(), "cancel", organizer, HttpStatusCode.NotFound);
+    await Post(active.Id, "cancel", organizer, HttpStatusCode.Conflict);
+    await Post(toEnd.Id, "cancel", organizer, HttpStatusCode.Conflict);
+    Assert(repository.Deleted.Count == 0 && active.EndDate == null, "refused cancels changed state");
+    await Post(toCancel.Id, "cancel", organizer, HttpStatusCode.NoContent);
+    Assert(repository.Deleted.SequenceEqual([toCancel.Id]), "the scheduled session was not cancelled");
+});
 Console.WriteLine($"{passed} isolated session start/end tests passed.");
 await app.StopAsync();
 
@@ -229,8 +304,15 @@ public class Repository(List<GameSession> sessions) : IGameSessionRepository {
     public Task<IReadOnlyList<GameSession>> GetOpenForUpdateAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<GameSession>>(sessions.Where(s => s.EndDate == null && !s.IsCancelled).ToList());
     public Task AddAsync(GameSession session, CancellationToken ct = default) => throw new NotSupportedException();
     public Task UpdateAsync(GameSession session, CancellationToken ct = default) => throw new NotSupportedException();
-    public Task DeleteAsync(Guid id, CancellationToken ct = default) => throw new NotSupportedException();
+    public List<Guid> Deleted = [];
+    public Task DeleteAsync(Guid id, CancellationToken ct = default) { Deleted.Add(id); sessions.RemoveAll(s => s.Id == id); return Task.CompletedTask; }
     public Task SaveChangesAsync(CancellationToken ct = default) { Saves++; return Task.CompletedTask; }
+    // Simulates another close already in the database (the conditional update finds no open row).
+    public (DateTime End, bool Automatic)? StoredByOther;
+    public Task<bool> SaveCloseAsync(GameSession session, CancellationToken ct = default) {
+        if (StoredByOther is { } stored) { Sessions.Set(session, "EndDate", stored.End); Sessions.Set(session, "ClosedAutomatically", stored.Automatic); return Task.FromResult(false); }
+        Saves++; return Task.FromResult(true);
+    }
 }
 public class Stub : DispatchProxy {
     protected override object? Invoke(MethodInfo? method, object?[]? args) => throw new NotSupportedException(method!.Name + " is not used by these tests.");

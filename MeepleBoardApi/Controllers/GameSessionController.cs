@@ -205,33 +205,28 @@ namespace MeepleBoardApi.Controllers
         }
 
         /// <summary>
-        /// Fecha uma sessão de jogo (só Organizer).
+        /// O organizador termina já a sessão a decorrer. Repetir devolve 200 sem mudar a hora guardada.
+        /// 403 a quem não organiza; 409 numa sessão agendada (cancela-se) ou cancelada.
         /// </summary>
         [HttpPost("{id:guid}/close")]
         [ProducesResponseType(200)]
+        [ProducesResponseType(403)]
         [ProducesResponseType(404)]
+        [ProducesResponseType(409)]
         public async Task<IActionResult> Close(Guid id)
         {
+            Guid authUserId;
+            try { authUserId = GetAuthUserId(); }
+            catch (UnauthorizedAccessException ex) { return Unauthorized(new { message = ex.Message }); }
             try
             {
-                var authUserId = GetAuthUserId();
-
                 await _sessionService.CloseSessionAsync(id, authUserId);
-
-                return Ok(new { message = "Sessão encerrada com sucesso." });
+                return Ok(new { message = "Sessão terminada." });
             }
-            catch (UnauthorizedAccessException ex)
-            {
-                return Unauthorized(new { message = ex.Message });
-            }
-            catch (KeyNotFoundException ex)
-            {
-                return NotFound(new { message = ex.Message });
-            }
-            catch (InvalidOperationException ex)
-            {
-                return Conflict(new { message = ex.Message });
-            }
+            catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message }); }
+            catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+            catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
+            catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
         }
 
         public sealed record CloseTimeRequest(DateTime ClosesAt);
@@ -274,13 +269,26 @@ namespace MeepleBoardApi.Controllers
             catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
         }
 
+        /// <summary>
+        /// O organizador cancela (apaga) uma sessão agendada. 403 a quem não organiza;
+        /// 409 numa sessão a decorrer (termina-se) ou já terminada.
+        /// </summary>
         [HttpPost("{id:guid}/cancel")]
         [Authorize]
         public async Task<IActionResult> Cancel(Guid id)
         {
-            var organizerId = User.GetUserId();
-            await _sessionService.CancelSessionAsync(id, organizerId);
-            return NoContent();
+            Guid authUserId;
+            try { authUserId = GetAuthUserId(); }
+            catch (UnauthorizedAccessException ex) { return Unauthorized(new { message = ex.Message }); }
+            try
+            {
+                await _sessionService.CancelSessionAsync(id, authUserId);
+                return NoContent();
+            }
+            catch (UnauthorizedAccessException ex) { return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message }); }
+            catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+            catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
+            catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
         }
 
     }

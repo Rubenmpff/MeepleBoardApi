@@ -177,14 +177,20 @@ namespace MeepleBoard.Services.Implementations
             if (sessionId == Guid.Empty) throw new ArgumentException("Sessão inválida.");
             if (organizerId == Guid.Empty) throw new ArgumentException("Organizer inválido.");
 
-            var session = await _sessionRepository.GetByIdForUpdateAsync(sessionId);
+            // With players: whether it is running depends on who accepted.
+            var session = await _sessionRepository.GetByIdWithPlayersForUpdateAsync(sessionId);
             if (session == null) throw new KeyNotFoundException("Sessão não encontrada.");
 
             if (session.OrganizerId != organizerId)
-                throw new InvalidOperationException("Apenas o organizer pode encerrar a sessão.");
+                throw new UnauthorizedAccessException("Apenas o organizador pode terminar a sessão.");
+
+            // Already ended (by hand or automatically): repeating keeps the stored time.
+            if (session.EndDate != null && !session.IsCancelled) return;
 
             session.CloseSession();
-            await _sessionRepository.SaveChangesAsync();
+            // Lost the race to the automatic close (or a cancellation): what was stored first stays.
+            if (!await _sessionRepository.SaveCloseAsync(session) && session.IsCancelled)
+                throw new InvalidOperationException("Sessão já foi cancelada.");
         }
 
         public async Task<GameSessionDto> SetCloseTimeAsync(Guid sessionId, Guid organizerId, DateTime closesAtUtc)
@@ -230,11 +236,12 @@ namespace MeepleBoard.Services.Implementations
             if (sessionId == Guid.Empty) throw new ArgumentException("Sessão inválida.");
             if (organizerId == Guid.Empty) throw new ArgumentException("Organizer inválido.");
 
-            var session = await _sessionRepository.GetByIdForUpdateAsync(sessionId);
+            // With players: a session with an accepted guest past its start is running and is not cancelled.
+            var session = await _sessionRepository.GetByIdWithPlayersForUpdateAsync(sessionId);
             if (session == null) throw new KeyNotFoundException("Sessão não encontrada.");
 
             if (session.OrganizerId != organizerId)
-                throw new InvalidOperationException("Apenas o organizer pode cancelar a sessão.");
+                throw new UnauthorizedAccessException("Apenas o organizador pode cancelar a sessão.");
 
             if (session.Status == "Active")
                 throw new InvalidOperationException("Não podes cancelar uma sessão que já está a decorrer. Usa encerrar.");
