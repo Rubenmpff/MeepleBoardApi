@@ -1,5 +1,7 @@
 # Criação de sessões com pelo menos um amigo
 
+**Checkpoint confirmado no iPhone:** o utilizador validou o bloqueio sem seleção, conservação dos campos e criação/reabertura com Teste-participante pendente. Aceitação é o próximo percurso. A revisão de cancelar versus eliminar está registada em `pendencias-funcionais.md` e não foi implementada.
+
 ## Regra e compatibilidade
 
 O utilizador confirmou no iPhone a legibilidade do seletor e a conservação de data, hora e Teste-participante pendente na Sessão iPhone 02. A nova regra aplica-se **apenas à criação de sessões**: é obrigatório convidar pelo menos um amigo além do organizador. A amizade tem de estar aceite; **o convite para a sessão não precisa de estar aceite** e começa Pending. Para jogar sozinho mantém-se Registar partida → Solo.
