@@ -1,6 +1,6 @@
 # Contratos e agregações de Estatísticas — fase 1
 
-Resumo/lista autorizados em GET `/MeepleBoard/statistics/me` e `/MeepleBoard/statistics/me/matches`. Apenas utilizador do token; nenhuma consulta arbitrária por ID. DTOs mínimos em `MeepleBoard.Services/Statistics`, serviço registado no IoC e projeção EF de participação+diário próprio, restrita ao período UTC derivado de datas/fuso locais. Não carrega entidades/diários de amigos para devolver dados privados. Sem alteração do modelo/migrações/regras de gravação.
+Resumo/lista autorizados em GET `/MeepleBoard/statistics/me` e `/MeepleBoard/statistics/me/matches`. Apenas utilizador do token; nenhuma consulta arbitrária por ID. DTOs mínimos (desde 2026-10-17 em `MeepleBoard.Services/Mapping/Dtos/Statistics*Dto.cs`; consultas em `StatisticsRepository`, cálculo em `Services/Calculators`), serviço registado no IoC e projeção EF de participação+diário próprio, restrita ao período UTC derivado de datas/fuso locais. Não carrega entidades/diários de amigos para devolver dados privados. Sem alteração do modelo/migrações/regras de gravação.
 
 Query: start/endExclusive DateOnly, timeZone (IANA ou identificador reconhecido pelo runtime), gameId opcional, mode opcional COMPETITIVE/SOLO/COOPERATIVE/UNKNOWN. Intervalo máximo 3660 dias; limites locais ambíguos/inexistentes ou filtros inválidos → 400, sem adivinhar offset. Listas: metric all/games/duration/missing-duration/ratings/known/wins/losses/draws/undefined/legacy, bucket da série, offset≥0, limit1–100. Ordem data decrescente/ID estável.
 
