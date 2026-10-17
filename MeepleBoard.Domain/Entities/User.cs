@@ -137,6 +137,12 @@ namespace MeepleBoard.Domain.Entities
         /// picture, push token), sign-in is closed for good, and the row keeps a neutral unique name so shared
         /// matches, sessions and campaigns keep their players and results.
         /// </summary>
+        /// <summary>
+        /// The name a deleted account keeps: a neutral marker, never text in one language (the app shows it translated).
+        /// ':' is not accepted in names chosen at registration, so no account can take it.
+        /// </summary>
+        public static string DeletedUserName(Guid id) => "deleted:" + id.ToString("N")[..8];
+
         public void Anonymize(string deletedUserName)
         {
             if (string.IsNullOrWhiteSpace(deletedUserName)) throw new ArgumentException("O nome da conta eliminada é obrigatório.");

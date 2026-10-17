@@ -177,6 +177,11 @@ public static class DeviceDatabase {
         }
         disposable.Id = disposableUser.Id;
         await File.WriteAllTextAsync(disposableFile, JsonSerializer.Serialize(disposable, new JsonSerializerOptions { WriteIndented = true }));
+        // Accounts deleted before the neutral marker kept a Portuguese name; they get the marker on start.
+        foreach (var old in await db.Users.Where(u => u.DeletedAt != null && u.UserName!.StartsWith("Conta eliminada ")).ToListAsync()) {
+            old.UserName = User.DeletedUserName(old.Id); old.NormalizedUserName = old.UserName.ToUpperInvariant();
+        }
+        await db.SaveChangesAsync();
         // Fictitious games carry no description: the app labels descriptions of games with a BGG id as original BGG text,
         // so an invented sentence would be attributed to BGG. Older rows are cleared on start.
         foreach (var fictitious in await db.Games.Where(g => g.BGGId >= 990001 && g.BGGId <= 990003 && g.Description != "").ToListAsync()) Set(fictitious, "Description", "");

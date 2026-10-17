@@ -101,7 +101,7 @@ namespace MeepleBoard.Services.Implementations
 
             // Anonymised, not removed: shared matches keep their players. Ratings go with the account and the
             // games they counted in are recalculated in the same transaction.
-            var result = await _userRepository.AnonymizeAsync(id, $"Conta eliminada {id.ToString("N")[..8]}", cancellationToken);
+            var result = await _userRepository.AnonymizeAsync(id, User.DeletedUserName(id), cancellationToken);
 
             // Storage is outside the transaction: a failure leaves an unreachable file, never a half-deleted account.
             if (_photoStorageService == null) return;
