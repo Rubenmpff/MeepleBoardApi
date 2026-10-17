@@ -64,9 +64,22 @@ namespace MeepleBoard.Domain.Interfaces
 
     /// <summary>What an account deletion left to do outside the database: photos to remove from storage and the push
     /// tokens of guests whose session was cancelled.</summary>
-    public sealed record AccountDeletionResult(IReadOnlyList<Guid> RecalculatedGameIds, IReadOnlyList<string> PhotoUrls, IReadOnlyList<string> CancelledSessionGuestTokens);
+    public sealed record AccountDeletionResult(IReadOnlyList<Guid> RecalculatedGameIds, IReadOnlyList<string> PhotoUrls, IReadOnlyList<string> CancelledSessionGuestTokens,
+        IReadOnlyList<SuccessorNotice> NewManagers);
+
+    /// <summary>A member who now manages a campaign (push token, campaign name as stored — possibly a neutral marker).</summary>
+    public sealed record SuccessorNotice(string Token, string CampaignName);
 
     public sealed record AccountDeletionMember(Guid Id, string UserName);
-    public sealed record AccountDeletionCampaign(Guid Id, string Name, string? GameName, bool HasNotes, IReadOnlyList<AccountDeletionMember> Members);
+    /// <summary>A campaign the person manages that has other active members: they are ordered by seniority (accepted
+    /// longest ago first, then invited first, then by id), and the first is the automatic successor (DefaultManagerId).</summary>
+    public sealed record AccountDeletionCampaign(Guid Id, string Name, string? GameName, bool HasNotes, bool IsAuthor, Guid DefaultManagerId, IReadOnlyList<AccountDeletionMember> Members);
+
+    /// <summary>The automatic successor rule, the same for the confirmation screen and the deletion itself.</summary>
+    public static class CampaignSuccession
+    {
+        public static List<CampaignMember> Order(IEnumerable<CampaignMember> activeMembers) => activeMembers
+            .OrderBy(m => m.RespondedAt ?? m.InvitedAt).ThenBy(m => m.InvitedAt).ThenBy(m => m.UserId).ToList();
+    }
     public sealed record AccountDeletionSummary(int ScheduledSessions, int RunningSessions, IReadOnlyList<AccountDeletionCampaign> CampaignsWithMembers, int CampaignsOnlyYours);
 }

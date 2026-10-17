@@ -117,6 +117,14 @@ namespace MeepleBoard.Services.Implementations
                 try { await _notifications.SendToManyAsync(result.CancelledSessionGuestTokens, "Sessão cancelada", "Uma sessão para a qual foste convidado foi cancelada.", new { type = "session_cancelled" }, cancellationToken); }
                 catch (Exception ex) { _logger?.LogWarning(ex, "Aviso de sessão cancelada não enviado."); }
             }
+            // Each new campaign manager is told; nothing to accept, and a failed push changes nothing.
+            if (_notifications != null)
+                foreach (var notice in result.NewManagers)
+                {
+                    var body = User.IsDeletedMarker(notice.CampaignName) ? "Passaste a gerir uma campanha." : $"Passaste a gerir a campanha \"{notice.CampaignName}\".";
+                    try { await _notifications.SendAsync(notice.Token, "Nova gest\u00e3o de campanha", body, new { type = "campaign_manager" }, cancellationToken); }
+                    catch (Exception ex) { _logger?.LogWarning(ex, "Aviso ao novo gestor de uma campanha n\u00e3o enviado."); }
+                }
             if (_photoStorageService == null) return;
             foreach (var photoUrl in result.PhotoUrls)
                 if (!await TryDeletePhotoAsync(_photoStorageService, photoUrl, cancellationToken))

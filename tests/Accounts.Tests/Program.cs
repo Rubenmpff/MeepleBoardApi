@@ -69,6 +69,14 @@ await Check("a failing push to the guests of cancelled sessions never stops the 
     await Service(users, new Storage(), push, new Jobs()).DeleteAsync(users.Id);
     Assert(push.Calls == 0, "no cancelled session, no push");
 });
+await Check("each new campaign manager is told, without technical markers; a failing push changes nothing", async () => {
+    var users = new Users { Managers = [new("ExponentPushToken[m1]", User.DeletedCampaignName), new("ExponentPushToken[m2]", "Campanha de Ana")] }; var push = new Push();
+    await Service(users, new Storage(), push, new Jobs()).DeleteAsync(users.Id);
+    Assert(push.Bodies.SequenceEqual(["Passaste a gerir uma campanha.", "Passaste a gerir a campanha \"Campanha de Ana\"."]), string.Join(" | ", push.Bodies));
+    users = new Users { Managers = [new("ExponentPushToken[m1]", "Campanha")] }; push = new Push { Fail = true };
+    await Service(users, new Storage(), push, new Jobs()).DeleteAsync(users.Id);
+    Assert(users.Anonymised == 1 && push.Calls == 1, "failing push stopped the deletion");
+});
 await Check("an account already deleted is not found: nothing runs again", async () => {
     var users = new Users(); var storage = new Storage();
     await Service(users, storage, new Push(), new Jobs()).DeleteAsync(users.Id);
@@ -145,14 +153,14 @@ static void Set(object target, string property, object? value) =>
 // The repository as UserService sees it: one account with one photo; cancelled sessions give guest tokens.
 public class Users {
     public Guid Id = Guid.NewGuid(); public string Photo = "https://res.cloudinary.com/x/image/authenticated/" + Guid.NewGuid() + ".jpg";
-    public bool Deleted; public int Anonymised; public IReadOnlyDictionary<Guid, Guid>? Transfers; public List<string> Tokens = [];
+    public bool Deleted; public int Anonymised; public IReadOnlyDictionary<Guid, Guid>? Transfers; public List<string> Tokens = []; public List<SuccessorNotice> Managers = [];
     public IUserRepository Proxy => Stub.Create<IUserRepository>((method, args) => method.Name switch {
         "GetByIdAsync" => Task.FromResult<User?>(Account()),
         "AnonymizeAsync" => Anonymise((IReadOnlyDictionary<Guid, Guid>?)args[2]),
         _ => throw new NotSupportedException(method.Name),
     });
     User Account() { var u = new User("Pessoa", "p@example.test", "Local"); typeof(User).GetProperty("Id")!.SetValue(u, Id); if (Deleted) u.Anonymize(User.DeletedUserName(Id)); return u; }
-    Task<AccountDeletionResult> Anonymise(IReadOnlyDictionary<Guid, Guid>? transfers) { Anonymised++; Transfers = transfers; return Task.FromResult(new AccountDeletionResult([], [Photo], Tokens)); }
+    Task<AccountDeletionResult> Anonymise(IReadOnlyDictionary<Guid, Guid>? transfers) { Anonymised++; Transfers = transfers; return Task.FromResult(new AccountDeletionResult([], [Photo], Tokens, Managers)); }
 }
 public class Storage : IPhotoStorageService {
     public int FailFirst, Attempts; public List<string> Deleted = [];
@@ -161,9 +169,9 @@ public class Storage : IPhotoStorageService {
     public Task<(byte[] Content, string ContentType)> ReadProtectedAsync(string u, CancellationToken ct = default) => throw new NotSupportedException();
 }
 public class Push : INotificationService {
-    public bool Fail; public int Calls;
-    public Task SendToManyAsync(IEnumerable<string> tokens, string title, string body, object? data = null, CancellationToken ct = default) { Calls++; return Fail ? throw new HttpRequestException("push down") : Task.CompletedTask; }
-    public Task SendAsync(string token, string title, string body, object? data = null, CancellationToken ct = default) => throw new NotSupportedException();
+    public bool Fail; public int Calls; public List<string> Bodies = [];
+    public Task SendToManyAsync(IEnumerable<string> tokens, string title, string body, object? data = null, CancellationToken ct = default) { Calls++; Bodies.Add(body); return Fail ? throw new HttpRequestException("push down") : Task.CompletedTask; }
+    public Task SendAsync(string token, string title, string body, object? data = null, CancellationToken ct = default) { Calls++; Bodies.Add(body); return Fail ? throw new HttpRequestException("push down") : Task.CompletedTask; }
     public Task NotifyMatchCreatedAsync(Guid id, string name, IEnumerable<string> tokens, CancellationToken ct = default) => throw new NotSupportedException();
     public Task NotifyJournalEntryAddedAsync(Guid id, string name, string evaluator, IEnumerable<string> tokens, CancellationToken ct = default) => throw new NotSupportedException();
     public Task NotifyMatchJournalClosedAsync(Guid id, string name, IEnumerable<string> tokens, CancellationToken ct = default) => throw new NotSupportedException();

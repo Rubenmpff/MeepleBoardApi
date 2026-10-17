@@ -169,14 +169,12 @@ namespace MeepleBoard.Infra.Data.Repositories
                 if (user.DeletedAt.HasValue) throw new KeyNotFoundException("Utilizador não encontrado.");
                 var now = DateTime.UtcNow;
 
-                // New managers chosen by the person: only for campaigns they created, among other active members.
-                var created = await _context.Campaigns.Where(c => c.CreatorId == userId).Select(c => c.Id).ToListAsync(cancellationToken);
-                var activeMembers = await _context.CampaignMembers
-                    .Where(m => created.Contains(m.CampaignId) && m.UserId != userId && m.Status == CampaignMemberStatus.Accepted && m.User!.DeletedAt == null)
-                    .Select(m => new { m.CampaignId, m.UserId }).ToListAsync(cancellationToken);
-                foreach (var (campaignId, managerId) in campaignTransfers)
-                    if (!activeMembers.Any(m => m.CampaignId == campaignId && m.UserId == managerId))
-                        throw new ArgumentException("O novo gestor tem de ser um membro ativo de uma campanha que criaste.");
+                // Campaigns the person manages (Campaign.CreatorId): a successor is chosen or taken automatically below.
+                // Their rows are locked (as LeaveAsync does), so a member leaving at the same moment waits and sees the new manager.
+                var managed = await _context.Campaigns.FromSqlInterpolated($"SELECT * FROM Campaigns WITH (UPDLOCK, ROWLOCK) WHERE CreatorId = {userId}")
+                    .AsNoTracking().Select(c => c.Id).ToListAsync(cancellationToken);
+                if (campaignTransfers.Keys.Any(id => !managed.Contains(id)))
+                    throw new ArgumentException("Só podes escolher o novo gestor de uma campanha que geres.");
 
                 // The person's diary: notes, photos, ratings and publications (their reports go with the publications).
                 var entries = await _context.MatchJournalEntries.Where(e => e.UserId == userId).ToListAsync(cancellationToken);
@@ -232,20 +230,42 @@ namespace MeepleBoard.Infra.Data.Repositories
                         .ExecuteUpdateAsync(s => s.SetProperty(x => x.Name, title).SetProperty(x => x.Location, (string?)null), cancellationToken);
                 }
 
-                // Campaigns the person created: with no other active member they go (their matches follow the rules above);
-                // otherwise they stay with the members — under the chosen new manager or with management read-only — and a
-                // neutral title. Notes stay: any member may have written them.
-                var withMembers = activeMembers.Select(m => m.CampaignId).ToHashSet();
-                var alone = created.Where(id => !withMembers.Contains(id)).ToList();
-                if (alone.Count > 0) await _context.Campaigns.Where(c => alone.Contains(c.Id)).ExecuteDeleteAsync(cancellationToken);
-                foreach (var (campaignId, managerId) in campaignTransfers)
+                // Campaigns the person manages keep a manager while other active members remain: the one the person chose
+                // (checked again now) or the longest-standing active member. With nobody else active, the campaign goes
+                // (its matches follow the rules above). Members' rows are locked, so a successor cannot leave meanwhile.
+                // Authorship (CampaignMember.IsCreator) never moves; the status is kept.
+                var successorOf = new Dictionary<Guid, Guid>();
+                foreach (var campaignId in managed)
                 {
-                    await _context.Campaigns.Where(c => c.Id == campaignId).ExecuteUpdateAsync(s => s.SetProperty(c => c.CreatorId, managerId), cancellationToken);
-                    await _context.CampaignMembers.Where(m => m.CampaignId == campaignId && (m.UserId == userId || m.UserId == managerId))
-                        .ExecuteUpdateAsync(s => s.SetProperty(m => m.IsCreator, m => m.UserId == managerId), cancellationToken);
+                    var members = await _context.CampaignMembers.FromSqlInterpolated($"SELECT * FROM CampaignMembers WITH (UPDLOCK, ROWLOCK) WHERE CampaignId = {campaignId}")
+                        .AsNoTracking().ToListAsync(cancellationToken);
+                    var ids = members.Select(m => m.UserId).ToList();
+                    var gone = await _context.Users.Where(u => ids.Contains(u.Id) && u.DeletedAt != null).Select(u => u.Id).ToListAsync(cancellationToken);
+                    var successors = CampaignSuccession.Order(members.Where(m => m.UserId != userId && m.Status == CampaignMemberStatus.Accepted && !gone.Contains(m.UserId)));
+                    if (successors.Count == 0)
+                    {
+                        await _context.Campaigns.Where(c => c.Id == campaignId).ExecuteDeleteAsync(cancellationToken);
+                        continue;
+                    }
+                    Guid successor;
+                    if (campaignTransfers.TryGetValue(campaignId, out var chosen))
+                    {
+                        if (!successors.Any(m => m.UserId == chosen))
+                            throw new ArgumentException("O novo gestor escolhido já não é membro ativo desta campanha. Revê a escolha.");
+                        successor = chosen;
+                    }
+                    else successor = successors[0].UserId;
+                    await _context.Campaigns.Where(c => c.Id == campaignId).ExecuteUpdateAsync(s => s.SetProperty(c => c.CreatorId, successor), cancellationToken);
+                    successorOf[campaignId] = successor;
                 }
-                var kept = created.Where(withMembers.Contains).ToList();
-                if (kept.Count > 0) await _context.Campaigns.Where(c => kept.Contains(c.Id)).ExecuteUpdateAsync(s => s.SetProperty(c => c.Name, User.DeletedCampaignName), cancellationToken);
+                // The name of a campaign the person created was written by them: neutral title (D3). Notes stay (any member edits them).
+                await _context.Campaigns.Where(c => c.Members.Any(m => m.UserId == userId && m.IsCreator))
+                    .ExecuteUpdateAsync(s => s.SetProperty(c => c.Name, User.DeletedCampaignName), cancellationToken);
+                // Each new manager is told, with the campaign's name as it now stands (never the deleted person's own text).
+                var transferred = successorOf.Keys.ToList();
+                var successorNotices = (await _context.Campaigns.Where(c => transferred.Contains(c.Id))
+                        .Select(c => new { c.Name, Token = c.Creator!.ExpoPushToken }).ToListAsync(cancellationToken))
+                    .Where(n => !string.IsNullOrWhiteSpace(n.Token)).Select(n => new SuccessorNotice(n.Token!, n.Name)).ToList();
 
                 // Public resource links stay in the catalogue, no longer tied to the person.
                 await _context.GameResources.Where(r => r.SuggestedById == userId).ExecuteUpdateAsync(s => s.SetProperty(r => r.SuggestedById, (Guid?)null), cancellationToken);
@@ -274,7 +294,7 @@ namespace MeepleBoard.Infra.Data.Repositories
                 await _context.SaveChangesAsync(cancellationToken);
                 foreach (var gameId in games) await GameRepository.RecomputeMeepleBoardRating(_context, gameId, cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
-                return new AccountDeletionResult(games, photos.Distinct().ToList(), notify.Distinct().ToList());
+                return new AccountDeletionResult(games, photos.Distinct().ToList(), notify.Distinct().ToList(), successorNotices);
             });
         }
 
@@ -283,18 +303,23 @@ namespace MeepleBoard.Infra.Data.Repositories
             if (!await IsActiveAsync(userId, cancellationToken)) return null;
             var organized = await _context.GameSessions.AsNoTracking().Include(s => s.Players)
                 .Where(s => s.OrganizerId == userId && s.EndDate == null && !s.IsCancelled).ToListAsync(cancellationToken);
-            var campaigns = await _context.Campaigns.AsNoTracking().Where(c => c.CreatorId == userId)
-                .Select(c => new
-                {
-                    c.Id, c.Name, GameName = c.Game!.Name, HasNotes = c.Notes != null && c.Notes != "",
-                    Members = c.Members.Where(m => m.UserId != userId && m.Status == CampaignMemberStatus.Accepted && m.User!.DeletedAt == null)
-                        .OrderBy(m => m.RespondedAt).Select(m => new AccountDeletionMember(m.UserId, m.User!.UserName!)).ToList()
-                }).ToListAsync(cancellationToken);
+            // Campaigns the person manages, with the active members in succession order (the same rule as the deletion).
+            var campaigns = await _context.Campaigns.AsNoTracking().Include(c => c.Members).ThenInclude(m => m.User).Include(c => c.Game)
+                .Where(c => c.CreatorId == userId).ToListAsync(cancellationToken);
+            var withMembers = new List<AccountDeletionCampaign>();
+            foreach (var c in campaigns)
+            {
+                var successors = CampaignSuccession.Order(c.Members.Where(m => m.UserId != userId && m.Status == CampaignMemberStatus.Accepted && m.User?.DeletedAt == null));
+                if (successors.Count == 0) continue;
+                withMembers.Add(new AccountDeletionCampaign(c.Id, c.Name, c.Game?.Name, !string.IsNullOrEmpty(c.Notes),
+                    c.Members.Any(m => m.UserId == userId && m.IsCreator), successors[0].UserId,
+                    successors.Select(m => new AccountDeletionMember(m.UserId, m.User!.UserName!)).ToList()));
+            }
             return new AccountDeletionSummary(
                 organized.Count(s => s.Status == "Upcoming"),
                 organized.Count(s => s.Status is "Active" or "Closed"),
-                campaigns.Where(c => c.Members.Count > 0).Select(c => new AccountDeletionCampaign(c.Id, c.Name, c.GameName, c.HasNotes, c.Members)).ToList(),
-                campaigns.Count(c => c.Members.Count == 0));
+                withMembers,
+                campaigns.Count - withMembers.Count);
         }
 
         public async Task<int> ClearDeletedReporterTextAsync(DateTime deletedBefore, IReadOnlyCollection<Guid>? reporters = null, CancellationToken cancellationToken = default)
