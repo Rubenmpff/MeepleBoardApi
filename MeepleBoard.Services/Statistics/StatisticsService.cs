@@ -24,6 +24,8 @@ public sealed partial class StatisticsService(MeepleBoardDbContext db)
     public async Task<StatisticsMatchPage> Matches(Guid userId, StatisticsMatchesQuery query, CancellationToken ct)
     {
         if (query.Offset < 0 || query.Limit is < 1 or > 100) throw new ArgumentException("Paginação inválida.");
+        CompanyCalculator.ValidateContext(query.GroupContext);
+        if (!query.FriendId.HasValue && query.GroupContext != "all") throw new ArgumentException("Seleciona um amigo para filtrar o contexto de companhia.");
         if (query.FriendId.HasValue) return await CompanyMatches(userId, query, ct);
         StatisticsCalculator.MatchesMetric(new(Guid.Empty, Guid.Empty, "", null, DateTime.UtcNow, null, null, null, null, null, null), query.Metric);
         var filter = query.ToQuery(); var (rows, zone) = await Load(userId, filter, ct);

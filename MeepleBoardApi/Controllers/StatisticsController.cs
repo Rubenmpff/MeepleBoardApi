@@ -22,8 +22,8 @@ public sealed class StatisticsController(StatisticsService service) : Controller
         catch (ArgumentException e) { return BadRequest(new { message = e.Message }); }
     }
     [HttpGet("company")]
-    public async Task<IActionResult> Company([FromQuery] StatisticsQuery query, [FromQuery] Guid? friendId, CancellationToken ct) {
-        try { return Ok(await service.Company(User.GetUserId(), query, friendId, ct)); }
+    public async Task<IActionResult> Company([FromQuery] StatisticsQuery query, [FromQuery] Guid? friendId, CancellationToken ct, [FromQuery] string groupContext = "all") {
+        try { return Ok(await service.Company(User.GetUserId(), query, friendId, ct, groupContext)); }
         catch (UnauthorizedAccessException) { return Forbid(); }
         catch (ArgumentException e) { return BadRequest(new { message = e.Message }); }
     }

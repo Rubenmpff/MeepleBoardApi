@@ -1,7 +1,7 @@
 namespace MeepleBoard.Services.Statistics;
 
 public sealed record Companion(Guid FriendId, string Name, int Matches);
-public sealed record PairRow(StatisticsRow Own, int? FriendScore, string? FriendOutcome, bool OtherWin, bool OtherDraw);
+public sealed record PairRow(StatisticsRow Own, int? FriendScore, string? FriendOutcome, bool OtherWin, bool OtherDraw, int? ParticipantCount = null);
 public sealed record PairResults(int MyWins, int FriendWins, int SharedWins, int MyOnlyWins, int FriendOnlyWins,
  int Draws, int DrawsTogether, int OtherWins, int OtherSharedWins, int OtherDraws, int TeamWins, int TeamLosses, int TeamDraws, int Known, int Unknown);
 public sealed record PairBucket(string Key, int Matches, PairResults Results);
@@ -10,7 +10,11 @@ public sealed record PairGame(Guid GameId, string Name, string? ImageUrl, string
  int CompleteScores, IReadOnlyList<ScoreComparison> Scores);
 public sealed record CompanyReport(Guid? FriendId, string? FriendName, int Matches, PairResults Results,
  IReadOnlyList<Companion> Companions, IReadOnlyList<StatisticsGame> Games, IReadOnlyList<PairGame> Comparisons,
- IReadOnlyList<PairBucket> Evolution);
+ IReadOnlyList<PairBucket> Evolution) {
+ public string GroupContext { get; init; } = "all";
+ public PairContextCounts ContextCounts { get; init; } = new(0, 0, 0, 0);
+}
+public sealed record PairContextCounts(int All, int OnlyTwo, int Group, int Unclassified);
 public sealed record ExploreGame(Guid GameId, string Name, string? ImageUrl, string Mode, int Matches,
  StatisticsResults Results, int Scored, int? Minimum, int? Maximum, double? AverageScore,
  int Rated, double? AverageRating, DateTime FirstRecorded);
@@ -28,6 +32,12 @@ public sealed record YearReport(int Year, string TimeZone, StatisticsSummary Sum
 
 public static class CompanyCalculator
 {
+ public static string ValidateContext(string context) => context is "all" or "only-two" or "group" ? context : throw new ArgumentException("Contexto de companhia inválido.");
+ public static bool InContext(PairRow pair, string context) => ValidateContext(context) switch {
+  "only-two" => pair.ParticipantCount == 2, "group" => pair.ParticipantCount >= 3, _ => true
+ };
+ public static PairContextCounts ContextCounts(IReadOnlyList<PairRow> rows) => new(rows.Count,
+  rows.Count(p => p.ParticipantCount == 2), rows.Count(p => p.ParticipantCount >= 3), rows.Count(p => p.ParticipantCount == null || p.ParticipantCount < 2));
  public static string Category(PairRow pair) {
   var r = pair.Own; var mine = StatisticsCalculator.Outcome(r);
   var other = r.Result is "Win" or "Loss" or "Draw" && pair.FriendOutcome is "Win" or "Loss" or "Draw" ? pair.FriendOutcome : null;

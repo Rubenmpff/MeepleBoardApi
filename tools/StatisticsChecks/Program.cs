@@ -60,3 +60,17 @@ Check(pairs.All(p=>CompanyCalculator.Matches(p,"paired-scores")),"paired scores 
 Reject(()=>CompanyCalculator.Matches(pairs[0],"invented"),"invalid pair metric rejected");
 
 Check(CompanyCalculator.Results([Pair("COMPETITIVE","Win","Win","Loss",true)]).OtherSharedWins==1,"another participant can share a win with one of us without being counted as the sole winner");
+
+var contextRows = new List<PairRow> {
+ new(rows[0], 0, "Win", false, false, 2),
+ new(rows[1], -5, "Draw", false, false, 3),
+ new(rows[7], null, null, false, false, 4),
+ new(rows[6], null, null, false, false, null)
+};
+var distribution = CompanyCalculator.ContextCounts(contextRows);
+Check(distribution == new PairContextCounts(4,1,2,1), "registered participant contexts partition the sample without guessing missing counts");
+Check(contextRows.Count(p=>CompanyCalculator.InContext(p,"only-two"))==1, "only two excludes every third participant regardless of winners");
+var groupRows=contextRows.Where(p=>CompanyCalculator.InContext(p,"group")).ToList();
+Check(groupRows.Count==2 && CompanyCalculator.Results(groupRows).Unknown==1, "group retains legacy/unknown results in sample and out of known results");
+Check(contextRows.Count(p=>CompanyCalculator.InContext(p,"all"))==4, "all preserves unclassified historical rows");
+Reject(()=>CompanyCalculator.InContext(contextRows[0],"invented"), "invalid group context rejected even before aggregation");

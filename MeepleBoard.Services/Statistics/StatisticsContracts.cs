@@ -13,6 +13,7 @@ public sealed class StatisticsMatchesQuery : StatisticsQueryBase
     public string Metric { get; set; } = "all";
     public string? Bucket { get; set; }
     public Guid? FriendId { get; set; }
+    public string GroupContext { get; set; } = "all";
     public int? ScoreValue { get; set; }
     public int Offset { get; set; }
     public int Limit { get; set; } = 25;

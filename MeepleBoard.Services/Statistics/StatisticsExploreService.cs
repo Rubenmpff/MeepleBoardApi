@@ -19,9 +19,10 @@ public sealed partial class StatisticsService
    && ((f.UserAId == userId && f.UserBId == friendId) || (f.UserBId == userId && f.UserAId == friendId)), ct))
    throw new UnauthorizedAccessException("Esta comparação só está disponível para amigos aceites.");
  }
- private async Task<List<Companion>> Companions(Guid userId, StatisticsQuery query, CancellationToken ct) {
+ private async Task<List<Companion>> Companions(Guid userId, StatisticsQuery query, CancellationToken ct, string groupContext = "all") {
   var friends = await AcceptedFriends(userId, ct); var own = OwnMatches(userId, query);
-  var counts = await db.MatchPlayers.AsNoTracking().Where(p => friends.Contains(p.UserId) && own.Contains(p.MatchId))
+  var counts = await db.MatchPlayers.AsNoTracking().Where(p => friends.Contains(p.UserId) && own.Contains(p.MatchId)
+    && (groupContext == "all" || (groupContext == "only-two" ? p.Match!.MatchPlayers.Select(x => x.UserId).Distinct().Count() == 2 : p.Match!.MatchPlayers.Select(x => x.UserId).Distinct().Count() >= 3)))
    .GroupBy(p => p.UserId).Select(g => new { Id = g.Key, Matches = g.Select(p => p.MatchId).Distinct().Count() }).ToListAsync(ct);
   // «Com quem jogaste»: only friends with at least one shared match under the selected filters.
   var played = counts.Select(c => c.Id).ToList();
@@ -34,16 +35,20 @@ public sealed partial class StatisticsService
   var (ownRows, zone) = await Load(userId, query, ct); var own = OwnMatches(userId, query);
   var partners = await db.MatchPlayers.AsNoTracking().Where(p => p.UserId == friendId && own.Contains(p.MatchId))
    .Select(p => new { p.MatchId, p.Score, p.Outcome,
+    ParticipantCount = p.Match!.MatchPlayers.Select(x => x.UserId).Distinct().Count(),
     OtherWin = p.Match!.MatchPlayers.Any(x => x.UserId != userId && x.UserId != friendId && x.Outcome == "Win"),
     OtherDraw = p.Match.MatchPlayers.Any(x => x.UserId != userId && x.UserId != friendId && x.Outcome == "Draw") }).ToListAsync(ct);
   var lookup = ownRows.ToDictionary(r => r.MatchId);
-  return (partners.Select(p => new PairRow(lookup[p.MatchId], p.Score, p.Outcome, p.OtherWin, p.OtherDraw)).DistinctBy(p => p.Own.MatchId).ToList(), zone);
+  return (partners.Select(p => new PairRow(lookup[p.MatchId], p.Score, p.Outcome, p.OtherWin, p.OtherDraw, p.ParticipantCount)).DistinctBy(p => p.Own.MatchId).ToList(), zone);
  }
- public async Task<CompanyReport> Company(Guid userId, StatisticsQuery query, Guid? friendId, CancellationToken ct) {
+ public async Task<CompanyReport> Company(Guid userId, StatisticsQuery query, Guid? friendId, CancellationToken ct, string groupContext = "all") {
   StatisticsCalculator.Validate(query);
-  var companions = await Companions(userId, query, ct);
-  if (!friendId.HasValue) return new(null, null, 0, CompanyCalculator.Results([]), companions, [], [], []);
+  CompanyCalculator.ValidateContext(groupContext);
+  var companions = await Companions(userId, query, ct, groupContext);
+  if (!friendId.HasValue) return new(null, null, 0, CompanyCalculator.Results([]), companions, [], [], []) { GroupContext = groupContext };
   var (rows, zone) = await Pairs(userId, friendId.Value, query, ct);
+  var counts = CompanyCalculator.ContextCounts(rows);
+  rows = rows.Where(p => CompanyCalculator.InContext(p, groupContext)).ToList();
   var name = await db.Users.Where(u => u.Id == friendId).Select(u => u.UserName).SingleAsync(ct);
   var games = rows.GroupBy(p => new { p.Own.GameId, Mode = StatisticsCalculator.Mode(p.Own) }).Select(g => {
    var sample = g.ToList(); var first = sample[0].Own;
@@ -55,13 +60,14 @@ public sealed partial class StatisticsService
    return new PairBucket(b.Key, sample.Count, CompanyCalculator.Results(sample));
   }).ToList();
   return new(friendId, name, rows.Count, CompanyCalculator.Results(rows), companions,
-   StatisticsCalculator.Games(rows.Select(p => p.Own)), games, buckets);
+   StatisticsCalculator.Games(rows.Select(p => p.Own)), games, buckets) { GroupContext = groupContext, ContextCounts = counts };
  }
  private async Task<StatisticsMatchPage> CompanyMatches(Guid userId, StatisticsMatchesQuery query, CancellationToken ct) {
+  CompanyCalculator.ValidateContext(query.GroupContext);
   var (rows, zone) = await Pairs(userId, query.FriendId!.Value, query.ToQuery(), ct);
   // Validate even for empty samples.
   if (!CompanyCalculator.Metrics.Contains(query.Metric) && query.Metric != "all") throw new ArgumentException("Indicador inválido.");
-  var result = rows.Where(p => CompanyCalculator.Matches(p, query.Metric == "all" ? "pair-all" : query.Metric))
+  var result = rows.Where(p => CompanyCalculator.InContext(p, query.GroupContext)).Where(p => CompanyCalculator.Matches(p, query.Metric == "all" ? "pair-all" : query.Metric))
    .Where(p => query.Bucket == null || StatisticsCalculator.Bucket(p.Own, query.ToQuery(), zone) == query.Bucket)
    .OrderByDescending(p => p.Own.MatchDate).ThenBy(p => p.Own.MatchId).ToList();
   return new(result.Count, query.Offset, query.Limit, result.Skip(query.Offset).Take(query.Limit).Select(p => {
