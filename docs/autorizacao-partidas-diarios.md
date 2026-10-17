@@ -82,3 +82,17 @@ As leituras do catálogo (`GET /game`, rankings, sugestões, ficha do jogo) cont
 
 - `tests/Authorization.Tests`: 99 testes HTTP e 1 verificação offline. Inclui as rotas das experiências: 7 recusadas a visitantes, a moderação recusada a contas sem perfil de administrador, e as regras de participante com o `ExperienceService` real (só os jogadores da partida gerem a publicação, cada um a sua; partida inexistente dá 404; retirar não muda a avaliação).
 - Em DeviceTests, os mesmos pedidos anónimos dão agora 401. Os verificadores `verify-ratings-experiences`, `verify-game-page` e `verify-durations` passam.
+
+## Fluxos legítimos das contas — verificados a 2026-10-17
+
+`tools/DeviceTestApi/verify-account-flows.cjs` corre com tokens reais e não altera dados.
+
+| Fluxo | Resultado |
+| --- | --- |
+| Registo, recuperação e confirmação (`AuthController`) | Funcionam sem sessão. Um pedido inválido dá 400, nunca 401. |
+| Conta própria: `GET /users/me`, `PATCH me/library-privacy`, `PATCH me/duration-sharing`, `POST push-token` | Abertos a qualquer conta autenticada. Um visitante recebe 401. |
+| Leituras que a app faz (34, incluindo as estatísticas com os parâmetros da app) | Todas dão 200 com uma conta normal. |
+| Contas alheias: listar, consultar, editar, apagar; criar jogos | 403 para uma conta normal; o administrador consulta. |
+| Ecrãs de administração (experiências e recursos) | 200 para administradores, 403 para os restantes. |
+
+A app **não tem** edição do próprio perfil, envio de fotografia nem eliminação da própria conta: não há ecrã nem chamada. A fotografia vem do fornecedor de login externo. Antes de 2026-10-16, a única forma de editar ou apagar uma conta era `PUT`/`DELETE /users/{id}`, aberta a qualquer visitante e sobre qualquer conta. A app nunca a usou, por isso as restrições não bloquearam nenhum fluxo existente. A eliminação pela própria pessoa seria uma funcionalidade nova e fica para decisão.
