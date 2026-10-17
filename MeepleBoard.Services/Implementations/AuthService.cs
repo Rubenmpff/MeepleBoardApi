@@ -80,7 +80,7 @@ namespace MeepleBoard.Services.Implementations
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Error registering user {user.Email}: {ex.Message}");
+                _logger.LogError(ex, "Error registering a user.");
                 return AuthenticationFailed("An error occurred during registration. Please try again later.");
             }
         }
@@ -98,7 +98,7 @@ namespace MeepleBoard.Services.Implementations
             if (!user.EmailConfirmed)
                 return AuthenticationFailed("Please confirm your email before logging in.");
 
-            _logger.LogInformation($"User {user.Id} ({user.Email}) logging in from device: {deviceInfo}");
+            _logger.LogInformation("User {UserId} logging in.", user.Id);
 
             var tokenResult = await _tokenService.GenerateTokensAsync(user, deviceInfo); 
             var userDto = _mapper.Map<UserDto>(user);
