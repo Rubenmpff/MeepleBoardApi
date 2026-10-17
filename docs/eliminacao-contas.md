@@ -57,10 +57,12 @@ Depois confirma:
 - que a conta já não se encontra na pesquisa e não tem email;
 - que o jogador anónimo continua na partida;
 - que a denúncia continua a contar;
+- que um token e um refresh token emitidos antes da eliminação deixam de dar acesso;
+- que a conta deixa de contribuir para a duração da comunidade, enquanto o outro jogador mantém a partida e a duração;
 - que as médias voltam ao valor inicial no fim.
 
 ## Limitações conhecidas
 
-- **Token de acesso já emitido.** Continua válido até expirar (`Jwt:ExpiryHours`, 24 h). A conta não tem dados nem sessão nova, mas, com esse token, ainda pode chamar a API até lá. A correção proposta é recusar o token em `JwtBearerEvents.OnTokenValidated` quando `DeletedAt` está preenchido. Custa uma consulta por chave primária em cada pedido autenticado, por isso fica para decisão.
+- **Token de acesso já emitido** (resolvido a 2026-10-17): cada pedido autenticado confirma que a conta existe e não foi eliminada (`JwtBearerEvents.OnTokenValidated`, uma consulta por chave primária). Um token anterior à eliminação dá 401, e o refresh token anterior não renova, porque foi apagado com a conta. O verificador testa-o e falha sem a correção.
 - **Nome da conta eliminada.** Está guardado em português (`Conta eliminada …`). Em inglês aparece igual.
 - **Pedido de eliminação pela própria pessoa.** A app ainda não o tem. Hoje só um administrador elimina contas.

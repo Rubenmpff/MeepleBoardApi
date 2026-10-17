@@ -1,4 +1,5 @@
 ﻿using MeepleBoard.Domain.Entities;
+using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Infra.Data.Context;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
@@ -50,6 +51,18 @@ namespace MeepleBoard.CrossCutting.Security
                     ValidAudience = configuration["Jwt:Audience"],
                     IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
                     ClockSkew = TimeSpan.Zero
+                };
+                options.Events = new JwtBearerEvents
+                {
+                    // A token issued before the account was deleted (anonymised) gives no access: checked on every
+                    // authenticated request, one lookup by primary key. Its refresh tokens were removed with the account.
+                    OnTokenValidated = async context =>
+                    {
+                        var id = context.Principal?.FindFirst("sub")?.Value ?? context.Principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                        var users = context.HttpContext.RequestServices.GetRequiredService<IUserRepository>();
+                        if (!Guid.TryParse(id, out var userId) || !await users.IsActiveAsync(userId, context.HttpContext.RequestAborted))
+                            context.Fail("A conta não existe ou foi eliminada.");
+                    }
                 };
             });
 

@@ -144,6 +144,9 @@ namespace MeepleBoard.Infra.Data.Repositories
             return await _context.SaveChangesAsync(cancellationToken);
         }
 
+        public Task<bool> IsActiveAsync(Guid userId, CancellationToken cancellationToken = default)
+            => _context.Users.AsNoTracking().AnyAsync(u => u.Id == userId && u.DeletedAt == null, cancellationToken);
+
         public Task<bool> ContributesDurationStatsAsync(Guid userId, CancellationToken cancellationToken = default)
             => _context.Users.AsNoTracking().Where(u => u.Id == userId).Select(u => u.ContributesDurationStats).FirstOrDefaultAsync(cancellationToken);
 

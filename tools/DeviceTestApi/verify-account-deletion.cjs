@@ -22,7 +22,8 @@ const MARK = 'Verificação de eliminação de conta';
     if (r.status !== 200 && name === 'eliminar') { console.log('SKIP «eliminar» was deleted by an earlier run; restart the DeviceTests host to recreate it.'); process.exit(0); }
     assert.equal(r.status, 200, 'login ' + name);
     const a = accounts.find(x => x.Email === name + '@meepleboard.test');
-    return { name, id: a.Id, token: (await r.json()).token };
+    const body = await r.json();
+    return { name, id: a.Id, token: body.token, refresh: body.refreshToken };
   };
   const call = async (u, method, route, body, expected) => {
     const r = await fetch(base + '/MeepleBoard' + route, { method, headers: { Authorization: `Bearer ${u.token}`, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
@@ -47,7 +48,9 @@ const MARK = 'Verificação de eliminação de conta';
   assert.ok((await call(A, 'GET', '/friendships', null, 200) || []).some(f => (f.id ?? f.userId) === X.id), 'friends before the deletion');
   await call(X, 'POST', `/users/${X.id}/games`, { gameId: G.id, gameName: G.name, status: 1 }, 201);
   const m = await call(A, 'POST', '/matches', { gameId: G.id, gameName: G.name, matchDate: new Date(Date.now() - 3600e3).toISOString(), isSoloGame: false,
-    playerIds: [A.id, X.id], gameMode: 'COMPETITIVE', result: 'Undefined', resultPlayerIds: [], durationMethod: 'Unknown', scoreSummary: MARK, personalRating: 7 }, 201);
+    playerIds: [A.id, X.id], gameMode: 'COMPETITIVE', result: 'Undefined', resultPlayerIds: [], durationInMinutes: 60, durationMethod: 'Measured', scoreSummary: MARK, personalRating: 7 }, 201);
+  await call(X, 'PATCH', '/users/me/duration-sharing', { enabled: true }, 204);
+  assert.equal((await call(admin, 'GET', `/users/${X.id}`, null, 200)).contributesDurationStats, true, 'shares durations before the deletion');
   await call(X, 'PUT', `/campaigns/matches/${m.id}/journal`, { personalRating: 9, notes: 'PRIVADO_ELIMINAR' }, 200);
   await call(A, 'PUT', `/campaigns/matches/${m.id}/journal/publication`, { showRating: true, comment: 'Comentário do autor para a verificação', publishComment: true }, 200);
   await call(X, 'PUT', `/campaigns/matches/${m.id}/journal/publication`, { showRating: true, comment: 'Comentário que deve desaparecer', publishComment: true }, 200);
@@ -66,6 +69,14 @@ const MARK = 'Verificação de eliminação de conta';
   pass('an account with activity is deleted by an administrator (other accounts 403; a second time 404)');
 
   // 3. What goes.
+  // A token and a refresh token issued before the deletion give no access.
+  const old = { ...X, name: 'eliminar (token anterior)' };
+  await call(old, 'GET', '/users/me', null, 401);
+  await call(old, 'GET', '/matches/pending-journal', null, 401);
+  await call(old, 'POST', '/matches', { gameId: G.id, gameName: G.name, matchDate: new Date().toISOString(), isSoloGame: true, playerIds: [X.id], scoreSummary: MARK }, 401);
+  const renewed = await fetch(base + '/MeepleBoard/auth/refresh-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken: X.refresh }) });
+  assert.notEqual(renewed.status, 200, 'the refresh token issued before the deletion is not renewed');
+  pass(`a token issued before the deletion is refused (401 on reading, on its own profile and on writing) and its refresh token is not renewed (${renewed.status})`);
   assert.notEqual((await signIn('eliminar')).status, 200, 'the deleted account can no longer sign in');
   const shared = await call(A, 'GET', `/matches/${m.id}`, null, 200);
   const ghost = shared.players.find(p => p.userId === X.id);
@@ -81,6 +92,10 @@ const MARK = 'Verificação de eliminação de conta';
   assert.ok(!JSON.stringify(found).includes(X.id), 'a deleted account is not found in people search');
   const user = await call(admin, 'GET', `/users/${X.id}`, null, 200);
   assert.ok(!user.email && !user.profilePictureUrl, 'no email or picture left');
+  assert.equal(user.contributesDurationStats, false, 'no longer contributes to community durations');
+  assert.equal(shared.durationInMinutes, 60, 'the other player keeps the match and its duration');
+  assert.ok(shared.players.some(p => p.userId === A.id), 'the other player is still in it');
+  pass('the deleted account no longer contributes to community durations (a match counts only when every participant shares); the other player keeps the match and its 60 min');
   pass('sign-in closed; diary, note, rating and publication gone; friendship gone; not searchable; no email; the shared match keeps «' + ghost.userName + '»');
 
   // 4. What stays: the report still counts, without naming anyone.

@@ -46,6 +46,9 @@ namespace MeepleBoard.Domain.Interfaces
         // Não carrega a entidade — é um UPDATE direto, só quando o valor está desatualizado.
         Task TouchLastActiveAsync(Guid userId, CancellationToken cancellationToken = default);
 
+        /// <summary>Whether the account exists and was not deleted: checked on every authenticated request.</summary>
+        Task<bool> IsActiveAsync(Guid userId, CancellationToken cancellationToken = default);
+
         /// <summary>Only the duration-sharing preference (false for an unknown account), without loading the account.</summary>
         Task<bool> ContributesDurationStatsAsync(Guid userId, CancellationToken cancellationToken = default);
     }
