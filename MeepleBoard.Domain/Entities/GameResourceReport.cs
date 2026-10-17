@@ -41,6 +41,8 @@ namespace MeepleBoard.Domain.Entities
         {
             if (ResolvedAt != null) return;
             ResolvedAt = DateTime.UtcNow; ResolvedById = administratorId;
+            // A report by a deleted account keeps its free text only while open (docs/proposta-eliminacao-conta.md, D6).
+            if (User?.DeletedAt != null) Comment = null;
         }
     }
 }

@@ -34,6 +34,7 @@ namespace MeepleBoard.Domain.Entities
         [MaxLength(16)] public string? Outcome { get; private set; }
         public bool IsOpen => ResolvedAt == null;
 
-        public void Resolve(Guid? administratorId, string outcome) { ResolvedAt = DateTime.UtcNow; ResolvedById = administratorId; Outcome = outcome; }
+        // A report by a deleted account keeps its free text only while open (docs/proposta-eliminacao-conta.md, D6).
+        public void Resolve(Guid? administratorId, string outcome) { ResolvedAt = DateTime.UtcNow; ResolvedById = administratorId; Outcome = outcome; if (Reporter?.DeletedAt != null) Detail = null; }
     }
 }

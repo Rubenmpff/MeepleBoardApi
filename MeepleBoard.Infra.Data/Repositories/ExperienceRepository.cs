@@ -11,7 +11,7 @@ namespace MeepleBoard.Infra.Data.Repositories
             => context.MatchExperiencePublications.FirstOrDefaultAsync(p => p.JournalEntryId == journalEntryId, ct);
 
         public Task<MatchExperiencePublication?> GetWithReportsForUpdateAsync(Guid publicationId, CancellationToken ct = default)
-            => context.MatchExperiencePublications.Include(p => p.JournalEntry).Include(p => p.Reports)
+            => context.MatchExperiencePublications.Include(p => p.JournalEntry).Include(p => p.Reports).ThenInclude(r => r.Reporter)
                 .FirstOrDefaultAsync(p => p.Id == publicationId, ct);
 
         public Task<int> CountPublishedSinceAsync(Guid userId, DateTime since, CancellationToken ct = default)

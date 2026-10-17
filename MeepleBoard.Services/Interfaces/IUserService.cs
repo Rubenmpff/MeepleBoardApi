@@ -1,3 +1,4 @@
+using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Domain.Enums;
 using MeepleBoard.Services.DTOs;
 
@@ -10,7 +11,11 @@ namespace MeepleBoard.Services.Interfaces
         Task<IEnumerable<UserDto>> GetAllAsync(CancellationToken cancellationToken = default);
         Task AddAsync(UserDto userDto, CancellationToken cancellationToken = default);
         Task UpdateAsync(UserDto userDto, CancellationToken cancellationToken = default);
-        Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+        /// <summary>Deletes (anonymises) an account; campaignTransfers maps campaigns the person created to their new manager.</summary>
+        Task DeleteAsync(Guid id, IReadOnlyDictionary<Guid, Guid>? campaignTransfers = null, CancellationToken cancellationToken = default);
+
+        /// <summary>What deleting the account would affect; null for an unknown or deleted account.</summary>
+        Task<AccountDeletionSummary?> GetDeletionSummaryAsync(Guid id, CancellationToken cancellationToken = default);
         Task<UserDto> GetUserStatisticsAsync(Guid userId, CancellationToken cancellationToken = default);
 
         Task UpdatePushTokenAsync(Guid userId, string expoPushToken, CancellationToken cancellationToken = default);

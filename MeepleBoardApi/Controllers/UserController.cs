@@ -51,6 +51,43 @@ namespace MeepleBoardApi.Controllers
             return user is null ? NotFound() : Ok(user);
         }
 
+        public sealed record CampaignTransferRequest(Guid CampaignId, Guid NewManagerId);
+        public sealed record DeleteOwnAccountRequest(string? Password, List<CampaignTransferRequest>? CampaignTransfers);
+
+        /// <summary>What deleting one's own account would affect: sessions organized and campaigns created with other members.</summary>
+        [Authorize]
+        [HttpGet("me/deletion-summary")]
+        public async Task<ActionResult> GetDeletionSummary(CancellationToken cancellationToken)
+        {
+            if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)) return Unauthorized();
+            var summary = await _userService.GetDeletionSummaryAsync(userId, cancellationToken);
+            return summary is null ? NotFound() : Ok(summary);
+        }
+
+        /// <summary>
+        /// Deletes the signed-in account, confirmed with its password (docs/proposta-eliminacao-conta.md in the app).
+        /// 204 deleted; 400 wrong password or invalid new manager; 429 locked after repeated failures (Identity lockout).
+        /// </summary>
+        [Authorize]
+        [HttpDelete("me")]
+        public async Task<ActionResult> DeleteOwnAccount([FromBody] DeleteOwnAccountRequest request, [FromServices] IAccountDeletionService deletion, CancellationToken cancellationToken)
+        {
+            if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)) return Unauthorized();
+            var transfers = request?.CampaignTransfers ?? [];
+            if (transfers.GroupBy(t => t.CampaignId).Any(g => g.Count() > 1)) return BadRequest(new { message = "Escolhe um só gestor por campanha." });
+            try
+            {
+                return await deletion.DeleteOwnAsync(userId, request?.Password, transfers.ToDictionary(t => t.CampaignId, t => t.NewManagerId), cancellationToken) switch
+                {
+                    OwnAccountDeletionOutcome.Deleted => NoContent(),
+                    OwnAccountDeletionOutcome.WrongPassword => BadRequest(new { message = "Palavra-passe incorreta." }),
+                    OwnAccountDeletionOutcome.LockedOut => StatusCode(StatusCodes.Status429TooManyRequests, new { message = "Demasiadas tentativas. Tenta novamente daqui a alguns minutos." }),
+                    _ => NotFound(),
+                };
+            }
+            catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
+        }
+
         /// <summary>
         /// Regista ou atualiza o Expo Push Token do utilizador autenticado.
         /// Chamado automaticamente quando a app abre.
@@ -102,7 +139,7 @@ namespace MeepleBoardApi.Controllers
         {
             if (id == Guid.Empty) return BadRequest("O ID do usuário não pode ser vazio.");
             // Anonymises the account (see UserService.DeleteAsync); an account already deleted is not found.
-            try { await _userService.DeleteAsync(id, cancellationToken); }
+            try { await _userService.DeleteAsync(id, cancellationToken: cancellationToken); }
             catch (KeyNotFoundException) { return NotFound("Usuário não encontrado."); }
             return NoContent();
         }

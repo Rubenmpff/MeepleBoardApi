@@ -32,12 +32,21 @@ namespace MeepleBoard.Domain.Interfaces
         Task<int> UpdateAsync(User user, CancellationToken cancellationToken = default);
 
         /// <summary>
-        /// Deletes an account by anonymising it, all or nothing in one transaction: personal data, sign-in, library,
-        /// friendships, pending invitations and the person's diary (notes, photos, ratings, publications) go; shared
-        /// matches, sessions and campaigns keep the anonymised player. Games whose MeepleBoard rating counted the
-        /// person are recalculated inside the same transaction.
+        /// Deletes an account by anonymising it, all or nothing in one transaction (docs/proposta-eliminacao-conta.md in the app):
+        /// personal data, sign-in, library, friendships, pending invitations and the person's diary (notes, photos, ratings,
+        /// publications) go; matches nobody else active played go; shared matches keep the anonymised player and their
+        /// structured data but lose the person's free text; sessions they organize are cancelled or ended, with a neutral
+        /// title and no place; campaigns they created go when nobody else is active, otherwise stay under the chosen new
+        /// manager (or with management read-only) with a neutral title. Recalculates the games whose rating counted.
+        /// Throws ArgumentException for a new manager who is not an active member of a campaign the person created.
         /// </summary>
-        Task<AccountDeletionResult> AnonymizeAsync(Guid userId, string deletedUserName, CancellationToken cancellationToken = default);
+        Task<AccountDeletionResult> AnonymizeAsync(Guid userId, string deletedUserName, IReadOnlyDictionary<Guid, Guid>? campaignTransfers = null, CancellationToken cancellationToken = default);
+
+        /// <summary>What deleting the account would affect, for the confirmation screen; null for an unknown or deleted account.</summary>
+        Task<AccountDeletionSummary?> GetDeletionSummaryAsync(Guid userId, CancellationToken cancellationToken = default);
+
+        /// <summary>Clears the free text of reports made by accounts deleted on or before the given time (retention limit).</summary>
+        Task<int> ClearDeletedReporterTextAsync(DateTime deletedBefore, IReadOnlyCollection<Guid>? reporters = null, CancellationToken cancellationToken = default);
 
         // 🔹 Salva as mudanças no banco
         Task<int> CommitAsync(CancellationToken cancellationToken = default);
@@ -53,6 +62,11 @@ namespace MeepleBoard.Domain.Interfaces
         Task<bool> ContributesDurationStatsAsync(Guid userId, CancellationToken cancellationToken = default);
     }
 
-    /// <summary>What an account deletion left to do outside the database: photos to remove from storage.</summary>
-    public sealed record AccountDeletionResult(IReadOnlyList<Guid> RecalculatedGameIds, IReadOnlyList<string> PhotoUrls);
+    /// <summary>What an account deletion left to do outside the database: photos to remove from storage and the push
+    /// tokens of guests whose session was cancelled.</summary>
+    public sealed record AccountDeletionResult(IReadOnlyList<Guid> RecalculatedGameIds, IReadOnlyList<string> PhotoUrls, IReadOnlyList<string> CancelledSessionGuestTokens);
+
+    public sealed record AccountDeletionMember(Guid Id, string UserName);
+    public sealed record AccountDeletionCampaign(Guid Id, string Name, string? GameName, bool HasNotes, IReadOnlyList<AccountDeletionMember> Members);
+    public sealed record AccountDeletionSummary(int ScheduledSessions, int RunningSessions, IReadOnlyList<AccountDeletionCampaign> CampaignsWithMembers, int CampaignsOnlyYours);
 }

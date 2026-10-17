@@ -145,6 +145,8 @@ namespace MeepleBoard.CrossCutting.IoC
                 IUserService,
                 UserService>();
 
+            services.AddScoped<IAccountDeletionService, AccountDeletionService>();
+
             services.AddScoped<
                 IGameService,
                 GameService>();
@@ -266,6 +268,7 @@ namespace MeepleBoard.CrossCutting.IoC
 
             services.AddScoped<SessionCleanupJob>();
             services.AddScoped<SessionAutoCloseJob>();
+            services.AddScoped<PhotoDeletionJob>();
 
             services.AddScoped<MatchCleanupJob>();
 

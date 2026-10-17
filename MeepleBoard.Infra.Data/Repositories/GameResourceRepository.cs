@@ -40,7 +40,7 @@ namespace MeepleBoard.Infra.Data.Repositories
                 .ToListAsync(ct);
 
         public Task<GameResourceReport?> GetReportForUpdateAsync(Guid id, CancellationToken ct = default) =>
-            _context.GameResourceReports.FirstOrDefaultAsync(r => r.Id == id, ct);
+            _context.GameResourceReports.Include(r => r.User).FirstOrDefaultAsync(r => r.Id == id, ct);
 
         public async Task AddAsync(GameResource resource, CancellationToken ct = default) => await _context.GameResources.AddAsync(resource, ct);
 

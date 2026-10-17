@@ -119,6 +119,43 @@ namespace MeepleBoard.Services.Implementations
         }
 
         /// <summary>
+        /// Envia a ligação de uso único para confirmar a eliminação da conta (pedido feito pelo apoio).
+        /// </summary>
+        public async Task SendAccountDeletionLinkAsync(string clientEmail, string clientName, string confirmationLink)
+        {
+            ValidateRecipient(clientEmail, clientName);
+            if (string.IsNullOrWhiteSpace(confirmationLink))
+                throw new ArgumentException("O link de confirmação não pode ser vazio.", nameof(confirmationLink));
+            var name = System.Net.WebUtility.HtmlEncode(clientName);
+            var email = CreateEmail(clientEmail, clientName, "Eliminar a tua conta - MeepleBoard",
+                $"""
+                <p>Olá {name},</p>
+                <p>Recebemos um pedido para eliminar a tua conta MeepleBoard. Para confirmar, abre a ligação abaixo e escolhe «Eliminar conta». Só funciona uma vez e durante 24 horas.</p>
+                <p><a href="{confirmationLink}" target="_blank" rel="noopener noreferrer">Confirmar a eliminação</a></p>
+                <p>Se não fizeste este pedido, ignora este email: a conta continua ativa.</p>
+                <p>MeepleBoard</p>
+                """);
+            await SendEmailAsync(email, "Email de eliminação de conta", clientEmail);
+        }
+
+        /// <summary>
+        /// Confirma que a conta foi eliminada.
+        /// </summary>
+        public async Task SendAccountDeletedAsync(string clientEmail, string clientName)
+        {
+            ValidateRecipient(clientEmail, clientName);
+            var name = System.Net.WebUtility.HtmlEncode(clientName);
+            var email = CreateEmail(clientEmail, clientName, "Conta eliminada - MeepleBoard",
+                $"""
+                <p>Olá {name},</p>
+                <p>A tua conta MeepleBoard foi eliminada. O acesso terminou e os teus dados foram apagados ou anonimizados como descrito na política de privacidade. Algumas cópias técnicas (cópias de segurança e registos de fornecedores) só desaparecem no fim do respetivo prazo.</p>
+                <p>Este é o último email que te enviamos.</p>
+                <p>MeepleBoard</p>
+                """);
+            await SendEmailAsync(email, "Email de conta eliminada", clientEmail);
+        }
+
+        /// <summary>
         /// Cria a mensagem a enviar através da Brevo.
         /// </summary>
         private SendSmtpEmail CreateEmail(

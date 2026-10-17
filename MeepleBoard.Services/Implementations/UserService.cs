@@ -5,6 +5,8 @@ using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Services.DTOs;
 using MeepleBoard.Services.ExternalServices.Interfaces;
 using MeepleBoard.Services.Interfaces;
+using Hangfire;
+using MeepleBoard.Services.Job;
 using Microsoft.Extensions.Logging;
 
 namespace MeepleBoard.Services.Implementations
@@ -17,10 +19,17 @@ namespace MeepleBoard.Services.Implementations
 
         private readonly IPhotoStorageService? _photoStorageService;
         private readonly ILogger<UserService>? _logger;
+        private readonly INotificationService? _notifications;
+        private readonly IBackgroundJobClient? _backgroundJobs;
+        // Waits between immediate storage attempts; a test may shorten them.
+        public static TimeSpan[] PhotoRetryDelays = [TimeSpan.FromMilliseconds(300), TimeSpan.FromSeconds(1)];
 
         public UserService(IUserRepository userRepository, IMatchRepository matchRepository, IMapper mapper,
-            IPhotoStorageService? photoStorageService = null, ILogger<UserService>? logger = null)
+            IPhotoStorageService? photoStorageService = null, ILogger<UserService>? logger = null,
+            INotificationService? notifications = null, IBackgroundJobClient? backgroundJobs = null)
         {
+            _notifications = notifications;
+            _backgroundJobs = backgroundJobs;
             _photoStorageService = photoStorageService;
             _logger = logger;
             _userRepository = userRepository;
@@ -92,23 +101,51 @@ namespace MeepleBoard.Services.Implementations
             await _userRepository.CommitAsync(cancellationToken);
         }
 
-        public async Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+        public async Task DeleteAsync(Guid id, IReadOnlyDictionary<Guid, Guid>? campaignTransfers = null, CancellationToken cancellationToken = default)
         {
             if (id == Guid.Empty) throw new ArgumentException("ID inválido.");
 
             var user = await _userRepository.GetByIdAsync(id, cancellationToken);
-            if (user == null || user.DeletedAt.HasValue) throw new KeyNotFoundException("Usuário não encontrado.");
+            if (user == null || user.DeletedAt.HasValue) throw new KeyNotFoundException("Utilizador não encontrado.");
 
-            // Anonymised, not removed: shared matches keep their players. Ratings go with the account and the
-            // games they counted in are recalculated in the same transaction.
-            var result = await _userRepository.AnonymizeAsync(id, User.DeletedUserName(id), cancellationToken);
+            // Anonymised, not removed: shared matches keep their players (docs/proposta-eliminacao-conta.md in the app).
+            var result = await _userRepository.AnonymizeAsync(id, User.DeletedUserName(id), campaignTransfers, cancellationToken);
 
-            // Storage is outside the transaction: a failure leaves an unreachable file, never a half-deleted account.
+            // Outside the transaction, and never able to undo it: the account is deleted whatever happens below.
+            if (result.CancelledSessionGuestTokens.Count > 0 && _notifications != null)
+            {
+                try { await _notifications.SendToManyAsync(result.CancelledSessionGuestTokens, "Sessão cancelada", "Uma sessão para a qual foste convidado foi cancelada.", new { type = "session_cancelled" }, cancellationToken); }
+                catch (Exception ex) { _logger?.LogWarning(ex, "Aviso de sessão cancelada não enviado."); }
+            }
             if (_photoStorageService == null) return;
             foreach (var photoUrl in result.PhotoUrls)
+                if (!await TryDeletePhotoAsync(_photoStorageService, photoUrl, cancellationToken))
+                {
+                    // Still failing: a background job keeps trying (Hangfire retries); the reference carries no identity.
+                    try { _backgroundJobs?.Enqueue<PhotoDeletionJob>(job => job.ExecuteAsync(photoUrl)); }
+                    catch (Exception ex) { _logger?.LogError(ex, "Não foi possível agendar a remoção de uma foto de uma conta eliminada."); }
+                }
+        }
+
+        public Task<AccountDeletionSummary?> GetDeletionSummaryAsync(Guid id, CancellationToken cancellationToken = default)
+            => _userRepository.GetDeletionSummaryAsync(id, cancellationToken);
+
+        // Three immediate attempts; storage answering «not found» counts as done.
+        private async Task<bool> TryDeletePhotoAsync(IPhotoStorageService storage, string photoUrl, CancellationToken cancellationToken)
+        {
+            for (var attempt = 0; ; attempt++)
             {
-                try { await _photoStorageService.DeleteAsync(photoUrl, cancellationToken); }
-                catch (Exception ex) { _logger?.LogWarning(ex, "Falha ao apagar foto {PhotoUrl} de uma conta eliminada.", photoUrl); }
+                try { await storage.DeleteAsync(photoUrl, cancellationToken); return true; }
+                catch (Exception ex) when (attempt < PhotoRetryDelays.Length)
+                {
+                    _logger?.LogWarning(ex, "Remoção de foto falhou (tentativa {Attempt}); a repetir.", attempt + 1);
+                    await Task.Delay(PhotoRetryDelays[attempt], cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Remoção de foto falhou depois de {Attempts} tentativas; fica agendada.", attempt + 1);
+                    return false;
+                }
             }
         }
 

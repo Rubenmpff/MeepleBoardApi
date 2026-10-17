@@ -142,6 +142,9 @@ namespace MeepleBoard.Domain.Entities
         /// ':' is not accepted in names chosen at registration, so no account can take it.
         /// </summary>
         public static string DeletedUserName(Guid id) => "deleted:" + id.ToString("N")[..8];
+        // Neutral titles for text the person wrote in shared records: markers in no language, translated by the app.
+        public static string DeletedSessionName(DateTime scheduledUtc) => "deleted:session:" + scheduledUtc.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        public const string DeletedCampaignName = "deleted:campaign";
 
         public void Anonymize(string deletedUserName)
         {
@@ -162,6 +165,7 @@ namespace MeepleBoard.Domain.Entities
             LockoutEnd = DateTimeOffset.MaxValue;
             ProfilePictureUrl = null;
             ExpoPushToken = null;
+            LastActiveAt = null;
             LibraryPrivacy = LibraryPrivacy.Private;
             ContributesDurationStats = false;
             DeletedAt = DateTime.UtcNow;
