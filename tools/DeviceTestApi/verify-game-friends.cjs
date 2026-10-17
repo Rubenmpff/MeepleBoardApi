@@ -13,7 +13,7 @@ const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
   const pass = name => console.log('PASS ' + name);
   const viewer = await login('participante'), author = await login('autor');
   const gameId = async name => (await call(viewer, 'GET', '/game/search?name=' + encodeURIComponent(name))).data.id;
-  const wingspan = await gameId('Wingspan'), empty = await gameId('Meeple Teste Solo');
+  const wingspan = await gameId('Wingspan'), empty = await gameId('Meeple Teste Cooperativo'); // verify-catalog-search keeps «Solo» in the author's library on purpose
   const owners = async (who, game = wingspan) => (await call(who, 'GET', `/game/${game}/friend-owners`)).data;
   const visible = ['amiga-colecionadora', 'amigo-com-um-nome-de-utilizador-bastante-comprido', 'amiga-tabuleiro', 'amigo-dados', 'amiga-meeples'].map(n => 'Teste-' + n);
   const hidden = ['amigo-privado', 'amiga-quer-jogar', 'amigo-ja-jogou', 'pedido-pendente', 'desconhecido'].map(n => 'Teste-' + n);
