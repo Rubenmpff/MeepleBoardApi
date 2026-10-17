@@ -117,7 +117,7 @@ namespace MeepleBoard.Services.Implementations
             var campaign = await _campaignRepository.GetByIdForUpdateAsync(id, ct);
             if (campaign == null) throw new KeyNotFoundException("Campanha não encontrada.");
 
-            await AssertIsMemberAsync(campaign, userId);
+            AssertIsManager(campaign, userId);
             campaign.Complete();
             await _campaignRepository.SaveChangesAsync(ct);
         }
@@ -127,7 +127,7 @@ namespace MeepleBoard.Services.Implementations
             var campaign = await _campaignRepository.GetByIdForUpdateAsync(id, ct);
             if (campaign == null) throw new KeyNotFoundException("Campanha não encontrada.");
 
-            await AssertIsMemberAsync(campaign, userId);
+            AssertIsManager(campaign, userId);
             campaign.Abandon();
             await _campaignRepository.SaveChangesAsync(ct);
         }
@@ -137,8 +137,7 @@ namespace MeepleBoard.Services.Implementations
             var campaign = await _campaignRepository.GetByIdForUpdateAsync(id, ct);
             if (campaign == null) throw new KeyNotFoundException("Campanha não encontrada.");
 
-            if (campaign.CreatorId != userId)
-                throw new UnauthorizedAccessException("Só o criador pode apagar a campanha.");
+            AssertIsManager(campaign, userId);
 
             await _campaignRepository.DeleteAsync(id, ct);
             await _campaignRepository.SaveChangesAsync(ct);
@@ -212,7 +211,8 @@ namespace MeepleBoard.Services.Implementations
                         await _notificationService.SendAsync(
                             creator.ExpoPushToken,
                             title: "🎉 Convite aceite!",
-                            body: $"{responder?.UserName ?? "Alguém"} aceitou o convite para \"{campaign.Name}\".",
+                            body: User.IsDeletedMarker(campaign.Name) ? $"{responder?.UserName ?? "Alguém"} aceitou o convite para uma campanha."
+                                : $"{responder?.UserName ?? "Alguém"} aceitou o convite para \"{campaign.Name}\".",
                             ct: ct);
                     }
                 }
@@ -225,10 +225,10 @@ namespace MeepleBoard.Services.Implementations
             var campaign = await _campaignRepository.GetByIdForUpdateAsync(campaignId, ct);
             if (campaign == null) throw new KeyNotFoundException("Campanha não encontrada.");
 
-            await AssertIsMemberAsync(campaign, requesterId);
+            AssertIsManager(campaign, requesterId);
 
             if (targetUserId == campaign.CreatorId)
-                throw new InvalidOperationException("O criador da campanha não pode ser removido.");
+                throw new InvalidOperationException("Quem gere a campanha não pode ser removido.");
 
             var member = await _campaignRepository.GetMemberAsync(campaignId, targetUserId, ct);
             if (member == null) throw new KeyNotFoundException("Membro não encontrado.");
@@ -243,7 +243,7 @@ namespace MeepleBoard.Services.Implementations
                 await _notificationService.SendAsync(
                     target.ExpoPushToken,
                     title: "ℹ️ Removido de campanha",
-                    body: $"Foste removido da campanha \"{campaign.Name}\".",
+                    body: User.IsDeletedMarker(campaign.Name) ? "Foste removido de uma campanha." : $"Foste removido da campanha \"{campaign.Name}\".",
                     ct: ct);
             }
         }
@@ -251,17 +251,13 @@ namespace MeepleBoard.Services.Implementations
         public async Task LeaveCampaignAsync(
             Guid campaignId, Guid userId, CancellationToken ct = default)
         {
-            var campaign = await _campaignRepository.GetByIdForUpdateAsync(campaignId, ct);
-            if (campaign == null) throw new KeyNotFoundException("Campanha não encontrada.");
-
-            if (campaign.CreatorId == userId)
-                throw new InvalidOperationException("O criador não pode sair. Usa Abandon() para abandonar a campanha.");
-
-            var member = await _campaignRepository.GetMemberAsync(campaignId, userId, ct);
-            if (member == null) throw new KeyNotFoundException("Não és membro desta campanha.");
-
-            member.Leave();
-            await _campaignRepository.SaveChangesAsync(ct);
+            // Atomic with a manager change (CampaignRepository.LeaveAsync locks the campaign row first).
+            switch (await _campaignRepository.LeaveAsync(campaignId, userId, ct))
+            {
+                case CampaignLeaveOutcome.NotFound: throw new KeyNotFoundException("Campanha não encontrada.");
+                case CampaignLeaveOutcome.IsManager: throw new InvalidOperationException("Quem gere a campanha não pode sair. Pode concluí-la ou abandoná-la.");
+                case CampaignLeaveOutcome.NotMember: throw new KeyNotFoundException("Não és membro desta campanha.");
+            }
         }
 
         /* ── Partidas ─────────────────────────────────────────────────────── */
@@ -294,6 +290,14 @@ namespace MeepleBoard.Services.Implementations
             if (campaign == null) throw new KeyNotFoundException("Campanha não encontrada.");
 
             await AssertIsMemberAsync(campaign, userId);
+
+            // Whoever manages may take any match out; any other member only one they played.
+            if (campaign.CreatorId != userId)
+            {
+                var match = await _matchRepository.GetByIdAsync(matchId, ct)
+                    ?? throw new KeyNotFoundException("Partida não encontrada.");
+                MatchService.RequireParticipant(match, userId);
+            }
 
             await _campaignRepository.RemoveCampaignMatchAsync(campaignId, matchId, ct);
             await _campaignRepository.SaveChangesAsync(ct);
@@ -552,6 +556,13 @@ namespace MeepleBoard.Services.Implementations
         };
 
         /* ── Helper de validação ─────────────────────────────────────────── */
+
+        // Management (remove members, complete, abandon, delete) belongs to whoever manages the campaign: Campaign.CreatorId.
+        private static void AssertIsManager(Campaign campaign, Guid userId)
+        {
+            if (campaign.CreatorId != userId)
+                throw new UnauthorizedAccessException("Só quem gere a campanha pode fazer isto.");
+        }
 
         private async Task AssertIsMemberAsync(Campaign campaign, Guid userId)
         {

@@ -54,7 +54,11 @@ namespace MeepleBoard.Domain.Entities
         [ForeignKey("GameId")]
         public virtual Game? Game { get; private set; }
 
-        /// <summary>Quem criou a campanha — não pode ser removido.</summary>
+        /// <summary>
+        /// Quem GERE a campanha agora (o nome ficou de quando era sempre quem a criou). Só esta pessoa remove membros,
+        /// conclui, abandona ou apaga a campanha, e não pode ser removida nem sair. Muda apenas quando quem gere elimina
+        /// a conta (sucessor escolhido ou automático). A autoria fica em CampaignMember.IsCreator.
+        /// </summary>
         [Required]
         public Guid CreatorId { get; private set; }
 
@@ -90,17 +94,19 @@ namespace MeepleBoard.Domain.Entities
             Touch();
         }
 
+        /// <summary>Só a partir de «Ativa».</summary>
         public void Complete()
         {
-            if (Status == CampaignStatus.Completed) return;
+            if (Status != CampaignStatus.Active) throw new InvalidOperationException("Só uma campanha ativa pode ser concluída.");
             Status = CampaignStatus.Completed;
             CompletedAt = DateTime.UtcNow;
             Touch();
         }
 
+        /// <summary>Só a partir de «Ativa».</summary>
         public void Abandon()
         {
-            if (Status == CampaignStatus.Abandoned) return;
+            if (Status != CampaignStatus.Active) throw new InvalidOperationException("Só uma campanha ativa pode ser abandonada.");
             Status = CampaignStatus.Abandoned;
             Touch();
         }

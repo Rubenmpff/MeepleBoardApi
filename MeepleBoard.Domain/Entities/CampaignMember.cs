@@ -58,7 +58,10 @@ namespace MeepleBoard.Domain.Entities
         [ForeignKey("UserId")]
         public virtual User? User { get; private set; }
 
-        /// <summary>True apenas para o criador da campanha — não pode ser removido.</summary>
+        /// <summary>
+        /// AUTORIA: true só para quem criou a campanha, para sempre — também depois de eliminar a conta («Conta eliminada»,
+        /// etiqueta «Criador»). Não dá permissões: a gestão é Campaign.CreatorId. Quem criou não pode ser removido nem sair.
+        /// </summary>
         public bool IsCreator { get; private set; }
 
         public CampaignMemberStatus Status { get; private set; }

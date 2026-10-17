@@ -80,6 +80,26 @@ namespace MeepleBoard.Infra.Data.Repositories
         }
 
         /// <summary>Para updates (com tracking ligado).</summary>
+        public async Task<CampaignLeaveOutcome> LeaveAsync(Guid campaignId, Guid userId, CancellationToken ct = default)
+        {
+            var strategy = _context.Database.CreateExecutionStrategy();
+            return await strategy.ExecuteAsync(async () =>
+            {
+                _context.ChangeTracker.Clear();
+                await using var transaction = await _context.Database.BeginTransactionAsync(ct);
+                var campaign = await _context.Campaigns.FromSqlInterpolated($"SELECT * FROM Campaigns WITH (UPDLOCK, ROWLOCK) WHERE Id = {campaignId}")
+                    .AsNoTracking().SingleOrDefaultAsync(ct);
+                if (campaign == null) return CampaignLeaveOutcome.NotFound;
+                if (campaign.CreatorId == userId) return CampaignLeaveOutcome.IsManager;
+                var member = await _context.CampaignMembers.SingleOrDefaultAsync(m => m.CampaignId == campaignId && m.UserId == userId, ct);
+                if (member == null || member.Status != CampaignMemberStatus.Accepted) return CampaignLeaveOutcome.NotMember;
+                member.Leave();
+                await _context.SaveChangesAsync(ct);
+                await transaction.CommitAsync(ct);
+                return CampaignLeaveOutcome.Left;
+            });
+        }
+
         public async Task<Campaign?> GetByIdForUpdateAsync(
             Guid id, CancellationToken ct = default)
         {

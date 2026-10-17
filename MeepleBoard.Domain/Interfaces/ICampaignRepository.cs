@@ -28,6 +28,12 @@ namespace MeepleBoard.Domain.Interfaces
         // ── Membros ────────────────────────────────────────────────────────────
 
         Task<CampaignMember?> GetMemberAsync(Guid campaignId, Guid userId, CancellationToken ct = default);
+
+        /// <summary>
+        /// A member leaves, with the campaign row locked first: a manager change committed meanwhile (account deletion)
+        /// is seen, so whoever manages never leaves. Not found / is the manager / not an active member / left.
+        /// </summary>
+        Task<CampaignLeaveOutcome> LeaveAsync(Guid campaignId, Guid userId, CancellationToken ct = default);
         Task AddMemberAsync(CampaignMember member, CancellationToken ct = default);
         Task<IReadOnlyList<CampaignMember>> GetMembersAsync(Guid campaignId, CancellationToken ct = default);
 
@@ -44,4 +50,6 @@ namespace MeepleBoard.Domain.Interfaces
         Task AddJournalEntryAsync(MatchJournalEntry entry, CancellationToken ct = default);
         Task UpdateJournalEntryAsync(MatchJournalEntry entry, CancellationToken ct = default);
     }
+
+    public enum CampaignLeaveOutcome { Left, NotFound, IsManager, NotMember }
 }

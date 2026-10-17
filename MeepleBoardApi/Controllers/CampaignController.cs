@@ -100,9 +100,10 @@ namespace MeepleBoardApi.Controllers
             }
             catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
             catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
         }
 
-        /// <summary>Abandona a campanha.</summary>
+        /// <summary>Abandona a campanha (só quem a gere, a partir de «Ativa»).</summary>
         [HttpPost("{id:guid}/abandon")]
         public async Task<ActionResult> Abandon(Guid id, CancellationToken ct)
         {
@@ -114,9 +115,10 @@ namespace MeepleBoardApi.Controllers
             }
             catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
             catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
         }
 
-        /// <summary>Apaga a campanha (só o criador).</summary>
+        /// <summary>Apaga a campanha (só quem a gere).</summary>
         [HttpDelete("{id:guid}")]
         public async Task<ActionResult> Delete(Guid id, CancellationToken ct)
         {
@@ -128,6 +130,7 @@ namespace MeepleBoardApi.Controllers
             }
             catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
             catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
         }
 
         // ── Membros ───────────────────────────────────────────────────────────

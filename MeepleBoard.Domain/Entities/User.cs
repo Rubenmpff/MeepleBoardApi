@@ -146,6 +146,18 @@ namespace MeepleBoard.Domain.Entities
         public static string DeletedSessionName(DateTime scheduledUtc) => "deleted:session:" + scheduledUtc.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
         public const string DeletedCampaignName = "deleted:campaign";
 
+        /// <summary>True for any of the neutral markers above (deleted account, session or campaign).</summary>
+        public static bool IsDeletedMarker(string? text) => text != null && text.StartsWith("deleted:", StringComparison.Ordinal);
+
+        /// <summary>Last guard for text sent outside the app (push notifications): markers become neutral Portuguese words.</summary>
+        public static string WithoutDeletedMarkers(string text) => System.Text.RegularExpressions.Regex.Replace(text,
+            @"deleted:(session:\d{4}-\d{2}-\d{2}|campaign|[0-9a-f]{8})", m => m.Groups[1].Value switch
+            {
+                "campaign" => "campanha sem título",
+                var v when v.StartsWith("session:") => "sessão",
+                _ => "Conta eliminada",
+            });
+
         public void Anonymize(string deletedUserName)
         {
             if (string.IsNullOrWhiteSpace(deletedUserName)) throw new ArgumentException("O nome da conta eliminada é obrigatório.");

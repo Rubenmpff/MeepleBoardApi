@@ -46,6 +46,10 @@ namespace MeepleBoard.Services.Implementations
             object? data = null,
             CancellationToken ct = default)
         {
+            // Never a technical marker (deleted:…) in a notification: last guard, whatever the caller built.
+            title = MeepleBoard.Domain.Entities.User.WithoutDeletedMarkers(title);
+            body = MeepleBoard.Domain.Entities.User.WithoutDeletedMarkers(body);
+
             var validTokens = expoPushTokens
                 .Where(t => !string.IsNullOrWhiteSpace(t))
                 .Distinct()
@@ -140,7 +144,9 @@ namespace MeepleBoard.Services.Implementations
             await SendAsync(
                 expoPushToken,
                 title: "🏰 Convite para campanha!",
-                body: $"{inviterName} convidou-te para a campanha \"{campaignName}\".",
+                body: MeepleBoard.Domain.Entities.User.IsDeletedMarker(campaignName)
+                    ? $"{inviterName} convidou-te para uma campanha."
+                    : $"{inviterName} convidou-te para a campanha \"{campaignName}\".",
                 data: new { type = "campaign_invite" },
                 ct: ct);
         }
