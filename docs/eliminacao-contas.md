@@ -124,3 +124,69 @@ As decisões D1–D9 e a tabela completa de tratamento estão em `MeepleBoardApp
     - três pedidos simultâneos;
     - retenção das denúncias.
   - **No fim:** limpeza, e a média do jogo volta ao valor inicial.
+
+## Gestão e autoria das campanhas (2026-10-17, DeviceTests)
+
+Decisão do utilizador: uma campanha mantém um gestor enquanto tiver outros membros aceites e ativos. Substitui a opção anterior de deixar campanhas sem gestor.
+
+### Significado dos campos (sem migração)
+
+Revi todos os usos de `CreatorId` e `IsCreator`.
+
+| Campo | Significa | Usado em |
+| --- | --- | --- |
+| `Campaign.CreatorId` | **Quem gere agora.** O nome ficou de quando era sempre quem criou. Muda apenas na eliminação da conta de quem gere. | Permissões em `CampaignService` (remover membros, concluir, abandonar, apagar; quem gere não pode ser removido nem sair; acesso de quem gere); listas e detalhe em `CampaignRepository`; aviso «convite aceite»; `CampaignDto.CreatorId` e `CreatorUserName`, que na app servem só para saber quem gere; sucessão em `UserRepository.AnonymizeAsync` |
+| `CampaignMember.IsCreator` | **Quem escreveu a campanha, para sempre**, também como «Conta eliminada». Não dá permissões. | Etiqueta «Criador» na app; o domínio impede que essa pessoa seja removida ou saia; título neutro na eliminação (só quando quem elimina a conta foi quem criou) |
+
+A app mostra «Criador» no autor e «Gestor» em quem gere, quando não é o autor.
+
+### Sucessão quando quem gere elimina a conta
+
+A regra é a mesma na app e pelo apoio, e acontece na mesma transação da eliminação:
+
+1. **Sucessor escolhido:** é validado de novo no momento da eliminação. Se já não for membro ativo, a API responde 400 e a app volta a carregar o resumo.
+2. **Sem escolha (sempre, pelo apoio):** fica o membro aceite e ativo há mais tempo. A ordem é por `RespondedAt`, depois `InvitedAt`, depois `UserId` (`CampaignSuccession.Order`). O ecrã mostra o resultado desta ordem antes da confirmação, e a app envia sempre o sucessor que mostrou.
+3. **Sem outros membros ativos:** a campanha é apagada.
+4. **Estado da campanha:** mantém-se (ativa, concluída ou abandonada).
+5. **Aviso ao sucessor:** push «Passaste a gerir…». Não pede aceitação, e uma falha no envio não bloqueia nada.
+6. **Concorrência:** a eliminação bloqueia as linhas das campanhas que gere e dos respetivos membros. Sair de uma campanha (`CampaignRepository.LeaveAsync`) bloqueia a linha da campanha antes de verificar quem gere. Assim, um sucessor nunca sai depois de ter recebido a gestão: ou sai antes, e a escolha é recusada, ou a gestão chega primeiro, e sair dá 409.
+
+### Permissões (servidor)
+
+| Operação | Quem |
+| --- | --- |
+| Remover membros, concluir, abandonar, apagar | Só quem gere (os outros recebem 403). Concluir e abandonar só a partir de «Ativa» (caso contrário, 409). |
+| Convidar, editar nome e notas | Membros aceites |
+| Retirar uma partida da campanha | Quem a jogou ou quem gere |
+| Sair | Membros, exceto quem gere (409) |
+| Remover quem gere ou o autor original | Ninguém (409) |
+
+**Notificações:** nenhuma mostra marcadores técnicos. Os textos de convite, convite aceite e remoção usam «uma campanha» quando o nome é neutro. Além disso, `NotificationService` aplica `User.WithoutDeletedMarkers` como última proteção.
+
+### Testes
+
+- **`tests/Campaigns.Tests` (7 testes isolados):**
+  - permissões por papel;
+  - estados de concluir e abandonar;
+  - retirar partidas;
+  - sair;
+  - textos sem marcadores.
+- **`tests/Accounts.Tests` (9 testes):** inclui o aviso ao sucessor.
+- **`verify-own-account-deletion.cjs` (SQL real):**
+  - sucessor escolhido;
+  - sucessor automático por antiguidade e em empate, determinístico entre leituras;
+  - campanha gerida por quem não a escreveu (o nome e a autoria ficam);
+  - campanha sem sucessores, que é apagada;
+  - a mesma regra pelo apoio;
+  - permissões depois da sucessão;
+  - aviso ao sucessor sem marcadores;
+  - sucessor a sair enquanto quem gere elimina a conta, com as duas ordens observadas.
+
+  A limpeza no fim é só do que a execução criou (`DELETE /device-test/account-deletion/fixture?people=…`).
+
+**Dados de teste corrigidos:** `POST /device-test/account-deletion/repair-legacy-campaigns`. Só toca em campanhas cujos membros são todos contas do fixture. Corrigiu as duas campanhas da validação no iPhone:
+
+- a que ficou sem gestor passou para o único membro ativo;
+- a transferida devolveu a autoria à conta eliminada.
+
+As contas e as sessões do roteiro não mudaram.
