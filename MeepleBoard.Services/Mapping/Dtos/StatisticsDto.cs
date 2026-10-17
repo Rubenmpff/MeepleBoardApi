@@ -1,4 +1,4 @@
-namespace MeepleBoard.Services.Statistics;
+namespace MeepleBoard.Services.DTOs;
 
 public sealed class StatisticsQuery
 {
@@ -28,9 +28,6 @@ public class StatisticsQueryBase
     public string? Mode { get; set; }
     public StatisticsQuery ToQuery() => new() { Start = Start, EndExclusive = EndExclusive, TimeZone = TimeZone, GameId = GameId, Mode = Mode };
 }
-public sealed record StatisticsRow(Guid MatchId, Guid GameId, string GameName, string? GameImageUrl,
-    DateTime MatchDate, string? GameMode, string? Result, string? Outcome, int? DurationInMinutes,
-    int? Score, double? PersonalRating);
 public sealed record StatisticsResults(int Wins, int Losses, int Draws, int Known, int WithoutResult, int Legacy, double? WinRate);
 public sealed record StatisticsMode(string Mode, int Matches, StatisticsResults Results);
 public sealed record StatisticsGame(Guid GameId, string Name, string? ImageUrl, int Matches);

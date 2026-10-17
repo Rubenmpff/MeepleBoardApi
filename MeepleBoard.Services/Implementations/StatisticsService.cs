@@ -1,44 +1,67 @@
-using Microsoft.EntityFrameworkCore;
-using MeepleBoard.Domain.Enums;
+using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Services.Calculators;
-namespace MeepleBoard.Services.Statistics;
+using MeepleBoard.Services.DTOs;
+using MeepleBoard.Services.Interfaces;
 
-public sealed partial class StatisticsService
+namespace MeepleBoard.Services.Implementations;
+
+/// <summary>
+/// One person's statistics. Reads through IStatisticsRepository (this participant and this person's diary only) and
+/// calculates with StatisticsCalculator and CompanyCalculator. Company comparisons require an accepted friend.
+/// </summary>
+public sealed class StatisticsService(IStatisticsRepository statistics) : IStatisticsService
 {
- private IQueryable<Guid> OwnMatches(Guid userId, StatisticsQuery query) {
+    private async Task<(List<StatisticsRow> Rows, TimeZoneInfo Zone)> Load(Guid userId, StatisticsQuery query, CancellationToken ct)
+    {
+        if (userId == Guid.Empty) throw new UnauthorizedAccessException();
+        var (zone, start, end) = StatisticsCalculator.Validate(query);
+        // SQL selects only this participant and this person's diary; no friend IDs, names, notes or prices.
+        var rows = await statistics.GetPlayedRowsAsync(userId, start, end, ct);
+        return (rows.Where(r => query.Mode == null || StatisticsCalculator.Mode(r) == query.Mode).DistinctBy(r => r.MatchId).ToList(), zone);
+    }
+    public async Task<StatisticsSummary> Summary(Guid userId, StatisticsQuery query, CancellationToken ct)
+    {
+        var (rows, zone) = await Load(userId, query, ct);
+        return StatisticsCalculator.Summary(rows, query, zone);
+    }
+    public async Task<StatisticsMatchPage> Matches(Guid userId, StatisticsMatchesQuery query, CancellationToken ct)
+    {
+        if (query.Offset < 0 || query.Limit is < 1 or > 100) throw new ArgumentException("Paginação inválida.");
+        CompanyCalculator.ValidateContext(query.GroupContext);
+        if (!query.FriendId.HasValue && query.GroupContext != "all") throw new ArgumentException("Seleciona um amigo para filtrar o contexto de companhia.");
+        if (query.FriendId.HasValue) return await CompanyMatches(userId, query, ct);
+        StatisticsCalculator.MatchesMetric(new(Guid.Empty, Guid.Empty, "", null, DateTime.UtcNow, null, null, null, null, null, null), query.Metric);
+        var filter = query.ToQuery(); var (rows, zone) = await Load(userId, filter, ct);
+        var result = rows.Where(r => !query.GameId.HasValue || r.GameId == query.GameId)
+            .Where(r => StatisticsCalculator.MatchesMetric(r, query.Metric))
+            .Where(r => !query.ScoreValue.HasValue || r.Score == query.ScoreValue)
+            .Where(r => query.Bucket == null || StatisticsCalculator.Bucket(r, filter, zone) == query.Bucket)
+            .OrderByDescending(r => r.MatchDate).ThenBy(r => r.MatchId).ToList();
+        return new(result.Count, query.Offset, query.Limit, result.Skip(query.Offset).Take(query.Limit).Select(r => new StatisticsMatch(r.MatchId, r.GameId, r.GameName,
+            r.GameImageUrl, DateTime.SpecifyKind(r.MatchDate, DateTimeKind.Utc), StatisticsCalculator.Mode(r), StatisticsCalculator.Outcome(r),
+            r.Result == null ? "Legacy" : "Explicit", r.DurationInMinutes, r.Score, r.PersonalRating)).ToList());
+    }
+
+ private static StatisticsMatchFilter Filter(Guid userId, StatisticsQuery query) {
   var (_, start, end) = StatisticsCalculator.Validate(query);
-  return db.MatchPlayers.Where(p => p.UserId == userId && p.Match!.MatchDate >= start && p.Match.MatchDate < end
-   && (!query.GameId.HasValue || p.Match.GameId == query.GameId)
-   && (query.Mode == null || (query.Mode == "UNKNOWN" ? p.Match.GameMode == null || !StatisticsCalculator.Modes.Take(3).Contains(p.Match.GameMode) : p.Match.GameMode == query.Mode)))
-   .Select(p => p.MatchId);
+  return new(userId, start, end, query.GameId, query.Mode, KnownModes);
  }
- private async Task<List<Guid>> AcceptedFriends(Guid userId, CancellationToken ct) => await db.Friendships.AsNoTracking()
-  .Where(f => f.Status == FriendshipStatus.Accepted && (f.UserAId == userId || f.UserBId == userId))
-  .Select(f => f.UserAId == userId ? f.UserBId : f.UserAId).ToListAsync(ct);
+ /// <summary>The three explicit modes; anything else is «UNKNOWN».</summary>
+ private static readonly string[] KnownModes = StatisticsCalculator.Modes.Take(3).ToArray();
  private async Task RequireFriend(Guid userId, Guid friendId, CancellationToken ct) {
-  if (userId == Guid.Empty || friendId == Guid.Empty || friendId == userId || !await db.Friendships.AnyAsync(f => f.Status == FriendshipStatus.Accepted
-   && ((f.UserAId == userId && f.UserBId == friendId) || (f.UserBId == userId && f.UserAId == friendId)), ct))
+  if (userId == Guid.Empty || friendId == Guid.Empty || friendId == userId || !await statistics.AreAcceptedFriendsAsync(userId, friendId, ct))
    throw new UnauthorizedAccessException("Esta comparação só está disponível para amigos aceites.");
  }
  private async Task<List<Companion>> Companions(Guid userId, StatisticsQuery query, CancellationToken ct, string groupContext = "all") {
-  var friends = await AcceptedFriends(userId, ct); var own = OwnMatches(userId, query);
-  var counts = await db.MatchPlayers.AsNoTracking().Where(p => friends.Contains(p.UserId) && own.Contains(p.MatchId)
-    && (groupContext == "all" || (groupContext == "only-two" ? p.Match!.MatchPlayers.Select(x => x.UserId).Distinct().Count() == 2 : p.Match!.MatchPlayers.Select(x => x.UserId).Distinct().Count() >= 3)))
-   .GroupBy(p => p.UserId).Select(g => new { Id = g.Key, Matches = g.Select(p => p.MatchId).Distinct().Count() }).ToListAsync(ct);
-  // «Com quem jogaste»: only friends with at least one shared match under the selected filters.
-  var played = counts.Select(c => c.Id).ToList();
-  var names = await db.Users.AsNoTracking().Where(u => played.Contains(u.Id)).Select(u => new { u.Id, u.UserName }).ToListAsync(ct);
-  return names.Select(n => new Companion(n.Id, n.UserName ?? "", counts.First(c => c.Id == n.Id).Matches))
+  var friends = await statistics.GetAcceptedFriendIdsAsync(userId, ct);
+  var names = await statistics.GetCompanionsAsync(Filter(userId, query), friends, groupContext, ct);
+  return names.Select(n => new Companion(n.Id, n.UserName ?? "", n.Matches))
    .OrderByDescending(c => c.Matches).ThenBy(c => c.FriendId).ToList();
  }
  private async Task<(List<PairRow> Rows, TimeZoneInfo Zone)> Pairs(Guid userId, Guid friendId, StatisticsQuery query, CancellationToken ct) {
   await RequireFriend(userId, friendId, ct);
-  var (ownRows, zone) = await Load(userId, query, ct); var own = OwnMatches(userId, query);
-  var partners = await db.MatchPlayers.AsNoTracking().Where(p => p.UserId == friendId && own.Contains(p.MatchId))
-   .Select(p => new { p.MatchId, p.Score, p.Outcome,
-    ParticipantCount = p.Match!.MatchPlayers.Select(x => x.UserId).Distinct().Count(),
-    OtherWin = p.Match!.MatchPlayers.Any(x => x.UserId != userId && x.UserId != friendId && x.Outcome == "Win"),
-    OtherDraw = p.Match.MatchPlayers.Any(x => x.UserId != userId && x.UserId != friendId && x.Outcome == "Draw") }).ToListAsync(ct);
+  var (ownRows, zone) = await Load(userId, query, ct);
+  var partners = await statistics.GetPartnerRowsAsync(Filter(userId, query), friendId, ct);
   var lookup = ownRows.ToDictionary(r => r.MatchId);
   return (partners.Select(p => new PairRow(lookup[p.MatchId], p.Score, p.Outcome, p.OtherWin, p.OtherDraw, p.ParticipantCount)).DistinctBy(p => p.Own.MatchId).ToList(), zone);
  }
@@ -50,7 +73,7 @@ public sealed partial class StatisticsService
   var (rows, zone) = await Pairs(userId, friendId.Value, query, ct);
   var counts = CompanyCalculator.ContextCounts(rows);
   rows = rows.Where(p => CompanyCalculator.InContext(p, groupContext)).ToList();
-  var name = await db.Users.Where(u => u.Id == friendId).Select(u => u.UserName).SingleAsync(ct);
+  var name = await statistics.GetUserNameAsync(friendId.Value, ct);
   var games = rows.GroupBy(p => new { p.Own.GameId, Mode = StatisticsCalculator.Mode(p.Own) }).Select(g => {
    var sample = g.ToList(); var first = sample[0].Own;
    return new PairGame(first.GameId, first.GameName, first.GameImageUrl, g.Key.Mode, sample.Count, CompanyCalculator.Results(sample),
@@ -81,8 +104,7 @@ public sealed partial class StatisticsService
  public async Task<ExploreReport> Explore(Guid userId, StatisticsQuery query, CancellationToken ct) {
   var (available, zone) = await Load(userId, query, ct);
   var rows = available.Where(r => !query.GameId.HasValue || r.GameId == query.GameId).ToList();
-  var first = await db.MatchPlayers.AsNoTracking().Where(p => p.UserId == userId).GroupBy(p => p.Match!.GameId)
-   .Select(g => new { GameId = g.Key, Date = g.Min(p => p.Match!.MatchDate) }).ToDictionaryAsync(x => x.GameId, x => x.Date, ct);
+  var first = await statistics.GetFirstPlayedDatesAsync(userId, ct);
   var games = rows.GroupBy(r => new { r.GameId, Mode = StatisticsCalculator.Mode(r) }).Select(g => {
    var sample = g.ToList(); var scores = sample.Where(r => r.Score.HasValue).Select(r => r.Score!.Value).ToList();
    var ratings = sample.Where(r => r.PersonalRating.HasValue).Select(r => r.PersonalRating!.Value).ToList(); var r = sample[0];
@@ -95,10 +117,8 @@ public sealed partial class StatisticsService
    return new RatingBucket(b.Key, ratings.Count, ratings.Count == 0 ? null : Math.Round(ratings.Average(), 2));
   }).ToList();
   var (_, start, end) = StatisticsCalculator.Validate(query);
-  var libraries = await db.UserGameLibraries.AsNoTracking().Where(l => l.UserId == userId && l.AddedAt >= start && l.AddedAt < end
-   && (!query.GameId.HasValue || l.GameId == query.GameId))
-   .Select(l => new { l.Id, l.GameId, l.Game!.Name, l.Game.ImageUrl, l.Status, l.PricePaid, l.AddedAt }).ToListAsync(ct);
-  var modeGames = query.Mode == null ? null : (await db.MatchPlayers.Where(p => p.UserId == userId && (query.Mode == "UNKNOWN" ? p.Match!.GameMode == null || !StatisticsCalculator.Modes.Take(3).Contains(p.Match.GameMode) : p.Match!.GameMode == query.Mode)).Select(p => p.Match!.GameId).Distinct().ToListAsync(ct)).ToHashSet();
+  var libraries = await statistics.GetLibraryAddedAsync(userId, start, end, query.GameId, ct);
+  var modeGames = query.Mode == null ? null : (await statistics.GetGameIdsPlayedInModeAsync(userId, query.Mode, KnownModes, ct)).ToHashSet();
   var collection = libraries.Where(l => modeGames == null || modeGames.Contains(l.GameId)).Select(l => new LibraryStatistic(l.Id, l.GameId, l.Name, l.ImageUrl,
    l.Status.ToString(), l.PricePaid, DateTime.SpecifyKind(l.AddedAt, DateTimeKind.Utc), first.ContainsKey(l.GameId), rows.Count(r => r.GameId == l.GameId))).ToList();
   return new(games, ratingBuckets, collection);

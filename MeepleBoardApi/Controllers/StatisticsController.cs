@@ -1,11 +1,12 @@
 using MeepleBoard.CrossCutting.Security;
-using MeepleBoard.Services.Statistics;
+using MeepleBoard.Services.DTOs;
+using MeepleBoard.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 namespace MeepleBoardApi.Controllers;
 
 [ApiController, Authorize, Route("MeepleBoard/statistics/me")]
-public sealed class StatisticsController(StatisticsService service) : ControllerBase
+public sealed class StatisticsController(IStatisticsService service) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> Summary([FromQuery] StatisticsQuery query, CancellationToken ct)

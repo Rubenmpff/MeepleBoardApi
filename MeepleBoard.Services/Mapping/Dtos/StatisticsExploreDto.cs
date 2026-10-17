@@ -1,4 +1,4 @@
-namespace MeepleBoard.Services.Statistics;
+namespace MeepleBoard.Services.DTOs;
 
 public sealed record Companion(Guid FriendId, string Name, int Matches);
 public sealed record PairResults(int MyWins, int FriendWins, int SharedWins, int MyOnlyWins, int FriendOnlyWins,
