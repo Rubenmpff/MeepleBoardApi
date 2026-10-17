@@ -1,4 +1,5 @@
 ﻿using MeepleBoard.Domain.Entities;
+using MeepleBoard.Services.Calculators;
 using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Services.DTOs.Campaign;
 using MeepleBoard.Services.DTOs.MatchJournal;

@@ -97,7 +97,7 @@ namespace MeepleBoard.Services.ExternalServices.Implementations
 
         public async Task<(byte[] Content, string ContentType)> ReadProtectedAsync(string photoUrl, CancellationToken ct = default)
         {
-            if (!MeepleBoard.Services.Implementations.JournalPhotoReference.IsProtected(photoUrl))
+            if (!MeepleBoard.Services.Calculators.JournalPhotoReference.IsProtected(photoUrl))
                 throw new UnauthorizedAccessException("Legacy public photos are quarantined pending storage remediation.");
             var publicId = ExtractPublicId(photoUrl) ?? throw new ArgumentException("Invalid photo reference.");
             // Signed provider URL is used server-side only, never returned to a client.

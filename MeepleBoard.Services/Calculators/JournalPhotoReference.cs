@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
-namespace MeepleBoard.Services.Implementations;
+namespace MeepleBoard.Services.Calculators;
 public static class JournalPhotoReference
 {
     public static string Key(string url) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url))).ToLowerInvariant();
