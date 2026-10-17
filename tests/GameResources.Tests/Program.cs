@@ -165,6 +165,15 @@ await Check("BGG sheet: 0 or missing means unknown; one playing time fills both;
     var dto = new MapperConfiguration(c => c.AddProfile<MappingEntityToDto>()).CreateMapper().Map<GameDto>(game);
     Assert(dto.MinPlayTime == 45 && dto.MaxPlayTime == 90 && dto.MinAge == 14 && dto.AverageWeight == null, "mapped to the game DTO");
 });
+await Check("AutoMapper 14 (GHSA-rvv3-g6hj-g44x, no 14.x fix): the self-referencing Game→GameDto map stays bounded with the API's own registration", async () => { await Task.CompletedTask;
+    // Same registration as the API: AddAutoMapper scans every profile of the assembly, where Game→GameDto is defined twice.
+    var services = new ServiceCollection(); services.AddLogging(); services.AddAutoMapper(typeof(AutoMapperConfig));
+    var mapper = services.BuildServiceProvider().GetRequiredService<IMapper>();
+    var root = new Game("Chain 0", "", null); var current = root;
+    for (var i = 1; i <= 500; i++) { var next = new Game("Chain " + i, "", null); current.Expansions.Add(next); current = next; }
+    int Depth(GameDto d) => 1 + (d.Expansions.Count == 0 ? 0 : d.Expansions.Max(Depth));
+    Assert(Depth(mapper.Map<GameDto>(root)) == 3, "a chain of 501 games maps to 3 levels (MaxDepth), never deeper");
+});
 Console.WriteLine($"{passed} isolated game resource HTTP tests passed.");
 await app.StopAsync();
 
