@@ -90,19 +90,29 @@ public static class AccountDeletionFixture {
             Set(closed, "EndDate", now.AddDays(-2));
             var ofA = Session("Sessão de A", a, now.AddDays(2), "Casa de A", (person, true));
             var game = await db.Games.SingleAsync(g => g.BGGId == 990001);
-            Campaign Campaign(string name, Guid creator, string? notes, params (Guid User, CampaignMemberStatus Status)[] members) {
+            // Members accept at given minutes before now, so seniority (who takes over automatically) is known.
+            Campaign Campaign(string name, Guid creator, string? notes, params (Guid User, CampaignMemberStatus Status, int AcceptedMinutesAgo)[] members) {
                 var c = new Campaign(name, game.Id, creator); if (notes != null) c.UpdateNotes(notes);
-                c.Members.Add(new CampaignMember(c.Id, creator, isCreator: true));
-                foreach (var (user, status) in members) { var m = new CampaignMember(c.Id, user); if (status == CampaignMemberStatus.Accepted) m.Accept(); else if (status == CampaignMemberStatus.Declined) m.Decline(); c.Members.Add(m); }
+                var own = new CampaignMember(c.Id, creator, isCreator: true); Set(own, "InvitedAt", now.AddDays(-30)); Set(own, "RespondedAt", now.AddDays(-30)); c.Members.Add(own);
+                foreach (var (user, status, ago) in members) {
+                    var m = new CampaignMember(c.Id, user); Set(m, "InvitedAt", now.AddDays(-20));
+                    if (status == CampaignMemberStatus.Accepted) m.Accept(); else if (status == CampaignMemberStatus.Declined) m.Decline();
+                    Set(m, "RespondedAt", now.AddMinutes(-ago)); c.Members.Add(m);
+                }
                 db.Campaigns.Add(c); return c;
             }
-            var transfer = Campaign("Campanha do P (passa para A)", person, "Notas que A escreveu", (a, CampaignMemberStatus.Accepted), (b, CampaignMemberStatus.Accepted));
-            var readOnly = Campaign("Campanha do P (sem gestor)", person, null, (b, CampaignMemberStatus.Accepted));
-            var alone = Campaign("Campanha só do P", person, "Notas só do P", (b, CampaignMemberStatus.Declined));
-            var campaignOfA = Campaign("Campanha de A", a, "Notas de A", (person, CampaignMemberStatus.Accepted));
+            const CampaignMemberStatus Accepted = CampaignMemberStatus.Accepted;
+            var transfer = Campaign("Campanha do P (escolhe A)", person, "Notas que A escreveu", (a, Accepted, 60), (b, Accepted, 120));
+            var auto = Campaign("Campanha do P (sucessão automática)", person, null, (a, Accepted, 60), (b, Accepted, 120));
+            var tie = Campaign("Campanha do P (empate)", person, null, (a, Accepted, 90), (b, Accepted, 90));
+            var alone = Campaign("Campanha só do P", person, "Notas só do P", (b, CampaignMemberStatus.Declined, 30));
+            // Written by A, managed by P (as after an earlier succession): P's deletion keeps A's name and authorship.
+            var managedByP = Campaign("Campanha escrita por A", a, "Notas de A", (person, Accepted, 300), (b, Accepted, 200));
+            Set(managedByP, "CreatorId", person);
+            var campaignOfA = Campaign("Campanha de A", a, "Notas de A", (person, Accepted, 30));
             await db.SaveChangesAsync();
             return Results.Ok(new { sessions = new { scheduled = scheduled.Id, running = running.Id, closed = closed.Id, ofA = ofA.Id },
-                campaigns = new { transfer = transfer.Id, readOnly = readOnly.Id, alone = alone.Id, ofA = campaignOfA.Id }, gameId = game.Id });
+                campaigns = new { transfer = transfer.Id, auto = auto.Id, tie = tie.Id, alone = alone.Id, managedByP = managedByP.Id, ofA = campaignOfA.Id }, gameId = game.Id });
         });
 
         // An encounter title written by whoever recorded the match (the API adds matches to campaigns without a title).
@@ -115,7 +125,34 @@ public static class AccountDeletionFixture {
             Interlocked.Exchange(ref OfflineNotifications.FailNextBulk, push ? 1 : 0);
             return Results.Ok();
         });
-        group.MapGet("/recorded", () => Results.Ok(new { jobs = DisabledBackgroundJobs.Recorded.ToArray(), pushBulk = OfflineNotifications.BulkSent }));
+        group.MapGet("/recorded", () => Results.Ok(new { jobs = DisabledBackgroundJobs.Recorded.ToArray(), pushBulk = OfflineNotifications.BulkSent, pushTexts = OfflineNotifications.Texts.ToArray() }));
+
+        // Campaigns of these fixtures left by the earlier rule (2026-10-17, before succession was required): only those
+        // whose origin the fixtures confirm — every member is a fixture account. (1) Managed by a deleted fixture person:
+        // the longest-standing active member takes over. (2) Neutral title, managed by A or B marked as author, with
+        // exactly one deleted fixture person among the members: the old transfer moved authorship; it goes back.
+        group.MapPost("/repair-legacy-campaigns", async (MeepleBoardDbContext db) => {
+            var (a, b) = await Stay(); var people = await People();
+            var fixture = people.Append(a).Append(b).ToHashSet();
+            var deleted = await db.Users.Where(u => people.Contains(u.Id) && u.DeletedAt != null).Select(u => u.Id).ToListAsync();
+            var campaigns = await db.Campaigns.Include(c => c.Members).ThenInclude(m => m.User).ToListAsync();
+            var changes = new List<string>();
+            foreach (var c in campaigns.Where(c => c.Members.Count > 0 && c.Members.All(m => fixture.Contains(m.UserId)))) {
+                if (deleted.Contains(c.CreatorId)) {
+                    var next = CampaignSuccession.Order(c.Members.Where(m => m.Status == CampaignMemberStatus.Accepted && m.User?.DeletedAt == null)).FirstOrDefault();
+                    if (next != null) { Set(c, "CreatorId", next.UserId); changes.Add($"{c.Id}: manager → {next.UserId}"); }
+                }
+                var marked = c.Members.Where(m => m.IsCreator).ToList();
+                var deletedMembers = c.Members.Where(m => deleted.Contains(m.UserId)).ToList();
+                if (c.Name == MeepleBoard.Domain.Entities.User.DeletedCampaignName && marked.Count == 1 && marked[0].UserId == c.CreatorId
+                    && (c.CreatorId == a || c.CreatorId == b) && deletedMembers.Count == 1 && !deletedMembers[0].IsCreator) {
+                    Set(marked[0], "IsCreator", false); Set(deletedMembers[0], "IsCreator", true);
+                    changes.Add($"{c.Id}: author → {deletedMembers[0].UserId}");
+                }
+            }
+            await db.SaveChangesAsync();
+            return Results.Ok(new { changes });
+        });
 
         // State as stored in SQL, for the ids the verifier asks about.
         group.MapPost("/state", async (StateRequest r, MeepleBoardDbContext db) => Results.Ok(new {
@@ -137,16 +174,20 @@ public static class AccountDeletionFixture {
         group.MapPost("/report-retention", async (DateTime deletedBefore, IUserRepository users) =>
             Results.Ok(new { cleared = await users.ClearDeletedReporterTextAsync(deletedBefore.ToUniversalTime(), await People()) }));
 
-        // Everything the fixture people and A/B left: matches, sessions and campaigns; game ratings recalculated.
-        group.MapDelete("/fixture", async (MeepleBoardDbContext db, IGameRepository gamesRepository) => {
+        // What the fixture made, removed: by default for every fixture person and A/B; with ?people=… only what involves
+        // those people (matches they played, sessions and campaigns they organized or joined, their reports), so a run
+        // cleans after itself and leaves other scenarios (e.g. the iPhone validation) alone. Game ratings recalculated.
+        group.MapDelete("/fixture", async (string? people, MeepleBoardDbContext db, IGameRepository gamesRepository) => {
             var (a, b) = await Stay();
-            var everyone = (await People()).Append(a).Append(b).ToList();
+            var scoped = !string.IsNullOrWhiteSpace(people);
+            var everyone = scoped ? people!.Split(',').Select(Guid.Parse).ToList() : (await People()).Append(a).Append(b).ToList();
+            if (scoped && everyone.Any(id => !File.ReadAllText(Path.Combine(dataPath, PeopleFile)).Contains(id.ToString()))) return Results.BadRequest(new { message = "Only fixture people." });
             var matches = await db.MatchPlayers.Where(p => everyone.Contains(p.UserId)).Select(p => p.MatchId).Distinct().ToListAsync();
             var games = await db.Matches.Where(m => matches.Contains(m.Id)).Select(m => m.GameId).Distinct().ToListAsync();
             await db.CampaignMatches.Where(c => matches.Contains(c.MatchId)).ExecuteDeleteAsync();
             await db.Matches.Where(m => matches.Contains(m.Id)).ExecuteDeleteAsync();
-            await db.GameSessions.Where(s => everyone.Contains(s.OrganizerId)).ExecuteDeleteAsync();
-            await db.Campaigns.Where(c => everyone.Contains(c.CreatorId)).ExecuteDeleteAsync();
+            await db.GameSessions.Where(s => everyone.Contains(s.OrganizerId) || s.Players.Any(p => everyone.Contains(p.UserId))).ExecuteDeleteAsync();
+            await db.Campaigns.Where(c => everyone.Contains(c.CreatorId) || c.Members.Any(m => everyone.Contains(m.UserId))).ExecuteDeleteAsync();
             await db.ExperienceReports.Where(r => everyone.Contains(r.ReporterId)).ExecuteDeleteAsync();
             await db.GameResourceReports.Where(r => everyone.Contains(r.UserId)).ExecuteDeleteAsync();
             // Resources the verifier created (also those left by an interrupted run); their reports go with them.

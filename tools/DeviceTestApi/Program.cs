@@ -331,11 +331,14 @@ public class DisabledBackgroundJobs : Hangfire.IBackgroundJobClient {
     public bool ChangeState(string jobId, Hangfire.States.IState state, string expectedState) => false;
 }
 public class OfflineNotifications : INotificationService {
-    public Task SendAsync(string token, string title, string body, object? data = null, CancellationToken ct = default) => Task.CompletedTask;
+    public Task SendAsync(string token, string title, string body, object? data = null, CancellationToken ct = default) { Texts.Enqueue(title + " | " + body); return Task.CompletedTask; }
     // A verifier may make the next bulk send fail, to check that nothing depends on it.
     public static int FailNextBulk; public static int BulkSent;
+    // What would have been sent (title and body only), so verifiers can check the wording.
+    public static readonly System.Collections.Concurrent.ConcurrentQueue<string> Texts = new();
     public Task SendToManyAsync(IEnumerable<string> tokens, string title, string body, object? data = null, CancellationToken ct = default) {
         if (Interlocked.Exchange(ref FailNextBulk, 0) == 1) throw new HttpRequestException("Simulated push failure (DeviceTests).");
+        Texts.Enqueue(title + " | " + body);
         Interlocked.Increment(ref BulkSent); return Task.CompletedTask;
     }
     public Task NotifyMatchCreatedAsync(Guid id, string name, IEnumerable<string> tokens, CancellationToken ct = default) => Task.CompletedTask;

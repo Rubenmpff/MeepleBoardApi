@@ -30,6 +30,8 @@ const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
   const stay = JSON.parse(fs.readFileSync(path.join(root, '.device-tests/account-deletion-accounts.json'), 'utf8'));
   const adminAccount = JSON.parse(fs.readFileSync(path.join(root, '.device-tests/accounts.json'), 'utf8')).find(a => a.Email === 'admin@meepleboard.test');
   const people = (await fixture('POST', '/people')).data;
+  // Only what this run creates is cleaned at the end (other scenarios, such as the iPhone validation, stay).
+  const runPeople = people.people.map(x => x.id);
   const [pInfo, qInfo] = [people.people.find(x => x.role === 'p'), people.people.find(x => x.role === 'q')];
   const A = { ...(await login(stay[0].Email, stay[0].Password, 'A')), id: stay[0].Id };
   const B = { ...(await login(stay[1].Email, stay[1].Password, 'B')), id: stay[1].Id };
@@ -78,8 +80,15 @@ const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
   const withMembers = Object.fromEntries(summary.campaignsWithMembers.map(c => [c.id, c]));
   assert.deepEqual(withMembers[st.campaigns.transfer].members.map(m => m.id).sort(), [A.id, B.id].sort());
   assert.equal(withMembers[st.campaigns.transfer].hasNotes, true);
-  assert.deepEqual(withMembers[st.campaigns.readOnly].members.map(m => m.id), [B.id]);
-  pass('deletion summary: 1 scheduled and 1 running session, two campaigns with active members (and who), notes flagged, one campaign only P\'s');
+  // Succession order: accepted longest ago first (B 120 min, A 60 min); a tie falls back to a fixed order.
+  assert.deepEqual(withMembers[st.campaigns.auto].members.map(m => m.id), [B.id, A.id]); assert.equal(withMembers[st.campaigns.auto].defaultManagerId, B.id);
+  assert.equal(withMembers[st.campaigns.transfer].defaultManagerId, B.id, 'B would take over if P chose nobody');
+  const tieDefault = withMembers[st.campaigns.tie].defaultManagerId;
+  assert.ok([A.id, B.id].includes(tieDefault));
+  assert.equal((await call(P, 'GET', '/users/me/deletion-summary', null, 200)).data.campaignsWithMembers.find(c => c.id === st.campaigns.tie).defaultManagerId, tieDefault, 'tie-break is deterministic');
+  assert.equal(withMembers[st.campaigns.managedByP].isAuthor, false); assert.equal(withMembers[st.campaigns.managedByP].defaultManagerId, A.id);
+  assert.equal(withMembers[st.campaigns.transfer].isAuthor, true);
+  pass('deletion summary: sessions; four managed campaigns with their successor shown (by seniority, deterministic on a tie), authorship flagged, notes flagged; one campaign only P\'s');
 
   // Refusals change nothing.
   await call(P, 'DELETE', '/users/me', { password: 'errada-1A' }, 400);
@@ -118,15 +127,31 @@ const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
   pass('sessions: the scheduled one is cancelled (A sees «Cancelled», out of the lists), the running one ended, both and the ended one with a neutral title and no place; A\'s session keeps its text and the anonymised P');
 
   const campaign = key => state.campaigns.find(c => c.id === st.campaigns[key]);
-  assert.equal(campaign('transfer').creatorId, A.id); assert.deepEqual(campaign('transfer').creators, [A.id]);
+  assert.equal(campaign('transfer').creatorId, A.id); assert.deepEqual(campaign('transfer').creators, [P.id], 'P stays the author');
   assert.equal(campaign('transfer').name, 'deleted:campaign'); assert.equal(campaign('transfer').notes, 'Notas que A escreveu');
   assert.equal(campaign('transfer').matches.find(m => m.matchId === m1.id).sessionTitle, null);
-  assert.equal(campaign('readOnly').creatorId, P.id); assert.equal(campaign('readOnly').name, 'deleted:campaign');
+  assert.equal(campaign('auto').creatorId, B.id); assert.deepEqual(campaign('auto').creators, [P.id]);
+  assert.equal(campaign('tie').creatorId, tieDefault); assert.deepEqual(campaign('tie').creators, [P.id]);
   assert.equal(campaign('alone'), undefined);
+  assert.equal(campaign('managedByP').creatorId, A.id); assert.deepEqual(campaign('managedByP').creators, [A.id]); assert.equal(campaign('managedByP').name, 'Campanha escrita por A');
   assert.equal(campaign('ofA').name, 'Campanha de A'); assert.equal(campaign('ofA').notes, 'Notas de A');
-  await call(B, 'DELETE', `/campaigns/${st.campaigns.readOnly}`, null, 403);
-  assert.equal((await call(B, 'GET', `/campaigns/${st.campaigns.readOnly}`, null, 200)).data.id, st.campaigns.readOnly);
-  pass('campaigns: one passes to A (neutral title, A\'s notes kept, P\'s encounter title gone), one stays for B with management read-only, P\'s own one is gone; A\'s campaign untouched');
+  const pushTexts = (await fixture('GET', '/recorded')).data.pushTexts;
+  assert.ok(pushTexts.filter(t => t.includes('Passaste a gerir')).length >= 1, 'the new manager with notifications is told');
+  assert.ok(!pushTexts.some(t => t.includes('deleted:')), 'no technical marker in any notification: ' + pushTexts.filter(t => t.includes('deleted:')).join(' | '));
+  pass('campaigns: chosen successor A, automatic successor B (longest-standing), the tie resolved as announced; P stays the author everywhere, the campaign written by A keeps A\'s name and authorship; P\'s own one is gone; the new manager is told, with no marker');
+
+  // Management after the succession: only the manager; complete/abandon only from «Ativa»; matches out by who played or manages.
+  await call(B, 'POST', `/campaigns/${st.campaigns.transfer}/complete`, null, 403);
+  await call(B, 'DELETE', `/campaigns/${st.campaigns.transfer}/members/${A.id}`, null, 403);
+  await call(B, 'DELETE', `/campaigns/${st.campaigns.transfer}/matches/${m1.id}`, null, 403);
+  await call(A, 'DELETE', `/campaigns/${st.campaigns.transfer}/members/${P.id}`, null, 409);
+  await call(A, 'DELETE', `/campaigns/${st.campaigns.transfer}/matches/${m1.id}`, null, 204);
+  await call(A, 'POST', `/campaigns/${st.campaigns.transfer}/complete`, null, 204);
+  await call(A, 'POST', `/campaigns/${st.campaigns.transfer}/abandon`, null, 409);
+  await call(A, 'DELETE', `/campaigns/${st.campaigns.auto}/members/${B.id}`, null, 403);
+  await call(B, 'DELETE', `/campaigns/${st.campaigns.auto}/members/${A.id}`, null, 204);
+  await call(B, 'POST', `/campaigns/${st.campaigns.auto}/members/leave`, null, 409);
+  pass('management: B (member) cannot complete, remove members or take out a match it did not play (403); A (manager) cannot remove the original author (409), takes out the match it played, completes, then cannot abandon a completed campaign (409); B manages its campaign and cannot leave it (409)');
 
   const m = id => state.matches.find(x => x.id === id);
   assert.equal(m(m2.id), undefined, 'the solo match is gone');
@@ -152,6 +177,8 @@ const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
   pass('reports: P\'s open report keeps its text for administrators only and loses it when resolved; the resolved resource report lost it at once; P\'s suggestion stays without P');
 
   // Through support: a single-use link sent to the account's own address; storage failing beyond the retries.
+  const qCampaign = (await call(Q, 'POST', '/campaigns', { name: 'Campanha de Q', gameId: game.id, notes: null })).data;
+  await call(Q, 'POST', `/campaigns/${qCampaign.id}/members/invite`, { userId: A.id }); await call(A, 'POST', `/campaigns/${qCampaign.id}/members/respond`, true);
   const q1 = await match(Q, { isSoloGame: true, playerIds: [Q.id], personalRating: 7 });
   await photo(Q, q1.id);
   await call(Q, 'POST', `/experiences/${ofA.id}/reports`, { reason: 'Spam', detail: 'Detalhe escrito por Q' }, 204);
@@ -183,6 +210,9 @@ const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
   const recorded = (await fixture('GET', '/recorded')).data.jobs;
   assert.ok(recorded.some(j => j === 'PhotoDeletionJob:' + qPhotos[0]), 'storage failing beyond the retries leaves a job with the reference only');
   await fixture('POST', '/fail?photos=0&push=false');
+  const qState = (await fixture('POST', '/state', { ...ids, Campaigns: [qCampaign.id] })).data.campaigns[0];
+  assert.equal(qState.creatorId, A.id); assert.deepEqual(qState.creators, [Q.id]); assert.equal(qState.name, 'deleted:campaign');
+  pass('through support: the same rule — the only active member A takes over automatically; Q stays the author');
   pass('through support: same answer for any address; the link goes to the account\'s address; opening it deletes nothing; POST deletes and confirms by email; the used link changes nothing; storage still failing leaves a retry job');
 
   // Retention: an open report by a deleted account keeps its text at most until the limit (job step, run now for the fixture).
@@ -194,10 +224,33 @@ const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
   assert.equal(qReport.detail, null); assert.equal(qReport.open, true); assert.equal(qReport.reason, 'Spam');
   pass('retention: past the limit, an open report by a deleted account loses its text and keeps its reason for moderation');
 
+  // A successor leaving at the very moment the manager deletes the account: one of them wins, never a campaign whose
+  // manager has left or been deleted.
+  const outcomes = [];
+  // The leave starts 0, 150 and 400 ms after the deletion request, so both orders get a chance to happen.
+  for (const delay of [0, 150, 400]) {
+    const created = (await fixture('POST', '/people')).data.people; runPeople.push(...created.map(x => x.id));
+    const fresh = created.find(x => x.role === 'p');
+    const R = { ...(await login(fresh.email, fresh.password, 'R')), id: fresh.id };
+    const c = (await call(R, 'POST', '/campaigns', { name: 'Corrida de sucessão', gameId: game.id, notes: null })).data;
+    for (const u of [A, B]) { await call(R, 'POST', `/campaigns/${c.id}/members/invite`, { userId: u.id }); await call(u, 'POST', `/campaigns/${c.id}/members/respond`, true); }
+    const [del, leave] = await Promise.all([
+      call(R, 'DELETE', '/users/me', { password: fresh.password, campaignTransfers: [{ campaignId: c.id, newManagerId: A.id }] }),
+      new Promise(res => setTimeout(res, delay)).then(() => call(A, 'POST', `/campaigns/${c.id}/members/leave`))]);
+    const after = (await fixture('POST', '/state', { ...ids, Users: [R.id], Campaigns: [c.id] })).data;
+    const cs = after.campaigns[0], r = after.users[0];
+    if (del.status === 204) { assert.equal(leave.status, 409, 'A left after becoming manager'); assert.equal(cs.creatorId, A.id); assert.ok(r.deletedAt); outcomes.push('deletion first'); }
+    else { assert.equal(del.status, 400); assert.equal(leave.status, 204); assert.equal(cs.creatorId, R.id); assert.equal(r.deletedAt, null); outcomes.push('leave first');
+      await call(R, 'DELETE', '/users/me', { password: fresh.password }, 204);
+      const again = (await fixture('POST', '/state', { ...ids, Users: [R.id], Campaigns: [c.id] })).data.campaigns[0];
+      assert.equal(again.creatorId, B.id, 'then B, the only active member left, takes over'); }
+  }
+  pass(`successor leaving while the manager deletes (${outcomes.join(', ')}): the deletion with A as successor and A's leave never both happen; a refused choice changes nothing`);
+
   // Clean up: resources, then everything the fixture made; the game average is back.
   await call(admin, 'POST', `/admin/experiences/${ofA.id}/keep`, { reason: null }, 204);
   for (const r of [r1, r2]) await call(admin, 'DELETE', `/admin/game-resources/${r.id}`, null, 204);
-  assert.equal((await fixture('DELETE', '/fixture')).status, 204);
+  assert.equal((await fixture('DELETE', `/fixture?people=${runPeople.join(',')}`)).status, 204);
   assert.deepEqual(await averages(), initial, 'the game average is back to where it was');
   pass('clean-up: resources, matches, sessions and campaigns of the fixture removed; the game average is back to where it was');
 })().catch(error => { console.error('FAIL', error.message); process.exit(1); });
