@@ -2,6 +2,7 @@
 //   node tools/DeviceTestApi/verify-game-friends.cjs
 // Uses the fictitious friends the test host seeds for "participante" (Wingspan): five who may appear, five who must not.
 // A privacy change made here is restored before it ends. Never prints credentials or tokens.
+if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
 (async () => {

@@ -2,6 +2,7 @@
 //   node tools/DeviceTestApi/verify-account-flows.cjs
 // Changes no data: own-profile writes send the value already saved, registration is reached with an invalid body,
 // and everything else is a read. Never prints credentials or tokens.
+if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
 (async () => {

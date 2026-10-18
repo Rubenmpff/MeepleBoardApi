@@ -1,4 +1,5 @@
 // Creates only dated synthetic fixtures in the guarded DeviceTests API; credentials stay local/in-memory.
+if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const base='http://127.0.0.1:5099',root=path.resolve(__dirname,'../..'),file=path.join(root,'.device-tests/statistics-fixture.json');
 async function call(route,token,method='GET',body,expected=200){

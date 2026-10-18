@@ -1,3 +1,4 @@
+if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const base = 'http://127.0.0.1:5099';
 async function send(method, route, token, body, status = 200) {

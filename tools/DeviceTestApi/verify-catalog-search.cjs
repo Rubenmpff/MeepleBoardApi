@@ -1,4 +1,5 @@
 // Uses only the guarded disposable API and synthetic accounts. No external BGG calls.
+if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');

@@ -4,6 +4,7 @@
 // Recalculates every game once (the approved recalculation; individual ratings are only read), then works on
 // «Meeple Teste Cooperativo» with matches it creates and deletes again, so averages return to where they were.
 // Never prints credentials or tokens.
+if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
 const MARK = 'Verificação de avaliações';

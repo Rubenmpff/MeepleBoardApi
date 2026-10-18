@@ -2,6 +2,7 @@
 //   node tools/DeviceTestApi/verify-game-resources.cjs            seed the verified links, check permissions, filters, approval and reports
 //   node tools/DeviceTestApi/verify-game-resources.cjs --recheck  after restarting the API: the catalogue is still there
 // Seeding is idempotent (by URL). Test suggestions and reports it creates are removed or resolved before it ends.
+if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
 const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'game-resources.fixture.json'), 'utf8'));

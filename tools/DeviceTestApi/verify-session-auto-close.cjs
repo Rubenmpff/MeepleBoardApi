@@ -2,6 +2,7 @@
 //   node tools/DeviceTestApi/verify-session-auto-close.cjs            full check; leaves one fictitious running session
 //   node tools/DeviceTestApi/verify-session-auto-close.cjs --recheck  after restarting the API: ends and limits unchanged
 // Uses the fictitious "autor" (organizer) and "participante" accounts; never prints credentials or tokens.
+if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
 const state = path.join(root, '.device-tests/session-auto-close.json');

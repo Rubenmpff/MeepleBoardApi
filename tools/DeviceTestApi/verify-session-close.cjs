@@ -2,6 +2,7 @@
 // automatic close. Uses its own disposable accounts and sessions (SessionCloseFixture); the iPhone walkthrough
 // accounts and sessions are never touched. Never prints credentials or tokens.
 //   node tools/DeviceTestApi/verify-session-close.cjs
+if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
 (async () => {

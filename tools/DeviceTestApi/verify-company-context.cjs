@@ -1,4 +1,5 @@
 // Read-only checks against the existing synthetic DeviceTests fixtures.
+if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const root=path.resolve(__dirname,'../..'),base='http://127.0.0.1:5099';
 async function call(route,token,expected=200){const r=await fetch(base+route,{headers:token?{Authorization:`Bearer ${token}`}:{}});assert.equal(r.status,expected,'Unexpected HTTP status');return r.status===200?r.json():null;}

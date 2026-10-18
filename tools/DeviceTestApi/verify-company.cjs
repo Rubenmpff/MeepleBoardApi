@@ -1,4 +1,5 @@
 // Guarded synthetic SQL/API checks. No credentials, tokens or private text are printed.
+if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const root=path.resolve(__dirname,'../..'),base='http://127.0.0.1:5099';
 async function call(url,token,method='GET',body,status=200){const r=await fetch(base+url,{method,headers:{...(token?{Authorization:`Bearer ${token}`}:{ }),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});assert.ok(Array.isArray(status)?status.includes(r.status):r.status===status,`${method} ${url.split('?')[0]} returned ${r.status}`);const text=await r.text();return text?JSON.parse(text):null;}

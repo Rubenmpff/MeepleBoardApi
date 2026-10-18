@@ -1,5 +1,6 @@
 // DeviceTests only: adding a game with status Wishlist (3) or Played (2) is stored and read back with that status.
 // Uses the fictitious "membro" account, creates two entries and removes them again, leaving its library as found.
+if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const root=path.resolve(__dirname,'../..'),base='http://127.0.0.1:5099';
 (async()=>{

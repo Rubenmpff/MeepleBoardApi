@@ -5,6 +5,7 @@
 // anonymised, neutralised or kept; storage and push failures; repeated and simultaneous requests; report retention.
 // Everything created is removed at the end and the game average returns to where it was. Never touches the iPhone
 // walkthrough accounts or sessions; never prints credentials or tokens.
+if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
 (async () => {

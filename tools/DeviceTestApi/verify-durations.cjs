@@ -5,6 +5,7 @@
 // rules, then leaves a small shared fixture so the community average can be seen on the iPhone: six matches of the
 // chosen game by three friends who contribute (amiga-colecionadora, amiga-tabuleiro, amiga-meeples). Never prints
 // credentials or tokens.
+if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
 const MARK = 'Verificação de duração', FIXTURE = 'Verificação de duração · comunidade';

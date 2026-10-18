@@ -4,6 +4,7 @@
 // Gives it a friendship, a library entry, a shared rated match with a note and a publication, and a report on
 // someone else's comment; an administrator deletes it; then checks what goes and what stays. The match it
 // shared is deleted again at the end, so averages return to where they were. Never prints credentials or tokens.
+if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
 const MARK = 'Verificação de eliminação de conta';

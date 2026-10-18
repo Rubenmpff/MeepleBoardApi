@@ -79,3 +79,31 @@ O script exige Node 22.14.0/npm 10.9.2, valida health na LAN e define variáveis
 Ligação reutilizável no iPhone: na mesma rede Wi-Fi, abrir `http://192.168.1.116:5099/device-test/health` no Safari e confirmar DeviceTests. Só depois abrir Expo Go com `exp://192.168.1.116:8082`. Após reiniciar a API, voltar a fazer login com uma conta fictícia; não transportar tokens do Windows.
 
 Referência Microsoft: [contentores SQL Server e limitações de emulação](https://learn.microsoft.com/en-us/sql/linux/containers/deploy?view=sql-server-ver16). Este resultado confirma este ensaio, não suporte oficial nem estabilidade prolongada.
+
+## Verificadores: importar não executa (2026-10-18)
+
+**Incidente (2026-10-17):** um comando que devia só confirmar a sintaxe usou `node -e "require('…/verify-own-account-deletion.cjs')"`. Isso executou o verificador contra a API DeviceTests, que ainda tinha o código antigo. Criou dados descartáveis, que foram depois limpos com a limpeza por pessoas; o roteiro não foi tocado.
+
+**Correção:** os 24 verificadores em `tools/DeviceTestApi/*.cjs` começam por:
+
+```js
+if (require.main !== module) return;
+```
+
+**Regras:**
+
+- **Verificar a sintaxe:** só com `node --check <ficheiro>`. Nunca com `require` nem `node -e`.
+- **Correr um verificador:** só de forma explícita, com `node tools/DeviceTestApi/<verificador>.cjs`.
+- **Verificadores novos:** começam com a mesma guarda.
+
+**Verificado:** os 24 ficheiros foram carregados com a rede bloqueada e não houve nenhuma tentativa de pedido.
+
+## Fotografia do roteiro (2026-10-18)
+
+`node tools/DeviceTestApi/roteiro-snapshot.cjs save|compare` compara o conteúdo dos dados do roteiro do iPhone (autor, participante, alheio, membro), não só as contagens. Só lê dados: faz o início de sessão e pedidos GET.
+
+- **O que guarda:** amigos; coleção; sessões (nome, local, organizador, datas, jogo previsto, participantes, partidas); campanhas (nome, notas em hash, quem gere, estado, membros e autoria, encontros); e cada partida (jogo, data, modo, resultado, vencedor, duração, local, resumo, sessão, jogadores com pontuação e resultado, diários com avaliação, notas em hash, etiquetas e número de fotografias).
+- **Onde guarda:** `.device-tests/roteiro-snapshot.json`, ignorado pelo git.
+- **O que muda com o tempo** (estado e fim de uma sessão quando passa o fecho automático): é comparado à parte e não conta como falha.
+
+**Referência:** fotografia tirada a 2026-10-18 às 07:47 UTC, depois da etapa da eliminação de conta. A comparação imediata deu 0 diferenças. Não prova o que aconteceu antes desta data: até aqui, a verificação do roteiro comparava só as contagens de sessões por estado.

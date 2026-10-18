@@ -1,6 +1,7 @@
 // DeviceTests only: game page sheet, expansions and a session's planned game against real SQL (test API, port 5099).
 //   node tools/DeviceTestApi/verify-game-page.cjs
 // The session created here is cancelled (and so deleted) before it ends. Never prints credentials or tokens.
+if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
 (async () => {

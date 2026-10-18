@@ -2,6 +2,7 @@
 //   node tools/DeviceTestApi/verify-planned-game-journey.cjs
 // Leaves one running session, «Sessão de teste · jogo previsto» (participante organizes, autor accepted), for the iPhone
 // walkthrough; a previous one from this script is closed first. Never prints credentials or tokens.
+if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099', NAME = 'Sessão de teste · jogo previsto';
 (async () => {
