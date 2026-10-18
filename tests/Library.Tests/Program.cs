@@ -164,7 +164,7 @@ public class Fixture {
         });
         var users = Stub.Create<IUserRepository>((m, a) => m.Name == "GetByIdAsync" ? Task.FromResult<User?>(Owner) : throw new Exception(m.Name));
         var matches = Stub.Create<IMatchRepository>((m, a) => m.Name == "GetPlayCountsByGameForUserAsync" ? Task.FromResult<IReadOnlyDictionary<Guid, (int Count, DateTime LastPlayed)>>(new Dictionary<Guid, (int Count, DateTime LastPlayed)> { [Game.Id] = (3, DateTime.UtcNow.AddDays(-1)) }) : throw new Exception("Unexpected match mutation: " + m.Name));
-        Service = new(library, games, users, matches, Unused<IFriendshipRepository>(), Unused<IBGGService>(), Unused<IGameService>(), new MapperConfiguration(c => c.AddProfile<MappingEntityToDto>()).CreateMapper());
+        Service = new(library, games, users, matches, Unused<IFriendshipRepository>(), Unused<IBGGService>(), Unused<IGameService>(), new MapperConfiguration(c => c.AddProfile<MappingEntityToDto>()).CreateMapper(), NoBlocks.Create());
     }
     Task Add(UserGameLibrary entry) { entry.GetType().GetProperty("Game")!.SetValue(entry, Game); Entry = entry; return Task.CompletedTask; }
     Task Remove() { Entry = null; return Task.CompletedTask; }
@@ -173,4 +173,14 @@ public class Stub : DispatchProxy {
     public Func<MethodInfo, object?[]?, object?> Handler = null!;
     protected override object? Invoke(MethodInfo? method, object?[]? args) => Handler(method!, args);
     public static T Create<T>(Func<MethodInfo, object?[]?, object?> handler) where T : class { var proxy = DispatchProxy.Create<T, Stub>(); ((Stub)(object)proxy).Handler = handler; return proxy; }
+}
+
+
+/// <summary>Community rules are covered by Community.Tests: here nobody has blocked anybody.</summary>
+public class NoBlocks : System.Reflection.DispatchProxy
+{
+    public static MeepleBoard.Domain.Interfaces.ICommunityRepository Create() => Create<MeepleBoard.Domain.Interfaces.ICommunityRepository, NoBlocks>();
+    protected override object? Invoke(System.Reflection.MethodInfo? m, object?[]? a) => m!.ReturnType == typeof(Task<bool>) ? Task.FromResult(false)
+        : m.ReturnType == typeof(Task<IReadOnlyList<Guid>>) ? Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>())
+        : throw new InvalidOperationException("Unexpected community call: " + m.Name);
 }

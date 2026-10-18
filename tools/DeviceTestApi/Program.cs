@@ -56,6 +56,7 @@ app.UseCors(); app.UseAuthentication(); app.UseAuthorization(); app.MapControlle
 app.MapGet("/device-test/health", () => new { environment = "DeviceTests", database = "MeepleBoard_DeviceTests", externalDelivery = false });
 SessionCloseFixture.Map(app, dataPath);
 AccountDeletionFixture.Map(app, dataPath);
+CommunityFixture.Map(app, dataPath);
 await DeviceDatabase.Prepare(app.Services, dataPath, connection);
 if (args.Contains("--audit-only")) return;
 Console.WriteLine("DeviceTests ready on port 5099; synthetic accounts: " + Path.Combine(dataPath, "accounts.json"));
@@ -129,7 +130,7 @@ public static class DeviceDatabase {
                 "REFERENCES [MatchJournalEntries] ([Id]) ON DELETE CASCADE", "REFERENCES [MatchExperiencePublications] ([Id]) ON DELETE CASCADE"];
             var auditedSql = approvedResourceKeys.Aggregate(sql.Replace(approvedDefaultDrop, ""), (text, clause) => text.Replace(clause, ""));
             if (auditedSql.Contains("DROP ") || auditedSql.Contains("UPDATE [Matches]") || auditedSql.Contains("DELETE ")) throw new Exception("Unexpected destructive migration SQL");
-            Console.WriteLine("Migration audit passed: model matches snapshot; nullable CreatorId, one filtered index and nullable rating widened to float, four nullable outcome columns, two session close-time columns, two new resource tables, two nullable resource columns, four nullable game sheet columns, a nullable planned game (set null on delete), a nullable duration method, an off-by-default duration sharing preference, two rating counts and the experience publication and report tables.");
+            Console.WriteLine("Migration audit passed: model matches snapshot; nullable CreatorId, one filtered index and nullable rating widened to float, four nullable outcome columns, two session close-time columns, two new resource tables, two nullable resource columns, four nullable game sheet columns, a nullable planned game (set null on delete), a nullable duration method, an off-by-default duration sharing preference, two rating counts and the experience publication and report tables, and the blocks, people/photo reports and suspension columns.");
             if (Environment.GetCommandLineArgs().Contains("--audit-only")) return;
         }
         // All SQL access derives from the same validated exclusive test connection.

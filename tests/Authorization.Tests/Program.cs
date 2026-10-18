@@ -398,9 +398,9 @@ public class Fixture
             if (m.Name == "AddAsync") { var player = (MatchPlayer)args![0]!; Store[player.MatchId].MatchPlayers.Add(player); return Task.CompletedTask; }
             return Default(m.ReturnType);
         });
-        MatchService = new(Matches, players, sessions, Empty<IGameSessionPlayerRepository>(), users, games, Journals, Empty<IBGGService>(), Empty<IGameService>(), Empty<INotificationService>(), mapper);
-        CampaignService = new(Journals, Matches, users, games, Empty<INotificationService>(), Photos, Microsoft.Extensions.Logging.Abstractions.NullLogger<CampaignService>.Instance);
-        SessionService = new(sessions, Empty<IGameSessionPlayerRepository>(), users, mapper, Empty<IFriendshipRepository>(), games);
+        MatchService = new(Matches, players, sessions, Empty<IGameSessionPlayerRepository>(), users, games, Journals, Empty<IBGGService>(), Empty<IGameService>(), Empty<INotificationService>(), mapper, AllFriends.Create(), NoBlocks.Create());
+        CampaignService = new(Journals, Matches, users, games, Empty<INotificationService>(), Photos, Microsoft.Extensions.Logging.Abstractions.NullLogger<CampaignService>.Instance, AllFriends.Create(), NoBlocks.Create());
+        SessionService = new(sessions, Empty<IGameSessionPlayerRepository>(), users, mapper, Empty<IFriendshipRepository>(), games, NoBlocks.Create());
         var lineup = Stub.Create<IMatchPlayerRepository>((m, args) => m.Name switch {
             "ExistsAsync" => Task.FromResult(Store[(Guid)args![1]!].MatchPlayers.Any(p => p.UserId == (Guid)args[0]!)),
             "GetByMatchAndPlayerAsync" => Task.FromResult(Store[(Guid)args![0]!].MatchPlayers.FirstOrDefault(p => p.UserId == (Guid)args[1]!)),
@@ -409,7 +409,7 @@ public class Fixture
             _ => Default(m.ReturnType)
         });
         var knownUsers = Stub.Create<IUserRepository>((m, args) => m.Name == "GetByIdAsync" ? Task.FromResult<User?>(new User("Fixture user", "fixture@example.invalid", "Local")) : Default(m.ReturnType));
-        PlayerService = new(lineup, knownUsers, Matches, mapper, Microsoft.Extensions.Logging.Abstractions.NullLogger<MatchPlayerService>.Instance, games);
+        PlayerService = new(lineup, knownUsers, Matches, mapper, Microsoft.Extensions.Logging.Abstractions.NullLogger<MatchPlayerService>.Instance, games, AllFriends.Create(), NoBlocks.Create(), Empty<IGameSessionPlayerRepository>());
         UserService = Empty<IUserService>();
         var publications = Stub.Create<IExperienceRepository>((m, args) => m.Name switch {
             "GetByEntryForUpdateAsync" => Task.FromResult(Publications.FirstOrDefault(p => p.JournalEntryId == (Guid)args![0]!)),
@@ -442,4 +442,22 @@ public class Stub : DispatchProxy
     public Func<MethodInfo, object?[]?, object?> Handler = null!;
     protected override object? Invoke(MethodInfo? method, object?[]? args) => Handler(method!, args);
     public static T Create<T>(Func<MethodInfo, object?[]?, object?> handler) where T : class { var proxy = DispatchProxy.Create<T, Stub>(); ((Stub)(object)proxy).Handler = handler; return proxy; }
+}
+
+
+/// <summary>Community rules are covered by Community.Tests: here nobody has blocked anybody.</summary>
+public class NoBlocks : System.Reflection.DispatchProxy
+{
+    public static MeepleBoard.Domain.Interfaces.ICommunityRepository Create() => Create<MeepleBoard.Domain.Interfaces.ICommunityRepository, NoBlocks>();
+    protected override object? Invoke(System.Reflection.MethodInfo? m, object?[]? a) => m!.ReturnType == typeof(Task<bool>) ? Task.FromResult(false)
+        : m.ReturnType == typeof(Task<IReadOnlyList<Guid>>) ? Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>())
+        : throw new InvalidOperationException("Unexpected community call: " + m.Name);
+}
+
+/// <summary>Who may play together is covered by Community.Tests: here every pair is an accepted friendship.</summary>
+public class AllFriends : System.Reflection.DispatchProxy
+{
+    public static IFriendshipRepository Create() => Create<IFriendshipRepository, AllFriends>();
+    protected override object? Invoke(System.Reflection.MethodInfo? m, object?[]? a) => m!.Name == "ExistsAcceptedAsync" ? Task.FromResult(true)
+        : throw new InvalidOperationException("Unexpected friendship call: " + m.Name);
 }

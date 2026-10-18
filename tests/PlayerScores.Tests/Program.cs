@@ -210,7 +210,7 @@ var ruleFriend = Guid.NewGuid();
         "AddAsync" => AddSession((GameSession)args![0]!),
         "SaveChangesAsync" => Task.CompletedTask,
         "GetByIdWithDetailsAsync" => Task.FromResult<GameSession?>(sessions.Single()),
-        "GetByIdForUpdateAsync" => Task.FromResult<GameSession?>(sessions.Single()),
+        "GetByIdForUpdateAsync" or "GetByIdWithPlayersForUpdateAsync" => Task.FromResult<GameSession?>(sessions.Single()),
         _ => throw new Exception("Unexpected session dependency: " + method.Name)
     });
     Task AddSession(GameSession value) { sessions.Add(value); return Task.CompletedTask; }
@@ -229,7 +229,7 @@ var ruleFriend = Guid.NewGuid();
         return Task.FromResult(acceptedFriend);
     });
     var mapper = new MapperConfiguration(c => c.AddProfile<MappingEntityToDto>()).CreateMapper();
-    return (new GameSessionService(sessionRepo, players, users, mapper, friends, Stub.Create<IGameRepository>((method, _) => throw new Exception("Unexpected game dependency"))), sessions, links);
+    return (new GameSessionService(sessionRepo, players, users, mapper, friends, Stub.Create<IGameRepository>((method, _) => throw new Exception("Unexpected game dependency")), NoBlocks.Create()), sessions, links);
 }
 foreach (var ids in new List<Guid>?[] { null, new(), new() { ruleOwner }, new() { Guid.Empty, ruleOwner } }) {
     await Check("session without a distinct friend rejected before tracking writes", async () => {
@@ -331,7 +331,7 @@ class Fixture {
         var users = Proxy<IUserRepository>((m, a) => m.Name == "GetByIdAsync" ? Task.FromResult<User?>(null) : throw new Exception(m.Name));
         var mapper = new MapperConfiguration(c => c.AddProfile<MappingEntityToDto>()).CreateMapper();
         Service = new(matches, players, Unused<IGameSessionRepository>(), Unused<IGameSessionPlayerRepository>(), users, games,
-            journals, Unused<IBGGService>(), Unused<IGameService>(), Unused<INotificationService>(), mapper);
+            journals, Unused<IBGGService>(), Unused<IGameService>(), Unused<INotificationService>(), mapper, AllFriends.Create(), NoBlocks.Create());
     }
     Task AddEntry(MatchJournalEntry entry) { Entries.Add(entry); Match!.JournalEntries.Add(entry); return Task.CompletedTask; }
     Task AddMatch(Match match) { Match = match; return Task.CompletedTask; }
@@ -348,4 +348,22 @@ public class Stub : DispatchProxy {
     public static T Create<T>(Func<MethodInfo, object?[]?, object?> handler) where T : class {
         var proxy = DispatchProxy.Create<T, Stub>(); ((Stub)(object)proxy).Handler = handler; return proxy;
     }
+}
+
+
+/// <summary>Community rules are covered by Community.Tests: here nobody has blocked anybody.</summary>
+public class NoBlocks : System.Reflection.DispatchProxy
+{
+    public static MeepleBoard.Domain.Interfaces.ICommunityRepository Create() => Create<MeepleBoard.Domain.Interfaces.ICommunityRepository, NoBlocks>();
+    protected override object? Invoke(System.Reflection.MethodInfo? m, object?[]? a) => m!.ReturnType == typeof(Task<bool>) ? Task.FromResult(false)
+        : m.ReturnType == typeof(Task<IReadOnlyList<Guid>>) ? Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>())
+        : throw new InvalidOperationException("Unexpected community call: " + m.Name);
+}
+
+/// <summary>Who may play together is covered by Community.Tests: here every pair is an accepted friendship.</summary>
+public class AllFriends : System.Reflection.DispatchProxy
+{
+    public static IFriendshipRepository Create() => Create<IFriendshipRepository, AllFriends>();
+    protected override object? Invoke(System.Reflection.MethodInfo? m, object?[]? a) => m!.Name == "ExistsAcceptedAsync" ? Task.FromResult(true)
+        : throw new InvalidOperationException("Unexpected friendship call: " + m.Name);
 }

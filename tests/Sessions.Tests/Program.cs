@@ -143,7 +143,7 @@ await Check("manual and automatic close: whichever is stored first stays; the ot
     var manualFirst = Sessions.Create(now.AddHours(-2), accepted: [now.AddHours(-3)]);
     var autoFirst = Sessions.Create(now.AddDays(-2), accepted: [now.AddDays(-3)]);
     var repo = new Repository([manualFirst, autoFirst]);
-    var sessions = new GameSessionService(repo, Stub.Create<IGameSessionPlayerRepository>(), Stub.Create<IUserRepository>(), new MapperConfiguration(c => c.AddProfile<MappingEntityToDto>()).CreateMapper(), Stub.Create<IFriendshipRepository>(), Games.With(Guid.Empty));
+    var sessions = new GameSessionService(repo, Stub.Create<IGameSessionPlayerRepository>(), Stub.Create<IUserRepository>(), new MapperConfiguration(c => c.AddProfile<MappingEntityToDto>()).CreateMapper(), Stub.Create<IFriendshipRepository>(), Games.With(Guid.Empty), NoBlocks.Create());
     await sessions.CloseSessionAsync(manualFirst.Id, manualFirst.OrganizerId);
     var manualEnd = manualFirst.EndDate;
     var job = new SessionAutoCloseJob(repo, NullLogger<SessionAutoCloseJob>.Instance);
@@ -156,7 +156,7 @@ await Check("manual and automatic close: whichever is stored first stays; the ot
     // Lost race: the database already holds the other close; the service keeps it and reports success.
     var raced = Sessions.Create(now.AddHours(-2), accepted: [now.AddHours(-3)]);
     var racing = new Repository([raced]) { StoredByOther = (raced.ScheduledStartDate.AddHours(24), true) };
-    var other = new GameSessionService(racing, Stub.Create<IGameSessionPlayerRepository>(), Stub.Create<IUserRepository>(), new MapperConfiguration(c => c.AddProfile<MappingEntityToDto>()).CreateMapper(), Stub.Create<IFriendshipRepository>(), Games.With(Guid.Empty));
+    var other = new GameSessionService(racing, Stub.Create<IGameSessionPlayerRepository>(), Stub.Create<IUserRepository>(), new MapperConfiguration(c => c.AddProfile<MappingEntityToDto>()).CreateMapper(), Stub.Create<IFriendshipRepository>(), Games.With(Guid.Empty), NoBlocks.Create());
     await other.CloseSessionAsync(raced.Id, raced.OrganizerId);
     Assert(raced.EndDate == raced.ScheduledStartDate.AddHours(24) && raced.ClosedAutomatically, "the stored close was not kept");
 });
@@ -171,7 +171,7 @@ var toCancel = Sessions.Create(now.AddDays(2), accepted: [now.AddHours(-1)], org
 var repository = new Repository([active, waiting, finished, toEnd, toCancel]);
 var knownGame = Guid.NewGuid();
 var mapper = new MapperConfiguration(c => c.AddProfile<MappingEntityToDto>()).CreateMapper();
-var service = new GameSessionService(repository, Stub.Create<IGameSessionPlayerRepository>(), Stub.Create<IUserRepository>(), mapper, Stub.Create<IFriendshipRepository>(), Games.With(knownGame));
+var service = new GameSessionService(repository, Stub.Create<IGameSessionPlayerRepository>(), Stub.Create<IUserRepository>(), mapper, Stub.Create<IFriendshipRepository>(), Games.With(knownGame), NoBlocks.Create());
 var builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions { EnvironmentName = "Testing", Args = [] });
 builder.WebHost.UseKestrel().UseUrls("http://127.0.0.1:0");
 builder.Services.AddLogging();
@@ -329,4 +329,13 @@ public class Games : DispatchProxy {
 public class FixtureAuthentication(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder) {
     protected override Task<AuthenticateResult> HandleAuthenticateAsync() => Task.FromResult(Guid.TryParse(Request.Headers["X-Fixture-User"], out var user)
         ? AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, user.ToString())], Scheme.Name)), Scheme.Name)) : AuthenticateResult.NoResult());
+}
+
+/// <summary>Community rules are covered by Community.Tests: here nobody has blocked anybody.</summary>
+public class NoBlocks : System.Reflection.DispatchProxy
+{
+    public static MeepleBoard.Domain.Interfaces.ICommunityRepository Create() => Create<MeepleBoard.Domain.Interfaces.ICommunityRepository, NoBlocks>();
+    protected override object? Invoke(System.Reflection.MethodInfo? m, object?[]? a) => m!.ReturnType == typeof(Task<bool>) ? Task.FromResult(false)
+        : m.ReturnType == typeof(Task<IReadOnlyList<Guid>>) ? Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>())
+        : throw new InvalidOperationException("Unexpected community call: " + m.Name);
 }

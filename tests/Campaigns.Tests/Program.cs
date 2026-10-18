@@ -31,7 +31,7 @@ builder.Services.AddLogging();
 builder.Services.AddAuthentication("Fixture").AddScheme<AuthenticationSchemeOptions, FixtureAuthentication>("Fixture", _ => { });
 builder.Services.AddAuthorization();
 builder.Services.AddControllers().AddApplicationPart(typeof(CampaignController).Assembly);
-builder.Services.AddSingleton<ICampaignService>(_ => new CampaignService(world.Campaigns, world.Matches, world.Users, Stub.Create<IGameRepository>(), world.Push, Stub.Create<IPhotoStorageService>(), NullLogger<CampaignService>.Instance));
+builder.Services.AddSingleton<ICampaignService>(_ => new CampaignService(world.Campaigns, world.Matches, world.Users, Stub.Create<IGameRepository>(), world.Push, Stub.Create<IPhotoStorageService>(), NullLogger<CampaignService>.Instance, AllFriends.Create(), NoBlocks.Create()));
 await using var app = builder.Build();
 app.UseAuthentication(); app.UseAuthorization(); app.MapControllers(); await app.StartAsync();
 using var client = new HttpClient { BaseAddress = new Uri(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single()) };
@@ -164,4 +164,22 @@ public class Stub : DispatchProxy {
 public class FixtureAuthentication(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder) {
     protected override Task<AuthenticateResult> HandleAuthenticateAsync() => Task.FromResult(Guid.TryParse(Request.Headers["X-Fixture-User"], out var user)
         ? AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, user.ToString())], Scheme.Name)), Scheme.Name)) : AuthenticateResult.NoResult());
+}
+
+
+/// <summary>Community rules are covered by Community.Tests: here nobody has blocked anybody.</summary>
+public class NoBlocks : System.Reflection.DispatchProxy
+{
+    public static MeepleBoard.Domain.Interfaces.ICommunityRepository Create() => Create<MeepleBoard.Domain.Interfaces.ICommunityRepository, NoBlocks>();
+    protected override object? Invoke(System.Reflection.MethodInfo? m, object?[]? a) => m!.ReturnType == typeof(Task<bool>) ? Task.FromResult(false)
+        : m.ReturnType == typeof(Task<IReadOnlyList<Guid>>) ? Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>())
+        : throw new InvalidOperationException("Unexpected community call: " + m.Name);
+}
+
+/// <summary>Who may play together is covered by Community.Tests: here every pair is an accepted friendship.</summary>
+public class AllFriends : System.Reflection.DispatchProxy
+{
+    public static IFriendshipRepository Create() => Create<IFriendshipRepository, AllFriends>();
+    protected override object? Invoke(System.Reflection.MethodInfo? m, object?[]? a) => m!.Name == "ExistsAcceptedAsync" ? Task.FromResult(true)
+        : throw new InvalidOperationException("Unexpected friendship call: " + m.Name);
 }
