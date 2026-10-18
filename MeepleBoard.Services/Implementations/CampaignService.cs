@@ -449,8 +449,16 @@ namespace MeepleBoard.Services.Implementations
                 throw new InvalidOperationException(
                     $"Só podes ter até {MaxPhotosPerJournalEntry} fotos por partida.");
 
+            // Identifying metadata (GPS, camera, dates, owner, comments) is removed before anything is stored or served;
+            // the pixels and the orientation stay. Only JPEG, PNG and WebP are accepted (what the app sends).
+            using var buffer = new MemoryStream();
+            await fileStream.CopyToAsync(buffer, ct);
+            var clean = PhotoMetadata.Strip(buffer.ToArray());
+            using var cleanStream = new MemoryStream(clean.Content);
+            var cleanName = Path.GetFileNameWithoutExtension(string.IsNullOrWhiteSpace(fileName) ? "photo" : fileName) + "." + (clean.Format == "jpeg" ? "jpg" : clean.Format);
+
             // Upload primeiro — só grava a entrada se a foto for enviada com sucesso
-            var url = await _photoStorageService.UploadAsync(fileStream, fileName, ct);
+            var url = await _photoStorageService.UploadAsync(cleanStream, cleanName, ct);
             if (!JournalPhotoReference.IsProtected(url)) throw new InvalidOperationException("O armazenamento não devolveu uma fotografia protegida.");
             entry.AddPhotoUrl(url);
 

@@ -169,7 +169,7 @@ foreach (var user in new Guid?[] { null, f.Author, f.Peer, f.Outsider, f.Session
         using var req = new HttpRequestMessage(HttpMethod.Post, journalPath + "/photos");
         if (user.HasValue) req.Headers.Add("X-Fixture-User", user.Value.ToString());
         using var form = new MultipartFormDataContent();
-        var file = new ByteArrayContent([1, 2, 3]); file.Headers.ContentType = new("image/png");
+        var file = new ByteArrayContent(TinyPng); file.Headers.ContentType = new("image/png");
         form.Add(file, "file", "fixture.png"); req.Content = form;
         using var response = await client.SendAsync(req);
         var expected = user == null ? HttpStatusCode.Unauthorized : user == f.Author || user == f.Peer ? HttpStatusCode.OK : HttpStatusCode.Forbidden;
@@ -183,7 +183,7 @@ await Check("a misconfigured public upload is rejected before journal persistenc
     var before = f.Own.PhotoUrls.Count;
     using var req = new HttpRequestMessage(HttpMethod.Post, journalPath + "/photos");
     req.Headers.Add("X-Fixture-User", f.Author.ToString());
-    using var form = new MultipartFormDataContent(); var file = new ByteArrayContent([1, 2, 3]); file.Headers.ContentType = new("image/png");
+    using var form = new MultipartFormDataContent(); var file = new ByteArrayContent(TinyPng); file.Headers.ContentType = new("image/png");
     form.Add(file, "file", "fixture.png"); req.Content = form;
     using var response = await client.SendAsync(req);
     Assert(response.StatusCode == HttpStatusCode.Conflict && f.Own.PhotoUrls.Count == before);
@@ -460,4 +460,10 @@ public class AllFriends : System.Reflection.DispatchProxy
     public static IFriendshipRepository Create() => Create<IFriendshipRepository, AllFriends>();
     protected override object? Invoke(System.Reflection.MethodInfo? m, object?[]? a) => m!.Name == "ExistsAcceptedAsync" ? Task.FromResult(true)
         : throw new InvalidOperationException("Unexpected friendship call: " + m.Name);
+}
+
+/// <summary>A real 1 × 1 PNG: uploads are checked as images (PhotoMetadata), so arbitrary bytes are refused.</summary>
+public static partial class Program
+{
+    public static readonly byte[] TinyPng = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN5kAAAAASUVORK5CYII=");
 }

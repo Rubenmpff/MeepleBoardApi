@@ -5,6 +5,7 @@ using MeepleBoard.Domain.Entities;
 using MeepleBoard.Domain.Enums;
 using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Infra.Data.Context;
+using MeepleBoard.Services.ExternalServices.Interfaces;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
@@ -129,35 +130,53 @@ public static class DisposableFixture {
             return Results.Ok(new { id = match.Id });
         });
 
+        // Read-only: every stored diary photo file, whether a diary entry still references it, and whose entry it is
+        // (walkthrough accounts, validation people, other DeviceTests people). File names and counts only.
+        group.MapGet("/photo-inventory", async (MeepleBoardDbContext db) => {
+            var directory = Path.Combine(dataPath, "photos");
+            var walkthrough = JsonSerializer.Deserialize<List<TestAccount>>(await File.ReadAllTextAsync(Path.Combine(dataPath, "accounts.json")))!.Select(a => a.Id).ToHashSet();
+            var kept = (await Read()).Where(x => x.Keep).Select(x => x.Id).ToHashSet();
+            var entries = await db.MatchJournalEntries.AsNoTracking().Where(e => e.PhotoUrlsJson != null).Select(e => new { e.UserId, e.PhotoUrlsJson }).ToListAsync();
+            var owners = new Dictionary<string, string>();
+            foreach (var e in entries)
+                foreach (var url in JsonSerializer.Deserialize<List<string>>(e.PhotoUrlsJson!) ?? [])
+                    owners[Path.GetFileNameWithoutExtension(new Uri(url).AbsolutePath)] = walkthrough.Contains(e.UserId) ? "roteiro" : kept.Contains(e.UserId) ? "validação" : "outros";
+            var files = Directory.Exists(directory) ? Directory.GetFiles(directory).Select(Path.GetFileName).ToList() : [];
+            return Results.Ok(files.Select(f => new { file = f, owner = owners.GetValueOrDefault(Path.GetFileNameWithoutExtension(f!)!, "sem referência"),
+                modified = File.GetLastWriteTimeUtc(Path.Combine(directory, f!)) }).OrderBy(x => x.modified));
+        });
+
         // Everything these people made, then the accounts. Only ids recorded by /people.
-        group.MapDelete("/fixture", async (string people, MeepleBoardDbContext db, UserManager<User> users, IGameRepository games) => {
+        group.MapDelete("/fixture", async (string people, MeepleBoardDbContext db, UserManager<User> users, IGameRepository games, IPhotoStorageService photos) => {
             var ids = people.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(Guid.Parse).ToList();
             await gate.WaitAsync();
             try {
                 var record = await Read();
                 if (ids.Any(id => record.All(x => x.Id != id))) return Results.BadRequest(new { message = "Only disposable people." });
-                var removed = await Remove(db, users, games, ids);
+                var removed = await Remove(db, users, games, photos, ids);
                 await Write(record.Where(x => !removed.Contains(x.Id)).ToList());
                 return Results.Ok(new { removed = removed.Count });
             } finally { gate.Release(); }
         });
 
         // People left by runs that were interrupted (older than the given minutes, so a run in progress is never touched).
-        group.MapPost("/sweep", async (int? olderThanMinutes, MeepleBoardDbContext db, UserManager<User> users, IGameRepository games) => {
+        group.MapPost("/sweep", async (int? olderThanMinutes, MeepleBoardDbContext db, UserManager<User> users, IGameRepository games, IPhotoStorageService photos) => {
             await gate.WaitAsync();
             try {
                 var record = await Read();
                 var limit = DateTime.UtcNow.AddMinutes(-(olderThanMinutes ?? 30));
                 var stale = record.Where(x => x.CreatedAt < limit && !x.Keep).Select(x => x.Id).ToList();
-                var removed = stale.Count == 0 ? [] : await Remove(db, users, games, stale);
+                var removed = stale.Count == 0 ? [] : await Remove(db, users, games, photos, stale);
                 await Write(record.Where(x => !removed.Contains(x.Id)).ToList());
                 return Results.Ok(new { removed = removed.Count });
             } finally { gate.Release(); }
         });
     }
 
-    static async Task<List<Guid>> Remove(MeepleBoardDbContext db, UserManager<User> users, IGameRepository gamesRepository, List<Guid> everyone) {
+    static async Task<List<Guid>> Remove(MeepleBoardDbContext db, UserManager<User> users, IGameRepository gamesRepository, IPhotoStorageService photos, List<Guid> everyone) {
         var matches = await db.Matches.Where(m => m.MatchPlayers.Any(p => everyone.Contains(p.UserId)) || (m.CreatorId != null && everyone.Contains(m.CreatorId.Value))).Select(m => m.Id).ToListAsync();
+        // The stored files of the diary photos that go with these matches (otherwise they stay behind as orphans).
+        var files = (await db.MatchJournalEntries.AsNoTracking().Where(e => matches.Contains(e.MatchId)).ToListAsync()).SelectMany(e => e.PhotoUrls).ToList();
         var games = await db.Matches.Where(m => matches.Contains(m.Id)).Select(m => m.GameId).Distinct().ToListAsync();
         await db.CampaignMatches.Where(c => matches.Contains(c.MatchId)).ExecuteDeleteAsync();
         await db.Matches.Where(m => matches.Contains(m.Id)).ExecuteDeleteAsync();
@@ -175,6 +194,7 @@ public static class DisposableFixture {
         await db.RefreshTokens.Where(t => everyone.Contains(t.UserId)).ExecuteDeleteAsync();
         await db.EmailResendLogs.Where(l => everyone.Contains(l.UserId)).ExecuteDeleteAsync();
         foreach (var game in games) await gamesRepository.RecomputeMeepleBoardRatingAsync(game);
+        foreach (var file in files) { try { await photos.DeleteAsync(file); } catch { /* already gone */ } }
         var removed = new List<Guid>();
         foreach (var id in everyone) {
             var user = await users.FindByIdAsync(id.ToString());
