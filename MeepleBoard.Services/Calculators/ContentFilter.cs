@@ -16,6 +16,8 @@ public static class ContentFilter
 
     // Whole words or expressions (accents removed, lower case). Inflections are listed explicitly instead of matching prefixes.
     // Left out on purpose because games use them innocently: «cabra» (goat), «fag», «rape», «go die», «vou-te matar», «I will kill you».
+    // Leaving them out does not make threats acceptable: threats stay forbidden by the rules and are handled by reports and
+    // moderation. This list is a first, incomplete protection; passing it does not mean a text is acceptable.
     static readonly string[] Terms =
     [
         // Portuguese

@@ -87,6 +87,16 @@ await Check("registering outside sessions: only with accepted friends, even with
     await Throws<UnauthorizedAccessException>(() => MatchCompany.RequireOutsideSessionAsync(B, [B, A], campaign.Id, friends, campaigns, default), "the registrant must be a member");
     await MatchCompany.RequireOutsideSessionAsync(A, [A], null, friends, campaigns, default); // solo
 });
+await Check("campaign encounter: a campaignId alone never opens the rule — pending or removed members and unknown campaigns are refused", async () => {
+    var pending = new CampaignMember(campaign.Id, B); campaign.Members.Add(pending);              // invited, not accepted
+    var removed = Member(campaign.Id, C, true); removed.Remove(); campaign.Members.Add(removed); // was a member
+    await Throws<InvalidOperationException>(() => MatchCompany.RequireOutsideSessionAsync(A, [A, B], campaign.Id, friends, campaigns, default), "a pending member does not play", MatchCompany.NotCampaignMembers);
+    await Throws<InvalidOperationException>(() => MatchCompany.RequireOutsideSessionAsync(A, [A, C], campaign.Id, friends, campaigns, default), "a removed member does not play", MatchCompany.NotCampaignMembers);
+    await Throws<UnauthorizedAccessException>(() => MatchCompany.RequireOutsideSessionAsync(B, [B, A], campaign.Id, friends, campaigns, default), "a pending member does not register");
+    await Throws<UnauthorizedAccessException>(() => MatchCompany.RequireOutsideSessionAsync(C, [C, A], campaign.Id, friends, campaigns, default), "a removed member does not register");
+    await Throws<KeyNotFoundException>(() => MatchCompany.RequireOutsideSessionAsync(A, [A, D], Guid.NewGuid(), friends, campaigns, default), "an unknown campaign");
+    campaign.Members.Remove(pending); campaign.Members.Remove(removed);
+});
 await Check("a block between any two players refuses the match, whoever registers and in both directions", async () => {
     community.Blocks.Add((B, C));
     await Throws<InvalidOperationException>(() => MatchCompany.RequireNoBlockAsync(community, [A, B, C], default), "B blocked C", MatchCompany.Blocked);
