@@ -6,9 +6,10 @@
 // Everything created is removed at the end and the game average returns to where it was. Never touches the iPhone
 // walkthrough accounts or sessions; never prints credentials or tokens.
 if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
+const { run } = require('./disposable.cjs');
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
-(async () => {
+run({ label: 'owndeletion', people: [{ role: 'admin', admin: true }] }, async world => {
   const health = await (await fetch(base + '/device-test/health')).json();
   assert.deepEqual(health, { environment: 'DeviceTests', database: 'MeepleBoard_DeviceTests', externalDelivery: false });
   const pass = name => console.log('PASS ' + name);
@@ -29,10 +30,13 @@ const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
     return { status: r.status, data: text && r.headers.get('content-type')?.includes('json') ? JSON.parse(text) : text };
   };
   const stay = JSON.parse(fs.readFileSync(path.join(root, '.device-tests/account-deletion-accounts.json'), 'utf8'));
-  const adminAccount = JSON.parse(fs.readFileSync(path.join(root, '.device-tests/accounts.json'), 'utf8')).find(a => a.Email === 'admin@meepleboard.test');
+  const adminAccount = world.people.admin; // an administrator of this run only (disposable.cjs), never the walkthrough's
   const people = (await fixture('POST', '/people')).data;
   // Only what this run creates is cleaned at the end (other scenarios, such as the iPhone validation, stay).
   const runPeople = people.people.map(x => x.id);
+  // The fixture people of this run are removed also when a check fails.
+  let cleaned = false;
+  try {
   const [pInfo, qInfo] = [people.people.find(x => x.role === 'p'), people.people.find(x => x.role === 'q')];
   const A = { ...(await login(stay[0].Email, stay[0].Password, 'A')), id: stay[0].Id };
   const B = { ...(await login(stay[1].Email, stay[1].Password, 'B')), id: stay[1].Id };
@@ -251,7 +255,10 @@ const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
   // Clean up: resources, then everything the fixture made; the game average is back.
   await call(admin, 'POST', `/admin/experiences/${ofA.id}/keep`, { reason: null }, 204);
   for (const r of [r1, r2]) await call(admin, 'DELETE', `/admin/game-resources/${r.id}`, null, 204);
-  assert.equal((await fixture('DELETE', `/fixture?people=${runPeople.join(',')}`)).status, 204);
+  cleaned = true; assert.equal((await fixture('DELETE', `/fixture?people=${runPeople.join(',')}`)).status, 204);
   assert.deepEqual(await averages(), initial, 'the game average is back to where it was');
   pass('clean-up: resources, matches, sessions and campaigns of the fixture removed; the game average is back to where it was');
-})().catch(error => { console.error('FAIL', error.message); process.exit(1); });
+  } finally {
+    if (!cleaned) { await fixture('DELETE', `/fixture?people=${runPeople.join(',')}`); console.log('CLEAN fixture people of this run removed after a failure'); }
+  }
+}).catch(error => { console.error('FAIL', error.message); process.exit(1); });

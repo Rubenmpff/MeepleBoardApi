@@ -1,19 +1,13 @@
 // DeviceTests only: the account restrictions keep every legitimate flow open — against real SQL and real tokens.
 //   node tools/DeviceTestApi/verify-account-flows.cjs
-// Changes no data: own-profile writes send the value already saved, registration is reached with an invalid body,
-// and everything else is a read. Never prints credentials or tokens.
+// Fresh people (disposable.cjs: autor and participante, friends, and an administrator), removed at the end. Own-profile
+// writes send the value already saved, registration is reached with an invalid body, and everything else is a read.
+// Never the iPhone accounts; never prints credentials or tokens.
 if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
-const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
-const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
-(async () => {
-  const health = await (await fetch(base + '/device-test/health')).json();
-  assert.deepEqual(health, { environment: 'DeviceTests', database: 'MeepleBoard_DeviceTests', externalDelivery: false });
-  const accounts = JSON.parse(fs.readFileSync(path.join(root, '.device-tests/accounts.json'), 'utf8'));
-  const login = async name => {
-    const a = accounts.find(x => x.Email === name + '@meepleboard.test');
-    const r = await fetch(base + '/MeepleBoard/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: a.Email, password: a.Password, deviceInfo: 'verify-account-flows' }) });
-    assert.equal(r.status, 200, 'login ' + name); return { name, id: a.Id, token: (await r.json()).token };
-  };
+const assert = require('node:assert/strict');
+const { run } = require('./disposable.cjs');
+const base = 'http://127.0.0.1:5099';
+run({ label: 'flows', people: [{ role: 'autor' }, { role: 'participante' }, { role: 'admin', admin: true }], friends: [['autor', 'participante']] }, async world => {
   const send = async (u, method, route, body) => {
     const r = await fetch(base + '/MeepleBoard' + route, { method, headers: { ...(u ? { Authorization: `Bearer ${u.token}` } : {}), 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
     const text = await r.text(); return { status: r.status, json: text && r.headers.get('content-type')?.includes('json') ? JSON.parse(text) : null };
@@ -22,7 +16,7 @@ const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
     const r = await send(u, method, route, body); assert.equal(r.status, status, `${u?.name ?? 'visitor'} ${method} ${route} → ${r.status}`); return r.json;
   };
   const pass = name => console.log('PASS ' + name);
-  const [A, P, admin] = await Promise.all(['autor', 'participante', 'admin'].map(login));
+  const [A, P, admin] = await Promise.all(['autor', 'participante', 'admin'].map(r => world.login(r)));
 
   // 1. Registration and the rest of the authentication flow need no session.
   for (const route of ['/auth/register', '/auth/forgot-password', '/auth/resend-confirmation', '/auth/reset-password']) {
@@ -74,4 +68,4 @@ const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
     await expect(admin, 'GET', route, 200);
   }
   pass('the administrator screens answer administrators (200) and refuse regular accounts (403)');
-})().catch(error => { console.error('FAIL', error.message); process.exit(1); });
+}).catch(error => { console.error('FAIL', error.message); process.exit(1); });

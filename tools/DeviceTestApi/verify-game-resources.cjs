@@ -1,18 +1,17 @@
 // DeviceTests only: game resource catalogue against real SQL through the running test API (port 5099).
 //   node tools/DeviceTestApi/verify-game-resources.cjs            seed the verified links, check permissions, filters, approval and reports
 //   node tools/DeviceTestApi/verify-game-resources.cjs --recheck  after restarting the API: the catalogue is still there
-// Seeding is idempotent (by URL). Test suggestions and reports it creates are removed or resolved before it ends.
+// Seeding is idempotent (by URL): the curated Wingspan catalogue is product content and stays. The people who act are
+// fresh (disposable.cjs: an administrator and two users), removed at the end with their suggestions and reports.
+// Never the iPhone accounts.
 if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
-const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
+const { run } = require('./disposable.cjs');
+const base = 'http://127.0.0.1:5099';
 const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'game-resources.fixture.json'), 'utf8'));
-(async () => {
-  const health = await (await fetch(base + '/device-test/health')).json();
-  assert.deepEqual(health, { environment: 'DeviceTests', database: 'MeepleBoard_DeviceTests', externalDelivery: false });
-  const accounts = JSON.parse(fs.readFileSync(path.join(root, '.device-tests/accounts.json'), 'utf8'));
-  const login = async email => { const a = accounts.find(x => x.Email === email); const r = await fetch(base + '/MeepleBoard/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: a.Email, password: a.Password, deviceInfo: 'verify-game-resources' }) }); assert.equal(r.status, 200); return { id: a.Id, token: (await r.json()).token }; };
+run({ label: 'resources', people: [{ role: 'admin', admin: true }, { role: 'autor' }, { role: 'participante' }] }, async world => {
   const call = async (u, method, route, body) => { const r = await fetch(base + '/MeepleBoard' + route, { method, headers: { Authorization: `Bearer ${u.token}`, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) }); const t = await r.text(); return { status: r.status, data: t ? JSON.parse(t) : null }; };
-  const admin = await login('admin@meepleboard.test'), user = await login('autor@meepleboard.test'), other = await login('participante@meepleboard.test');
+  const admin = await world.login('admin'), user = await world.login('autor'), other = await world.login('participante');
   const pass = name => console.log('PASS ' + name);
   const game = (await call(user, 'GET', '/game/search?name=' + encodeURIComponent(fixture.game.name))).data;
   assert.equal(game.bggId, fixture.game.bggId);
@@ -64,7 +63,7 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'game-resources.
   assert.equal(suggestion.status, 201); assert.equal(suggestion.data.status, 'Pending');
   assert.ok(!(await list(user, 'all')).items.some(i => i.id === suggestion.data.id), 'pending suggestion is public');
   assert.equal((await call(other, 'POST', `/admin/game-resources/${suggestion.data.id}/approve`)).status, 403);
-  assert.ok((await call(admin, 'GET', '/admin/game-resources?status=Pending')).data.some(r => r.resource.id === suggestion.data.id && r.suggestedBy === 'Teste-participante'));
+  assert.ok((await call(admin, 'GET', '/admin/game-resources?status=Pending')).data.some(r => r.resource.id === suggestion.data.id && r.suggestedBy === world.people.participante.userName));
   assert.equal((await call(admin, 'POST', `/admin/game-resources/${suggestion.data.id}/approve`)).status, 200);
   assert.ok((await list(user, 'pt')).items.some(i => i.id === suggestion.data.id), 'approved suggestion is public');
   assert.equal((await call(admin, 'DELETE', `/admin/game-resources/${suggestion.data.id}`)).status, 204);
@@ -99,4 +98,4 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'game-resources.
   assert.equal((await call(admin, 'POST', `/admin/game-resources/reports/${report.id}/resolve`)).status, 204);
   assert.ok(!(await call(admin, 'GET', '/admin/game-resources/reports')).data.some(r => r.id === report.id));
   pass('a report reaches the administrator once per user and closes when resolved');
-})().catch(error => { console.error('FAIL', error.message); process.exit(1); });
+}).catch(error => { console.error('FAIL', error.message); process.exit(1); });

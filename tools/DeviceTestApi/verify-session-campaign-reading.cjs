@@ -1,64 +1,50 @@
+// DeviceTests only: reading sessions and campaigns — each person reads what they belong to, an outsider gets 403, a
+// visitor 401, and containers never carry private match notes. Its own session, campaign and match between fresh
+// people (disposable.cjs), removed at the end. Never the iPhone accounts.
+//   node tools/DeviceTestApi/verify-session-campaign-reading.cjs
 if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
-const fs = require('node:fs');
 const assert = require('node:assert/strict');
-const root = require('node:path').resolve(__dirname, '../..');
+const { run, quartet } = require('./disposable.cjs');
 const base = 'http://127.0.0.1:5099';
 async function call(path, token, options = {}) {
   const r = await fetch(base + path, { ...options, headers: { ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(options.body ? { 'Content-Type': 'application/json' } : {}) } });
-  const body = await r.text();
-  return { status: r.status, body };
+  return { status: r.status, body: await r.text() };
 }
-(async () => {
-  const health = await call('/device-test/health');
-  assert.equal(JSON.parse(health.body).database, 'MeepleBoard_DeviceTests');
-  const accounts = JSON.parse(fs.readFileSync(root + '/.device-tests/accounts.json', 'utf8'));
-  const authorIds = {};
-  const inviteFile = root + '/.device-tests/session-invite-friends-fixture.json';
-  const invitedSession = fs.existsSync(inviteFile) ? JSON.parse(fs.readFileSync(inviteFile, 'utf8')).sessionId : null;
-  const writeFile = root + '/.device-tests/session-write-fixture.json';
-  const privateSession = fs.existsSync(writeFile) ? JSON.parse(fs.readFileSync(writeFile, 'utf8')).sessionId : null;
-  for (const account of accounts) {
-    const login = await call('/MeepleBoard/auth/login', null, { method: 'POST', body: JSON.stringify({ email: account.Email, password: account.Password, deviceInfo: 'MeepleBoard Mobile App' }) });
-    assert.equal(login.status, 200, 'Synthetic login');
-    const result = JSON.parse(login.body);
-    assert.equal(result.success, true);
-    assert.ok(result.refreshToken && result.user);
-    const token = result.token;
-    assert.ok(token);
-    const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
-    assert.equal(claims.sub || claims.nameid || claims.id || claims['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier'], account.Id);
-    console.log('PASS login ' + account.Email);
+run({ label: 'reading', ...quartet() }, async world => {
+  const roles = ['autor', 'participante', 'alheio', 'membro'];
+  const people = await Promise.all(roles.map(r => world.login(r)));
+  const [author, peer, outsider, member] = people;
+  const post = async (u, route, body, status) => { const r = await call('/MeepleBoard' + route, u.token, { method: 'POST', body: JSON.stringify(body) }); assert.equal(r.status, status, route + ' → ' + r.status + ' ' + r.body.slice(0, 200)); return r.body ? JSON.parse(r.body) : null; };
+  // The author's session (participante and membro accepted) with a match whose note is private; a campaign with membro.
+  const session = await post(author, '/session', { name: 'Leitura de sessão', scheduledStartDate: new Date().toISOString(), playerIds: [peer.id, member.id] }, 201);
+  for (const u of [peer, member]) await post(u, `/session/${session.id}/invites/respond`, { accept: true }, 200);
+  const game = JSON.parse((await call('/MeepleBoard/game/search?name=Meeple%20Teste%20Competitivo', author.token)).body);
+  await post(author, '/matches', { gameId: game.id, gameName: game.name, gameSessionId: session.id, matchDate: new Date().toISOString(), isSoloGame: false, winnerId: author.id,
+    playerIds: [author.id, peer.id], personalRating: 7, notes: 'PRIVATE_SQL_NOTE' }, 201);
+  const campaign = await post(author, '/campaigns', { name: 'Campanha de leitura', gameId: game.id, notes: 'Notas partilhadas' }, 201);
+  await post(author, `/campaigns/${campaign.id}/members/invite`, { userId: member.id }, 204);
+  await post(member, `/campaigns/${campaign.id}/members/respond`, true, 204);
+  const ids = { session: session.id, campaigns: campaign.id };
+  for (const [index, u] of people.entries()) {
+    const claims = JSON.parse(Buffer.from(u.token.split('.')[1], 'base64url').toString());
+    assert.equal(claims.sub, u.id);
+    console.log('PASS login ' + roles[index]);
     for (const path of ['/MeepleBoard/matches/last', '/MeepleBoard/matches/pending-journal']) {
-      const response = await call(path, token);
+      const response = await call(path, u.token);
       assert.ok(response.status === 200 || (path.endsWith('/last') && response.status === 404) || (path.endsWith('/pending-journal') && response.status === 204), 'Home data: ' + response.status);
-      console.log('PASS home ' + path + ': HTTP ' + response.status);
     }
     for (const resource of ['session', 'campaigns']) {
-      const list = await call('/MeepleBoard/' + resource + '/mine', token);
-      console.log(resource + ' list HTTP ' + list.status);
+      const list = await call('/MeepleBoard/' + resource + '/mine', u.token);
       assert.equal(list.status, 200);
       const rows = JSON.parse(list.body);
-      assert.ok(Array.isArray(rows));
-      if (account === accounts[0]) { assert.ok(rows.length > 0, 'Existing SQL fixtures'); authorIds[resource] = resource === 'session' && privateSession ? privateSession : rows.find(row => row.id !== invitedSession)?.id; assert.ok(authorIds[resource], 'A fixture without outsider membership is required'); }
-      if (account === accounts[2]) {
-        if (resource === 'campaigns') assert.equal(rows.length, 0, 'Outsider has no campaign membership');
-        else {
-          assert.ok(!rows.some(row => row.id === authorIds[resource]), 'Private fixture absent from outsider list');
-          if (invitedSession) assert.ok(rows.some(row => row.id === invitedSession), 'Explicitly invited fixture is readable');
-        }
-        assert.equal((await call('/MeepleBoard/' + resource + '/' + authorIds[resource], token)).status, 403);
-      }
-      for (const row of rows) {
-        const detail = await call('/MeepleBoard/' + resource + '/' + row.id, token);
-        assert.equal(detail.status, 200, resource + ' detail');
-        if (account === accounts[2] && resource === 'session') {
-          assert.ok(JSON.parse(detail.body).players.some(player => player.userId === account.Id), 'Every outsider session requires actual membership');
-        }
-        assert.ok(!detail.body.includes('PRIVATE_SQL_'), 'No private match notes in containers');
-      }
-      console.log('PASS ' + resource + ': ' + rows.length + ' readable details');
+      const belongs = u === author || u === member || (resource === 'session' && u === peer);
+      assert.equal(rows.some(r => r.id === ids[resource]), belongs, `${roles[index]} ${resource} list`);
+      const detail = await call('/MeepleBoard/' + resource + '/' + ids[resource], u.token);
+      assert.equal(detail.status, belongs ? 200 : 403, `${roles[index]} ${resource} detail`);
+      assert.ok(!detail.body.includes('PRIVATE_SQL_'), 'No private match notes in containers');
       assert.equal((await call('/MeepleBoard/' + resource + '/mine')).status, 401);
-      if (authorIds[resource]) assert.equal((await call('/MeepleBoard/' + resource + '/' + authorIds[resource])).status, 401);
+      assert.equal((await call('/MeepleBoard/' + resource + '/' + ids[resource])).status, 401);
     }
+    console.log(`PASS ${roles[index]}: sessions and campaigns readable only when a member; outsider 403; visitor 401; no private notes`);
   }
-})().catch(e => { console.error(e.message); process.exitCode = 1; });
+}).catch(e => { console.error('FAIL', e.message); process.exit(1); });

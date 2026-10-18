@@ -1,17 +1,13 @@
 // DeviceTests only: adding a game with status Wishlist (3) or Played (2) is stored and read back with that status.
-// Uses the fictitious "membro" account, creates two entries and removes them again, leaving its library as found.
+// A fresh person (disposable.cjs) adds two entries and removes them again; the person is removed at the end. Never the iPhone accounts.
 if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
-const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
-const root=path.resolve(__dirname,'../..'),base='http://127.0.0.1:5099';
-(async()=>{
- const health=await (await fetch(base+'/device-test/health')).json();
- assert.deepEqual(health,{environment:'DeviceTests',database:'MeepleBoard_DeviceTests',externalDelivery:false});
- const accounts=JSON.parse(fs.readFileSync(path.join(root,'.device-tests/accounts.json'),'utf8'));
- const login=async email=>{const a=accounts.find(x=>x.Email===email);const r=await fetch(base+'/MeepleBoard/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:a.Email,password:a.Password,deviceInfo:'verify-library-statuses'})});assert.equal(r.status,200);return {id:a.Id,token:(await r.json()).token};};
+const assert=require('node:assert/strict');
+const {run}=require('./disposable.cjs');
+const base='http://127.0.0.1:5099';
+run({label:'libstatus',people:[{role:'membro'}]},async world=>{
  const call=async(u,method,route,body)=>{const r=await fetch(base+'/MeepleBoard'+route,{method,headers:{Authorization:`Bearer ${u.token}`,'Content-Type':'application/json'},body:body&&JSON.stringify(body)});const t=await r.text();return {status:r.status,data:t?JSON.parse(t):null};};
- const reader=await login('autor@meepleboard.test'),user=await login('membro@meepleboard.test');
- const games=(await call(reader,'GET','/statistics/me/explore?start=2020-01-01&endExclusive=2029-01-01&timeZone=Europe%2FLisbon')).data.games;
- const catalog=[...new Map(games.map(g=>[g.gameId,g])).values()];
+ const user=await world.login('membro');
+ const catalog=(await call(user,'GET','/game/suggestions?query=Meeple&limit=10')).data.map(g=>({gameId:g.id,name:g.name}));
  const library=async()=>(await call(user,"GET",`/users/${user.id}/games`)).data??[]; // 204 when empty
  const before=await library();
  const free=catalog.filter(g=>!before.some(e=>(e.gameId??e.game?.id)===g.gameId));
@@ -29,4 +25,4 @@ const root=path.resolve(__dirname,'../..'),base='http://127.0.0.1:5099';
   const restored=await library();assert.equal(restored.length,before.length,'library restored to its initial size');
  }
  console.log('Library statuses verified; membro library restored.');
-})().catch(e=>{console.error('✗',e.message);process.exit(1);});
+}).catch(e=>{console.error('✗',e.message);process.exit(1);});

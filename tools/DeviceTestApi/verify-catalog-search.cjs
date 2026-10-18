@@ -1,7 +1,7 @@
-// Uses only the guarded disposable API and synthetic accounts. No external BGG calls.
+// DeviceTests only: catalogue search and a collection reload, for a fresh person (disposable.cjs) removed at the end.
+// Never the iPhone accounts. No external BGG calls.
 if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
-const fs = require('node:fs');
-const path = require('node:path');
+const { run } = require('./disposable.cjs');
 const assert = require('node:assert/strict');
 const base = 'http://127.0.0.1:5099';
 async function request(route, token, method = 'GET', body, expected = 200) {
@@ -10,11 +10,11 @@ async function request(route, token, method = 'GET', body, expected = 200) {
   const text = await r.text();
   return text ? JSON.parse(text) : [];
 }
-(async () => {
+run({ label: 'catalog', people: [{ role: 'autor' }, { role: 'participante' }], friends: [['autor', 'participante']] }, async world => {
   const health = await request('/device-test/health');
   assert.equal(health.environment, 'DeviceTests');
   assert.equal(health.database, 'MeepleBoard_DeviceTests');
-  const a = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../.device-tests/accounts.json'), 'utf8')).find(a => a.Email === 'autor@meepleboard.test');
+  const a = world.people.autor;
   const login = await request('/MeepleBoard/auth/login', null, 'POST', { email: a.Email, password: a.Password, deviceInfo: 'MeepleBoard Mobile App' });
   assert.ok(login.success && login.token && login.refreshToken && login.user);
   const token = login.token;
@@ -48,8 +48,11 @@ async function request(route, token, method = 'GET', body, expected = 200) {
     assert.equal(library.find(g => g.gameId === solo.id).pricePaid, 0);
   }
   assert.ok(library.some(g => g.gameName === 'Meeple Teste Solo'));
+  const competitive = all.find(g => g.bggId === 990001);
+  await request('/MeepleBoard/matches', token, 'POST', { gameId: competitive.id, gameName: competitive.name, matchDate: new Date(Date.now() - 3600e3).toISOString(), isSoloGame: false,
+    winnerId: a.Id, playerIds: [a.Id, world.people.participante.Id], personalRating: 7 }, 201);
   const played = await request('/MeepleBoard/users/' + a.Id + '/played-games', token);
   assert.ok(played.some(g => g.gameName === 'Meeple Teste Competitivo'));
   console.log('PASS SQL-backed collection reload: Meeple Teste Solo; played history preserved');
   console.log('PASS catalogue detail access, word-token search, filters and genuine empty responses');
-})().catch(e => { console.error(e.message); process.exitCode = 1; });
+}).catch(e => { console.error(e.message); process.exitCode = 1; });

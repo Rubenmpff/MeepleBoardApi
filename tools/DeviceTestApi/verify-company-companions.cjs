@@ -1,14 +1,16 @@
 // DeviceTests only: Companhia «Com quem jogaste» lists only friends with shared matches under the selected filters,
-// and each count equals that friend's own comparison. Read-only (GET). Never prints credentials or tokens.
+// and each count equals that friend's own comparison. On dated matches (statistics-dataset.cjs) of fresh people
+// (disposable.cjs), removed at the end. Never the iPhone accounts; never prints credentials or tokens.
 //   node tools/DeviceTestApi/verify-company-companions.cjs
 if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
-const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
-const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
-(async () => {
-  const health = await (await fetch(base + '/device-test/health')).json();
-  assert.deepEqual(health, { environment: 'DeviceTests', database: 'MeepleBoard_DeviceTests', externalDelivery: false });
-  const accounts = JSON.parse(fs.readFileSync(path.join(root, '.device-tests/accounts.json'), 'utf8'));
-  const login = async name => { const a = accounts.find(x => x.Email === name + '@meepleboard.test'); const r = await fetch(base + '/MeepleBoard/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: a.Email, password: a.Password, deviceInfo: 'verify-company-companions' }) }); assert.equal(r.status, 200); return (await r.json()).token; };
+const assert = require('node:assert/strict');
+const { run, quartet } = require('./disposable.cjs'), dataset = require('./statistics-dataset.cjs');
+const base = 'http://127.0.0.1:5099';
+run({ label: 'companions', ...quartet() }, async world => {
+  const people = Object.fromEntries(await Promise.all(['autor', 'participante', 'membro'].map(async r => [r, await world.login(r)])));
+  await dataset.statisticsCases(people.autor, people.participante, people.membro);
+  await dataset.companyExtras(people.autor, people.participante, people.membro);
+  const login = async name => people[name].token;
   const pass = name => console.log('PASS ' + name);
   for (const name of ['participante', 'autor']) {
     const token = await login(name);
@@ -29,4 +31,4 @@ const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
     }
     pass(`${name}: ${games.length} games × 3 contexts and a mode — only friends with shared matches; ${checked} counts equal the friend's comparison`);
   }
-})().catch(error => { console.error('FAIL', error.message); process.exit(1); });
+}).catch(error => { console.error('FAIL', error.message); process.exit(1); });

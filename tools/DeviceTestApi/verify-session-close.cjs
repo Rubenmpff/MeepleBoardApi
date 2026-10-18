@@ -35,6 +35,9 @@ const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
   const created = await fixture('POST', '/fixture');
   assert.equal(created.status, 200, 'fixture: ' + JSON.stringify(created.data));
   const f = created.data;
+  // The match and the disposable sessions go also when a check fails.
+  let match = null, cleaned = false;
+  try {
   pass('disposable sessions created for the two fixture accounts: running, scheduled, past its automatic end and five races');
 
   // 1. Authorization: nothing changes.
@@ -58,7 +61,7 @@ const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
   const game = (await call(organizer, 'GET', '/game/search?name=' + encodeURIComponent('Meeple Teste Competitivo'), null, 200)).data;
   const averages = async () => { const g = (await call(organizer, 'GET', `/game/${game.id}`, null, 200)).data; return [g.meepleBoardScore, g.meepleBoardRatingsCount]; };
   const initial = await averages();
-  const match = (await call(organizer, 'POST', '/matches', { gameId: game.id, gameName: game.name, gameSessionId: f.running, matchDate: new Date().toISOString(), isSoloGame: false,
+  match = (await call(organizer, 'POST', '/matches', { gameId: game.id, gameName: game.name, gameSessionId: f.running, matchDate: new Date().toISOString(), isSoloGame: false,
     winnerId: organizer.id, playerIds: [organizer.id, guest.id], playerScores: [{ userId: organizer.id, score: 12 }, { userId: guest.id, score: 9 }],
     scoreSummary: 'Verificação: terminar sessão', durationInMinutes: 30, durationMethod: 'Measured', personalRating: 5 }, 201)).data;
   const before = Date.now();
@@ -109,8 +112,15 @@ const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
   // 7. Cancelling the scheduled session works; then everything disposable goes.
   await call(organizer, 'POST', `/session/${f.scheduled}/cancel`, null, 204);
   assert.equal((await fixture('GET', `/${f.scheduled}`)).status, 404);
-  await call(organizer, 'DELETE', `/matches/${match.id}`, null, 204);
-  assert.equal((await fixture('DELETE', '/fixture')).status, 204);
+  await call(organizer, 'DELETE', `/matches/${match.id}`, null, 204); match = null;
+  cleaned = true; assert.equal((await fixture('DELETE', '/fixture')).status, 204);
   assert.deepEqual(await averages(), initial, 'the game average is back to where it was');
   pass('the organizer cancels the scheduled session (204, removed); the verification match and the disposable sessions are deleted; the game average is back to where it was');
+  } finally {
+    if (!cleaned) {
+      if (match) await call(organizer, 'DELETE', `/matches/${match.id}`);
+      await fixture('DELETE', '/fixture');
+      console.log('CLEAN disposable sessions removed after a failure');
+    }
+  }
 })().catch(error => { console.error('FAIL', error.message); process.exit(1); });

@@ -3,27 +3,22 @@
 //   node tools/DeviceTestApi/verify-ratings-experiences.cjs
 // Recalculates every game once (the approved recalculation; individual ratings are only read), then works on
 // «Meeple Teste Cooperativo» with matches it creates and deletes again, so averages return to where they were.
-// Never prints credentials or tokens.
+// Fresh people (disposable.cjs): amiga-colecionadora with two friends who play with her, two others and an
+// administrator; removed at the end, also on failure. Never the iPhone accounts; never prints credentials or tokens.
 if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
-const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
-const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
+const assert = require('node:assert/strict');
+const { run } = require('./disposable.cjs');
+const base = 'http://127.0.0.1:5099';
 const MARK = 'Verificação de avaliações';
-(async () => {
-  const health = await (await fetch(base + '/device-test/health')).json();
-  assert.deepEqual(health, { environment: 'DeviceTests', database: 'MeepleBoard_DeviceTests', externalDelivery: false });
-  const accounts = JSON.parse(fs.readFileSync(path.join(root, '.device-tests/accounts.json'), 'utf8'));
-  const login = async name => {
-    const a = accounts.find(x => x.Email === name + '@meepleboard.test');
-    const r = await fetch(base + '/MeepleBoard/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: a.Email, password: a.Password, deviceInfo: 'verify-ratings' }) });
-    assert.equal(r.status, 200, 'login ' + name); return { name, id: a.Id, token: (await r.json()).token };
-  };
+run({ label: 'ratings', people: [{ role: 'admin', admin: true }, ...['amiga-colecionadora', 'amiga-tabuleiro', 'amiga-meeples', 'amigo-dados', 'participante'].map(role => ({ role }))],
+  friends: [['amiga-colecionadora', 'amiga-tabuleiro'], ['amiga-colecionadora', 'amiga-meeples']] }, async world => {
   const call = async (u, method, route, body, expected) => {
     const r = await fetch(base + '/MeepleBoard' + route, { method, headers: { Authorization: `Bearer ${u.token}`, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
     if (expected) assert.equal(r.status, expected, `${u.name} ${method} ${route} → ${r.status} ${await r.clone().text()}`);
     return r.status === 204 ? null : r.headers.get('content-type')?.includes('json') ? r.json() : r.text();
   };
   const pass = name => console.log('PASS ' + name);
-  const [admin, C, D, E, F, P] = await Promise.all(['admin', 'amiga-colecionadora', 'amiga-tabuleiro', 'amiga-meeples', 'amigo-dados', 'participante'].map(login));
+  const [admin, C, D, E, F, P] = await Promise.all(['admin', 'amiga-colecionadora', 'amiga-tabuleiro', 'amiga-meeples', 'amigo-dados', 'participante'].map(r => world.login(r)));
   const G = await call(C, 'GET', '/game/search?name=' + encodeURIComponent('Meeple Teste Cooperativo'), null, 200);
   const game = () => call(C, 'GET', `/game/${G.id}`, null, 200);
   const mine = (u, matchId) => call(u, 'GET', `/campaigns/matches/${matchId}/journal/publication`, null, 200);
@@ -48,7 +43,7 @@ const MARK = 'Verificação de avaliações';
   const m1 = await match(C, [C, D], 0);
   let entries = await call(C, 'GET', `/campaigns/matches/${m1.id}/journal`, null, 200);
   assert.equal(entries.find(e => e.userId === C.id).personalRating, 0, 'zero is saved as a rating');
-  const pendingC = await call(C, 'GET', '/matches/pending-journal', null, 200) || [];
+  const pendingC = await call(C, 'GET', '/matches/pending-journal') || []; // 204 when nothing is pending
   const pendingD = await call(D, 'GET', '/matches/pending-journal', null, 200) || [];
   assert.ok(!pendingC.some(m => m.id === m1.id), 'zero counts as rated'); assert.ok(pendingD.some(m => m.id === m1.id), 'the friend still has it pending');
   pass('the registration rating (0) is saved as the creator\'s rating; zero is not «por avaliar»; the friend\'s pending match is theirs only');
@@ -148,4 +143,4 @@ const MARK = 'Verificação de avaliações';
   const after = await game();
   assert.equal(after.meepleBoardRatingsCount, before.meepleBoardRatingsCount); assert.equal(after.meepleBoardScore, before.meepleBoardScore);
   pass('the verification matches are removed; the MeepleBoard rating is back to its starting value');
-})().catch(error => { console.error('FAIL', error.message); process.exit(1); });
+}).catch(error => { console.error('FAIL', error.message); process.exit(1); });

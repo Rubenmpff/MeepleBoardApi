@@ -1,19 +1,18 @@
 if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
-const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
+const assert = require('node:assert/strict');
+const { run, quartet } = require('./disposable.cjs');
 const base = 'http://127.0.0.1:5099';
 async function send(method, route, token, body, status = 200) {
   const response = await fetch(base + route, { method, headers: { ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
   assert.equal(response.status, status, method + ' ' + route);
   const text = await response.text(); return text ? JSON.parse(text) : null;
 }
-(async () => {
+run({ label: 'invitefriends', ...quartet() }, async world => {
   const health = await send('GET', '/device-test/health');
   assert.equal(health.environment, 'DeviceTests'); assert.equal(health.database, 'MeepleBoard_DeviceTests');
-  const dataPath = path.resolve(__dirname, '../../.device-tests');
-  const accounts = JSON.parse(fs.readFileSync(path.join(dataPath, 'accounts.json'), 'utf8'));
-  const tokens = [];
-  for (const a of accounts) tokens.push((await send('POST', '/MeepleBoard/auth/login', null, { email: a.Email, password: a.Password, deviceInfo: 'MeepleBoard Mobile App' })).token);
-  const [author, peer, outsider, member] = accounts.map(a => a.Id);
+  const logins = await Promise.all(['autor', 'participante', 'alheio', 'membro'].map(r => world.login(r)));
+  const tokens = logins.map(l => l.token);
+  const [author, peer, outsider, member] = logins.map(l => l.id);
   const before = await send('GET', '/MeepleBoard/session/mine', tokens[0]);
   const scheduledStartDate = new Date(Date.now() + 3 * 86400000).toISOString();
   const accepted = await send('POST', '/MeepleBoard/session', tokens[0], { name: 'Convites SQL ' + Date.now(), scheduledStartDate, playerIds: [peer] }, 201);
@@ -39,6 +38,5 @@ async function send(method, route, token, body, status = 200) {
   console.log('PASS nonfriends rejected without insertion and declined invite cannot be resent');
   const after = await send('GET', '/MeepleBoard/session/mine', tokens[0]);
   for (const old of before) assert.deepEqual(after.find(s => s.id === old.id), old);
-  fs.writeFileSync(path.join(dataPath, 'session-invite-friends-fixture.json'), JSON.stringify({ sessionId: accepted.id, restrictedId: restricted.id, author, peer, outsider, member }, null, 2));
-  console.log('PASS all previous author sessions unchanged; no cancellation, campaigns or matches');
-})().catch(error => { console.error(error.message); process.exitCode = 1; });
+  console.log('PASS earlier sessions of these people unchanged; no cancellation, campaigns or matches');
+}).catch(error => { console.error(error.message); process.exitCode = 1; });

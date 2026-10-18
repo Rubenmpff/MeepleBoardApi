@@ -1,19 +1,21 @@
 // DeviceTests only: blocks, reports, suspension and the PT/EN filter against real SQL and real tokens
 // (docs/proposta-bloqueio-comunidade.md in the app).
 //   node tools/DeviceTestApi/verify-community.cjs
-// Fresh people each run (CommunityFixture): A, B, C, D with friendships A–B, A–C, B–C, A–D. Every rule is called through
-// the HTTP endpoints, with IDs sent directly where the app would never send them, and blocks checked in both directions.
-// The administrator of accounts.json moderates only these people. Everything created is removed at the end, accounts
-// included. Never touches the iPhone walkthrough; never prints credentials or tokens.
+// Fresh people each run (disposable.cjs): A, B, C, D with friendships A–B, A–C, B–C, A–D, and an administrator of their
+// own. Every rule is called through the HTTP endpoints, with IDs sent directly where the app would never send them, and
+// blocks checked in both directions. Everything created is removed at the end, accounts included, also on failure.
+// Never touches the iPhone walkthrough; never prints credentials or tokens.
 if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
-const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
-const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
-(async () => {
+const assert = require('node:assert/strict');
+const { run } = require('./disposable.cjs');
+const base = 'http://127.0.0.1:5099';
+run({ label: 'community', people: [{ role: 'a' }, { role: 'b' }, { role: 'c' }, { role: 'd' }, { role: 'admin', admin: true }],
+  friends: [['a', 'b'], ['a', 'c'], ['b', 'c'], ['a', 'd']] }, async world => {
   const health = await (await fetch(base + '/device-test/health')).json();
   assert.deepEqual(health, { environment: 'DeviceTests', database: 'MeepleBoard_DeviceTests', externalDelivery: false });
   const pass = name => console.log('PASS ' + name);
   const fixture = async (method, route, body) => {
-    const r = await fetch(`${base}/device-test/community${route}`, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    const r = await fetch(`${base}/device-test/disposable${route}`, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
     const text = await r.text(); return { status: r.status, data: text ? JSON.parse(text) : null };
   };
   const auth = async (route, body) => {
@@ -34,14 +36,14 @@ const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
     return { status: r.status, data: text && r.headers.get('content-type')?.includes('json') ? JSON.parse(text) : text };
   };
 
-  const made = (await fixture('POST', '/people')).data;
-  const [A, B, C, D] = ['a', 'b', 'c', 'd'].map(role => ({ name: role.toUpperCase(), ...made.people[role] }));
+  const made = { stamp: world.stamp };
+  const [A, B, C, D, admin] = ['a', 'b', 'c', 'd', 'admin'].map(role => ({ name: role.toUpperCase(), ...world.people[role] }));
+  const adminAccount = { Id: admin.id };
   const ids = [A, B, C, D].map(u => u.id);
-  try {
-    for (const u of [A, B, C, D]) await login(u);
-    const adminAccount = JSON.parse(fs.readFileSync(path.join(root, '.device-tests/accounts.json'), 'utf8')).find(a => a.Email === 'admin@meepleboard.test');
-    const admin = await login({ name: 'admin', email: adminAccount.Email, password: adminAccount.Password });
-    const game = made.game;
+  {
+    for (const u of [A, B, C, D, admin]) await login(u);
+    const competitive = (await call(A, 'GET', '/game/search?name=' + encodeURIComponent('Meeple Teste Competitivo'), undefined, 200)).data;
+    const game = { id: competitive.id, name: competitive.name };
     // Token issue times have whole seconds: a sign-in in the same second as a revocation is refused as well.
     const nextSecond = () => new Promise(resolve => setTimeout(resolve, 1100));
     const state = async () => (await fixture('POST', '/state', ids)).data;
@@ -78,6 +80,14 @@ const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
     await call(B, 'POST', `/campaigns/${k.id}/matches`, { matchId: encounter.id, sessionNumber: 1, sessionTitle: 'Primeiro encontro' }, 204);
     await match(C, { campaignId: k.id, playerIds: [C.id, A.id], winnerId: C.id }, 403); // C is not a member
     await match(B, { campaignId: k.id, playerIds: [B.id, C.id], winnerId: B.id }, 409); // C is not a member
+    // A campaignId alone is not enough: the server reads who is an accepted member now.
+    const k2 = (await call(A, 'POST', '/campaigns', { name: 'Campanha com convite pendente', gameId: game.id }, 201)).data;
+    await call(A, 'POST', `/campaigns/${k2.id}/members/invite`, { userId: D.id }, 204);                      // D invited, not accepted
+    await match(A, { campaignId: k2.id, playerIds: [A.id, D.id], winnerId: A.id }, 409);                   // a pending member does not play, even as A's friend
+    await match(D, { campaignId: k2.id, playerIds: [D.id, A.id], winnerId: D.id }, 403);                   // a pending member does not register
+    await match(A, { campaignId: k2.id, playerIds: [A.id, B.id], winnerId: A.id }, 409);                   // with a campaignId, friendship does not replace membership
+    await match(B, { campaignId: k2.id, playerIds: [B.id, D.id], winnerId: B.id }, 403);                   // B is not a member of k2
+    await match(B, { campaignId: '00000000-0000-0000-0000-000000000001', playerIds: [B.id, D.id], winnerId: B.id }, 404);
     await call(B, 'POST', `/campaigns/${k.id}/members/invite`, { userId: D.id }, 409); // already a member
     await call(D, 'POST', `/campaigns/${k.id}/members/invite`, { userId: C.id }, 400); // C is not D's friend
     pass('campaign encounter: members play without friendship; non-members refused; invitations only to the inviter\'s friends');
@@ -157,6 +167,10 @@ const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
     for (const players of [[A.id, B.id, C.id], [A.id, C.id, B.id]])
       assert.equal((await match(A, { playerIds: players, winnerId: A.id }, 409)).data.message, 'Não é possível registar a partida com estes jogadores.');
     await call(A, 'POST', `/matches/${m1.id}/players`, { userId: C.id }, 409);
+    // Members of the same campaign with a block between them: refused with the campaignId too.
+    await call(B, 'POST', `/community/blocks/${D.id}`, undefined, 204);
+    assert.equal((await match(B, { campaignId: k.id, playerIds: [B.id, D.id], winnerId: B.id }, 409)).data.message, 'Não é possível registar a partida com estes jogadores.');
+    await call(B, 'DELETE', `/community/blocks/${D.id}`, undefined, 204);
     await match(C, { gameSessionId: s1.id, playerIds: [C.id, B.id], winnerId: C.id }, 409); // the block is checked first
     // Joining an earlier match to a campaign widens nothing and invites nobody.
     await call(A, 'POST', `/campaigns/${k.id}/matches`, { matchId: shared.id, sessionNumber: 2, sessionTitle: 'Encontro antigo' }, 204);
@@ -309,11 +323,5 @@ const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
     assert.ok(st.userReports.filter(r => r.reportedUserId === D.id).every(r => !r.open && !r.hasDetail), 'reports about D closed and without text, also the resolved ones');
     assert.equal(st.users.find(u => u.id === D.id).suspensionReason, null);
     pass('account deletion: the blocks it made and received go; reports about it close and lose their text');
-  } finally {
-    const cleanup = await fixture('DELETE', `/fixture?people=${ids.join(',')}`);
-    assert.equal(cleanup.status, 200); assert.equal(cleanup.data.removed, 4, 'the four fixture accounts removed');
-    const left = (await fixture('POST', '/state', ids)).data;
-    assert.ok(left.blocks.length === 0 && left.userReports.length === 0 && left.photoReports.length === 0 && left.users.length === 0, 'nothing left');
-    pass('clean-up: matches, sessions, campaigns, reports, blocks and the four accounts removed');
   }
-})().catch(error => { console.error('FAIL', error.message); process.exit(1); });
+}).catch(error => { console.error('FAIL', error.message); process.exit(1); });

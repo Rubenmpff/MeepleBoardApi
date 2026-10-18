@@ -1,15 +1,18 @@
-// Guarded synthetic SQL/API checks. No credentials, tokens or private text are printed.
+// DeviceTests only: company statistics against real SQL on dated matches (statistics-dataset.cjs) of fresh people
+// (disposable.cjs), removed at the end, also on failure. Never the iPhone accounts. No credentials, tokens or private text are printed.
 if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
-const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
-const root=path.resolve(__dirname,'../..'),base='http://127.0.0.1:5099';
+const assert=require('node:assert/strict');
+const {run,quartet}=require('./disposable.cjs'),dataset=require('./statistics-dataset.cjs');
+const base='http://127.0.0.1:5099';
 async function call(url,token,method='GET',body,status=200){const r=await fetch(base+url,{method,headers:{...(token?{Authorization:`Bearer ${token}`}:{ }),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});assert.ok(Array.isArray(status)?status.includes(r.status):r.status===status,`${method} ${url.split('?')[0]} returned ${r.status}`);const text=await r.text();return text?JSON.parse(text):null;}
 const route=(path,q)=>`/MeepleBoard/statistics/me/${path}?${new URLSearchParams(q)}`;
-(async()=>{
+run({label:'company',...quartet()},async world=>{
  assert.deepEqual(await call('/device-test/health'),{environment:'DeviceTests',database:'MeepleBoard_DeviceTests',externalDelivery:false});
- const accounts=JSON.parse(fs.readFileSync(path.join(root,'.device-tests/accounts.json'),'utf8'));
- const account=name=>accounts.find(a=>a.Email===name+'@meepleboard.test');const a=account('autor'),b=account('participante'),c=account('membro'),outsider=account('alheio');
+ const a=world.people.autor,b=world.people.participante,c=world.people.membro,outsider=world.people.alheio;
  const login=async user=>(await call('/MeepleBoard/auth/login',null,'POST',{email:user.Email,password:user.Password,deviceInfo:'MeepleBoard Mobile App'})).token;
  const token=await login(a),peerToken=await login(b),outToken=await login(outsider);
+ await dataset.statisticsCases({id:a.Id,token},{id:b.Id},{id:c.Id});
+ const fixture=await dataset.companyExtras({id:a.Id,token},{id:b.Id,token:peerToken},{id:c.Id});
  const q={start:'2024-10-27',endExclusive:'2024-10-28',timeZone:'Europe/Lisbon'};
  const paired=await call(route('company',{...q,friendId:b.Id}),token);
  assert.equal(paired.matches,5);assert.equal(paired.results.myWins,1);assert.equal(paired.results.friendWins,2);assert.equal(paired.results.sharedWins,1);assert.equal(paired.results.draws,1);assert.equal(paired.results.teamWins,1);assert.equal(paired.results.known,4);assert.equal(paired.results.unknown,1);
@@ -28,14 +31,6 @@ const route=(path,q)=>`/MeepleBoard/statistics/me/${path}?${new URLSearchParams(
  const record=await call(route('matches',{...q,metric:'scores',gameId:comp.gameId,mode:'COMPETITIVE',scoreValue:'-5'}),token);assert.equal(record.total,1);assert.equal(record.items[0].score,-5);
  const own=await call(route('company',{...q,userId:a.Id}),outToken);assert.ok(own.companions.every(x=>x.matches===0));
  const games=await call('/MeepleBoard/game/suggestions?query=Meeple&limit=10',token),coop=games.find(g=>g.name==='Meeple Teste Cooperativo'),solo=games.find(g=>g.name==='Meeple Teste Solo');
- const fixturePath=path.join(root,'.device-tests/company-fixture.json');const fixture=fs.existsSync(fixturePath)?JSON.parse(fs.readFileSync(fixturePath,'utf8')):{matches:{}};
- for(const [index,result] of ['Loss','Draw','Undefined'].entries()){
-  if(fixture.matches[result])continue;
-  const saved=await call('/MeepleBoard/matches',token,'POST',{gameId:coop.id,gameName:coop.name,gameMode:'COOPERATIVE',result,playerIds:[a.Id,b.Id],resultPlayerIds:[],isSoloGame:false,matchDate:`2024-10-28T12:0${index}:00Z`,personalRating:0,scoresEnabled:false,notes:'COMPANY_AUTHOR_PRIVATE'},201);fixture.matches[result]=saved.id;
-  fs.writeFileSync(fixturePath,JSON.stringify(fixture,null,2),{mode:0o600});
- }
- if(!fixture.privatePeer){const saved=await call('/MeepleBoard/matches',peerToken,'POST',{gameId:solo.id,gameName:solo.name,gameMode:'SOLO',result:'Win',playerIds:[b.Id],resultPlayerIds:[],isSoloGame:true,matchDate:'2024-10-28T13:00:00Z',personalRating:7.5,scoresEnabled:true,playerScores:[{userId:b.Id,score:-5}],notes:'COMPANY_PEER_PRIVATE'},201);fixture.privatePeer=saved.id;fs.writeFileSync(fixturePath,JSON.stringify(fixture,null,2),{mode:0o600});}
- if(!fixture.sharedOther){const saved=await call('/MeepleBoard/matches',token,'POST',{gameId:comp.gameId,gameName:comp.name,gameMode:'COMPETITIVE',result:'Win',sharedVictoryAllowed:true,playerIds:[a.Id,b.Id,c.Id],resultPlayerIds:[a.Id,c.Id],isSoloGame:false,matchDate:'2024-10-28T12:03:00Z',personalRating:0,scoresEnabled:true,playerScores:[{userId:a.Id,score:-5},{userId:b.Id,score:0},{userId:c.Id,score:17}]},201);fixture.sharedOther=saved.id;fs.writeFileSync(fixturePath,JSON.stringify(fixture,null,2),{mode:0o600});}
  const otherShared=await call(route('company',{start:'2024-10-28',endExclusive:'2024-10-29',timeZone:q.timeZone,mode:'COMPETITIVE',friendId:b.Id}),token);assert.equal(otherShared.results.myWins,1);assert.equal(otherShared.results.otherSharedWins,1);assert.equal(otherShared.results.otherWins,0);
  const team=await call(route('company',{start:'2024-10-28',endExclusive:'2024-10-29',timeZone:q.timeZone,mode:'COOPERATIVE',friendId:b.Id}),token);assert.equal(team.matches,3);assert.equal(team.results.teamLosses,1);assert.equal(team.results.teamDraws,1);assert.equal(team.results.unknown,1);
  const undefinedTeam=await call(route('matches',{start:'2024-10-28',endExclusive:'2024-10-29',timeZone:q.timeZone,mode:'COOPERATIVE',friendId:b.Id,metric:'unknown-pair'}),token);assert.equal(undefinedTeam.total,1);assert.equal(undefinedTeam.items[0].friendOutcome,'Undefined');
@@ -67,4 +62,4 @@ const route=(path,q)=>`/MeepleBoard/statistics/me/${path}?${new URLSearchParams(
  assert.ok(denied.collection.every(l=>!expectedEntries.some(e=>e.id===l.entryId)));
  console.log('PASS SQL/API company: shared and individual wins, partial draws, another winner, team loss/draw/undefined, zero/negative scores, samples, filters and drilldown.');
  console.log('PASS accepted-friend and participant authorization; separate friend history, notes/ratings and identities excluded from annual payload; records/own ratings/year summaries use shared principal services.');
-})().catch(e=>{console.error(e.message);process.exitCode=1;});
+}).catch(e=>{console.error(e.message);process.exitCode=1;});

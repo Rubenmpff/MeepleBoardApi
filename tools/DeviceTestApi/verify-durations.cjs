@@ -1,23 +1,16 @@
 // DeviceTests only: match duration (measured, estimated, «Não sei», old zero), its correction, and the duration
 // statistics of a game — «A tua média» and «Média MeepleBoard» — against real SQL.
 //   node tools/DeviceTestApi/verify-durations.cjs
-// Starts from a known state (every test account's contribution off, previous runs' matches removed), checks the
-// rules, then leaves a small shared fixture so the community average can be seen on the iPhone: six matches of the
-// chosen game by three friends who contribute (amiga-colecionadora, amiga-tabuleiro, amiga-meeples). Never prints
-// credentials or tokens.
+// Fresh people (disposable.cjs): autor and participante, and three friends who may contribute (amiga-colecionadora,
+// amiga-tabuleiro, amiga-meeples); every registration is between accepted friends. Everything is removed at the end,
+// also on failure. Never the iPhone accounts; never prints credentials or tokens.
 if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
-const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
-const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
+const assert = require('node:assert/strict');
+const { run } = require('./disposable.cjs');
+const base = 'http://127.0.0.1:5099';
 const MARK = 'Verificação de duração', FIXTURE = 'Verificação de duração · comunidade';
-(async () => {
-  const health = await (await fetch(base + '/device-test/health')).json();
-  assert.deepEqual(health, { environment: 'DeviceTests', database: 'MeepleBoard_DeviceTests', externalDelivery: false });
-  const accounts = JSON.parse(fs.readFileSync(path.join(root, '.device-tests/accounts.json'), 'utf8'));
-  const login = async name => {
-    const a = accounts.find(x => x.Email === name + '@meepleboard.test');
-    const r = await fetch(base + '/MeepleBoard/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: a.Email, password: a.Password, deviceInfo: 'verify-durations' }) });
-    assert.equal(r.status, 200, 'login ' + name); return { name, id: a.Id, token: (await r.json()).token };
-  };
+run({ label: 'durations', people: ['autor', 'participante', 'amiga-colecionadora', 'amiga-tabuleiro', 'amiga-meeples'].map(role => ({ role })),
+  friends: [['autor', 'participante'], ['amiga-colecionadora', 'amiga-tabuleiro'], ['amiga-colecionadora', 'amiga-meeples'], ['amiga-tabuleiro', 'amiga-meeples'], ['amiga-colecionadora', 'participante']] }, async world => {
   const call = async (u, method, route, body, expected) => {
     const r = await fetch(base + '/MeepleBoard' + route, { method, headers: { Authorization: `Bearer ${u.token}`, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
     if (expected) assert.equal(r.status, expected, `${method} ${route} → ${r.status} ${await r.clone().text()}`);
@@ -25,7 +18,7 @@ const MARK = 'Verificação de duração', FIXTURE = 'Verificação de duração
   };
   const pass = name => console.log('PASS ' + name);
   const names = ['autor', 'participante', 'amiga-colecionadora', 'amiga-tabuleiro', 'amiga-meeples'];
-  const [A, P, C, D, E] = await Promise.all(names.map(login));
+  const [A, P, C, D, E] = await Promise.all(names.map(r => world.login(r)));
   const everyone = [A, P, C, D, E];
   const share = (u, enabled) => call(u, 'PATCH', '/users/me/duration-sharing', { enabled }, 204);
   const durations = (u, game) => call(u, 'GET', `/game/${game.id}/durations`, null, 200);
@@ -45,7 +38,7 @@ const MARK = 'Verificação de duração', FIXTURE = 'Verificação de duração
     for (const m of await call(u, 'GET', `/matches/history/game/${g.id}`) || []) // 204 when there are none
       if ((m.scoreSummary || '').startsWith(MARK) && m.creatorId === u.id) await call(u, 'DELETE', `/matches/${m.id}`, null, 204);
   // A game where the three contributing friends have no matches yet: the community set is then exactly what this script adds.
-  const clean = async g => { for (const u of [C, D, E]) { const s = (await durations(u, g)).personal; for (const side of [s.solo, s.multiplayer]) if (side.count || side.excludedUnknown || side.excludedMissing || side.excludedZero) return false; } return true; };
+  const clean = async g => { const c = (await durations(C, g)).community; if (c.multiplayer.count || c.solo.count) return false; for (const u of [C, D, E]) { const s = (await durations(u, g)).personal; for (const side of [s.solo, s.multiplayer]) if (side.count || side.excludedUnknown || side.excludedMissing || side.excludedZero) return false; } return true; };
   let G = null; for (const g of games) if (await clean(g)) { G = g; break; }
   assert.ok(G, 'no game without matches of the three friends; cannot check the community set exactly');
   pass(`known state: contributions off, earlier runs removed; community checks use «${G.name}»`);
@@ -137,11 +130,9 @@ const MARK = 'Verificação de duração', FIXTURE = 'Verificação de duração
   created.splice(4, 1, await match(E, G, { players: [E, C], minutes: 60, method: 'Estimated', summary: FIXTURE }));
   pass('correcting 180 → 65 min moves the mean to 55; deleting a match removes it (5 left, mean 50)');
 
-  // 9. Cleanup of the personal checks; the community fixture stays for the iPhone.
+  // 9. The personal check matches removed through the API; the rest goes with the disposable people.
   for (const m of [m1, m2, m3]) await call(A, 'DELETE', `/matches/${m.id}`, null, 204);
   const after = (await durations(A, G)).personal;
   assert.equal(after.multiplayer.count, before.multiplayer.count); assert.equal(after.solo.count, before.solo.count);
-  community = (await durations(P, G)).community.multiplayer;
-  console.log(`Left for the iPhone: «${G.name}» with ${community.count} shared matches (mean ${community.mean} min); amiga-colecionadora, amiga-tabuleiro and amiga-meeples contribute; autor and participante do not.`);
   pass('personal check matches removed; averages back to where they were');
-})().catch(error => { console.error('FAIL', error.message); process.exit(1); });
+}).catch(error => { console.error('FAIL', error.message); process.exit(1); });

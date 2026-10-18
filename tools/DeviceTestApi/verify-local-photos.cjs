@@ -1,10 +1,9 @@
-// Real HTTP/JWT + isolated SQL journal records + local files. Never contacts Cloudinary.
+// Real HTTP/JWT + isolated SQL journal records + local files, for fresh people (disposable.cjs) removed at the end.
+// Never the iPhone accounts. Never contacts Cloudinary.
 if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
-const fs = require('node:fs');
-const path = require('node:path');
+const { run, quartet } = require('./disposable.cjs');
 const assert = require('node:assert/strict');
 const base = 'http://127.0.0.1:5099';
-const accounts = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../.device-tests/accounts.json'), 'utf8'));
 async function request(method, url, token, body, expected = 200) {
   const headers = token ? { Authorization: 'Bearer ' + token } : {};
   if (body && !(body instanceof FormData)) { headers['Content-Type'] = 'application/json'; body = JSON.stringify(body); }
@@ -12,7 +11,8 @@ async function request(method, url, token, body, expected = 200) {
   assert.equal(response.status, expected, method + ' ' + url + ': unexpected HTTP status');
   return response;
 }
-(async () => {
+run({ label: 'photos', ...quartet() }, async world => {
+  const accounts = world.accounts(['autor', 'participante', 'alheio', 'membro']);
   const tokens = [];
   for (const a of accounts) tokens.push((await (await request('POST', '/MeepleBoard/auth/login', null, { email: a.Email, password: a.Password, rememberMe: false })).json()).token);
   const suggestions = await (await request('GET', '/MeepleBoard/game/suggestions?query=Meeple&limit=10')).json();
@@ -39,4 +39,4 @@ async function request(method, url, token, body, expected = 200) {
   await request('GET', photo, tokens[0], null, 404);
   console.log('PASS only author removes local photograph; URL becomes unavailable');
   console.log('5 live SQL/HTTP catalogue/photo scenarios passed; production storage untouched.');
-})().catch(error => { console.error(error.message); process.exitCode = 1; });
+}).catch(error => { console.error(error.message); process.exitCode = 1; });

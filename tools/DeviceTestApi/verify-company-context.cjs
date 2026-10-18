@@ -1,15 +1,18 @@
-// Read-only checks against the existing synthetic DeviceTests fixtures.
+// DeviceTests only: company context (only two / group) on dated matches (statistics-dataset.cjs) of fresh people
+// (disposable.cjs), removed at the end. Never the iPhone accounts.
 if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
-const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
-const root=path.resolve(__dirname,'../..'),base='http://127.0.0.1:5099';
+const assert=require('node:assert/strict');
+const {run,quartet}=require('./disposable.cjs'),dataset=require('./statistics-dataset.cjs');
+const base='http://127.0.0.1:5099';
 async function call(route,token,expected=200){const r=await fetch(base+route,{headers:token?{Authorization:`Bearer ${token}`}:{}});assert.equal(r.status,expected,'Unexpected HTTP status');return r.status===200?r.json():null;}
 const route=(kind,q)=>`/MeepleBoard/statistics/me/${kind}?${new URLSearchParams(q)}`;
-(async()=>{
+run({label:'context',...quartet()},async world=>{
  assert.deepEqual(await call('/device-test/health'),{environment:'DeviceTests',database:'MeepleBoard_DeviceTests',externalDelivery:false});
- const accounts=JSON.parse(fs.readFileSync(path.join(root,'.device-tests/accounts.json'),'utf8'));
- const account=name=>accounts.find(a=>a.Email===name+'@meepleboard.test');const a=account('autor'),b=account('participante'),outsider=account('alheio');
+ const a=world.people.autor,b=world.people.participante,outsider=world.people.alheio;
  const login=async u=>{const r=await fetch(base+'/MeepleBoard/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:u.Email,password:u.Password,deviceInfo:'MeepleBoard Mobile App'})});assert.equal(r.status,200);return (await r.json()).token;};
- const token=await login(a),outToken=await login(outsider),q={start:'2024-10-27',endExclusive:'2024-10-28',timeZone:'Europe/Lisbon',friendId:b.Id};
+ const token=await login(a),outToken=await login(outsider);
+ await dataset.statisticsCases({id:a.Id,token},{id:b.Id},{id:world.people.membro.Id});
+ const q={start:'2024-10-27',endExclusive:'2024-10-28',timeZone:'Europe/Lisbon',friendId:b.Id};
  const all=await call(route('company',q),token),list=await call(route('matches',{...q,metric:'pair-all',limit:'100'}),token);
  assert.equal(all.matches,list.total);assert.ok(list.total<100);
  const evidence=[];for(const row of list.items){const match=await call('/MeepleBoard/matches/'+row.id,token);const ids=new Set(match.players.map(p=>p.userId));assert.ok(ids.has(a.Id)&&ids.has(b.Id));evidence.push({id:row.id,count:ids.size});}
@@ -37,4 +40,4 @@ const route=(kind,q)=>`/MeepleBoard/statistics/me/${kind}?${new URLSearchParams(
  const only=await call(route('company',{...q,groupContext:'only-two'}),token);assert.ok(only.results.unknown>0,'Legacy unknown results must remain in two-player sample');
  await call(route('company',{...q,groupContext:'invalid'}),token,400);await call(route('matches',{...q,groupContext:'invalid',metric:'pair-all'}),token,400);await call(route('company',q),null,401);
  console.log('PASS SQL/API: distinct registered participants, both context counts, filtered evidence/results/evolution/games, unknown historical results, authorization and no private notes.');
-})().catch(e=>{console.error(e.message);process.exitCode=1;});
+}).catch(e=>{console.error(e.message);process.exitCode=1;});

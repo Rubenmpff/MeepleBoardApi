@@ -56,7 +56,8 @@ app.UseCors(); app.UseAuthentication(); app.UseAuthorization(); app.MapControlle
 app.MapGet("/device-test/health", () => new { environment = "DeviceTests", database = "MeepleBoard_DeviceTests", externalDelivery = false });
 SessionCloseFixture.Map(app, dataPath);
 AccountDeletionFixture.Map(app, dataPath);
-CommunityFixture.Map(app, dataPath);
+RoteiroCleanupFixture.Map(app, dataPath);
+DisposableFixture.Map(app, dataPath);
 await DeviceDatabase.Prepare(app.Services, dataPath, connection);
 if (args.Contains("--audit-only")) return;
 Console.WriteLine("DeviceTests ready on port 5099; synthetic accounts: " + Path.Combine(dataPath, "accounts.json"));

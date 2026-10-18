@@ -1,41 +1,23 @@
-// Creates only dated synthetic fixtures in the guarded DeviceTests API; credentials stay local/in-memory.
+// DeviceTests only: statistics against real SQL on dated matches (statistics-dataset.cjs) of fresh people (disposable.cjs),
+// removed at the end, also on failure. Never the iPhone accounts; credentials stay in memory.
 if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
-const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
-const base='http://127.0.0.1:5099',root=path.resolve(__dirname,'../..'),file=path.join(root,'.device-tests/statistics-fixture.json');
+const assert=require('node:assert/strict');
+const {run,quartet}=require('./disposable.cjs'),dataset=require('./statistics-dataset.cjs');
+const base='http://127.0.0.1:5099';
 async function call(route,token,method='GET',body,expected=200){
  const r=await fetch(base+route,{method,headers:{...(token?{Authorization:'Bearer '+token}:{}),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});
  assert.equal(r.status,expected,method+' '+route+' HTTP '+r.status);const text=await r.text();return text?JSON.parse(text):null;
 }
 const route=(q,suffix='')=>'/MeepleBoard/statistics/me'+suffix+'?'+new URLSearchParams(q);
-(async()=>{
+run({label:'statistics',...quartet()},async world=>{
  const health=await call('/device-test/health');assert.deepEqual(health,{environment:'DeviceTests',database:'MeepleBoard_DeviceTests',externalDelivery:false});
- const accounts=JSON.parse(fs.readFileSync(path.join(root,'.device-tests/accounts.json'),'utf8'));
  const tokenFor=async(a)=>(await call('/MeepleBoard/auth/login',null,'POST',{email:a.Email,password:a.Password,deviceInfo:'MeepleBoard Mobile App'})).token;
- const author=accounts.find(a=>a.Email==='autor@meepleboard.test'),peer=accounts.find(a=>a.Email==='participante@meepleboard.test'),third=accounts.find(a=>a.Email==='membro@meepleboard.test'),outsider=accounts.find(a=>a.Email==='alheio@meepleboard.test');
+ const author=world.people.autor,peer=world.people.participante,third=world.people.membro,outsider=world.people.alheio;
  const token=await tokenFor(author);
  const games=await call('/MeepleBoard/game/suggestions?query=Meeple&limit=10',token);
  const comp=games.find(g=>g.name==='Meeple Teste Competitivo'),solo=games.find(g=>g.name==='Meeple Teste Solo'),coop=games.find(g=>g.name==='Meeple Teste Cooperativo');assert.ok(comp&&solo&&coop);
- const ids=[author.Id,peer.Id,third.Id];
  const query={start:'2024-10-27',endExclusive:'2024-10-28',timeZone:'Europe/Lisbon'};
- let fixture=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{matches:{},query};
- const cases=[
- ['shared',comp,'COMPETITIVE','Win',ids,[author.Id,peer.Id],30,0,'2024-10-27T12:00:00Z',[17,0,-5]],
- ['partial-draw',comp,'COMPETITIVE','Draw',ids,[author.Id,peer.Id],null,7.5,'2024-10-27T12:01:00Z',[0,0,-5]],
- ['competitive-loss',comp,'COMPETITIVE','Win',ids,[peer.Id],0,10,'2024-10-27T12:02:00Z',[-5,17,0]],
- ['solo-loss',solo,'SOLO','Loss',[author.Id],[],15,7.5,'2024-10-27T12:03:00Z',[-5]],
- ['team-win',coop,'COOPERATIVE','Win',[author.Id,peer.Id],[],45,0,'2024-10-27T12:04:00Z',null],
- ['undefined',solo,'SOLO','Undefined',[author.Id],[],null,0,'2024-10-27T12:05:00Z',[0]],
- ['legacy',comp,null,null,[author.Id,peer.Id],[],null,7.5,'2024-10-27T12:06:00Z',null],
- ['start-inclusive',solo,'SOLO','Draw',[author.Id],[],0,0,'2024-10-26T23:00:00Z',[0]],
- ['before-start',solo,'SOLO','Win',[author.Id],[],99,10,'2024-10-26T22:59:59Z',[1]],
- ['end-exclusive',solo,'SOLO','Win',[author.Id],[],99,10,'2024-10-28T00:00:00Z',[1]],
- ];
- for(const [name,game,mode,result,playerIds,resultPlayerIds,duration,rating,date,scores] of cases){
-  if(fixture.matches[name])continue;
-  const payload={gameId:game.id,gameName:game.name,matchDate:date,isSoloGame:mode==='SOLO',gameMode:mode,result,resultPlayerIds,sharedVictoryAllowed:name==='shared',durationInMinutes:duration,personalRating:rating,playerIds,
-   winnerId:name==='legacy'?author.Id:null,scoresEnabled:scores!=null,playerScores:scores?.map((score,i)=>({userId:playerIds[i],score})),notes:'STATISTICS_TEST_PRIVATE_AUTHOR',tags:'statistics-test'};
-  const created=await call('/MeepleBoard/matches',token,'POST',payload,201);fixture.matches[name]=created.id;fs.writeFileSync(file,JSON.stringify(fixture,null,2),{mode:0o600});
- }
+ await dataset.statisticsCases({id:author.Id,token},{id:peer.Id},{id:third.Id});
  const summary=await call(route(query),token);
  assert.equal(summary.matches,8);assert.equal(summary.distinctGames,3);assert.equal(summary.recordedMinutes,90);assert.equal(summary.matchesWithDuration,5);assert.equal(summary.matchesWithoutDuration,3);
  assert.deepEqual(summary.results,{wins:2,losses:2,draws:2,known:6,withoutResult:2,legacy:1,winRate:33.33});assert.equal(summary.averagePersonalRating,4.06);assert.equal(summary.ratedMatches,8);
@@ -61,4 +43,4 @@ const route=(q,suffix='')=>'/MeepleBoard/statistics/me'+suffix+'?'+new URLSearch
  const text=JSON.stringify(summary);assert.ok(!text.includes('STATISTICS_TEST_PRIVATE_AUTHOR'));assert.ok(!text.includes(author.Email));assert.ok(!text.includes(peer.Email));
  console.log('PASS DeviceTests statistics: 8 matches / 3 games; 2 wins, 2 losses, 2 draws; 2 without known result; 90 min from 5/8; own rating 4.06 from 8/8.');
  console.log('PASS SQL-backed API: shared win, partial draw, Solo, cooperative, zero/negative scores, rating zero/half points, legacy, local DST boundary and exclusive end; filters/supporting rows/pagination; own-only diary, outsider isolation and no private fields.');
-})().catch(e=>{console.error(e.message);process.exitCode=1;});
+}).catch(e=>{console.error(e.message);process.exitCode=1;});

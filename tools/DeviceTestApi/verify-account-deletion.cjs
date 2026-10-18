@@ -1,31 +1,19 @@
 // DeviceTests only: deleting an account with activity anonymises it, all or nothing — against real SQL.
 //   node tools/DeviceTestApi/verify-account-deletion.cjs
-// Uses the disposable «eliminar» account (the host creates it again, new and empty, on its next start).
+// Fresh people (disposable.cjs): «eliminar» (the account deleted), «autor» and an administrator; removed at the end,
+// also on failure. Never the iPhone accounts.
 // Gives it a friendship, a library entry, a shared rated match with a note and a publication, and a report on
 // someone else's comment; an administrator deletes it; then checks what goes and what stays. The match it
 // shared is deleted again at the end, so averages return to where they were. Never prints credentials or tokens.
 if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
-const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
-const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
+const assert = require('node:assert/strict');
+const { run } = require('./disposable.cjs');
+const base = 'http://127.0.0.1:5099';
 const MARK = 'Verificação de eliminação de conta';
-(async () => {
-  const health = await (await fetch(base + '/device-test/health')).json();
-  assert.deepEqual(health, { environment: 'DeviceTests', database: 'MeepleBoard_DeviceTests', externalDelivery: false });
-  // «eliminar» lives in its own file, so the verifiers that sign in with every account never meet it deleted.
-  const accounts = [...JSON.parse(fs.readFileSync(path.join(root, '.device-tests/accounts.json'), 'utf8')),
-    JSON.parse(fs.readFileSync(path.join(root, '.device-tests/disposable-account.json'), 'utf8'))];
-  const signIn = name => {
-    const a = accounts.find(x => x.Email === name + '@meepleboard.test');
-    return fetch(base + '/MeepleBoard/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: a.Email, password: a.Password, deviceInfo: 'verify-account-deletion' }) });
-  };
-  const login = async name => {
-    const r = await signIn(name);
-    if (r.status !== 200 && name === 'eliminar') { console.log('SKIP «eliminar» was deleted by an earlier run; restart the DeviceTests host to recreate it.'); process.exit(0); }
-    assert.equal(r.status, 200, 'login ' + name);
-    const a = accounts.find(x => x.Email === name + '@meepleboard.test');
-    const body = await r.json();
-    return { name, id: a.Id, token: body.token, refresh: body.refreshToken };
-  };
+run({ label: 'deletion', people: [{ role: 'admin', admin: true }, { role: 'autor' }, { role: 'eliminar' }] }, async world => {
+  const signIn = name => fetch(base + '/MeepleBoard/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: world.people[name].email, password: world.people[name].password, deviceInfo: 'verify-account-deletion' }) });
+  const login = name => world.login(name);
   const call = async (u, method, route, body, expected) => {
     const r = await fetch(base + '/MeepleBoard' + route, { method, headers: { Authorization: `Bearer ${u.token}`, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
     if (expected) assert.equal(r.status, expected, `${u.name} ${method} ${route} → ${r.status} ${await r.clone().text()}`);
@@ -111,5 +99,5 @@ const MARK = 'Verificação de eliminação de conta';
   const end = await game();
   assert.equal(end.meepleBoardRatingsCount, before.meepleBoardRatingsCount, 'ratings back to the start');
   assert.equal(end.meepleBoardScore, before.meepleBoardScore, 'mean back to the start');
-  pass(`verification match removed; «${G.name}» back to ${end.meepleBoardScore ?? '—'} with ${end.meepleBoardRatingsCount} ratings. Restart the host to recreate «eliminar».`);
-})().catch(error => { console.error('FAIL', error.message); process.exit(1); });
+  pass(`verification match removed; «${G.name}» back to ${end.meepleBoardScore ?? '—'} with ${end.meepleBoardRatingsCount} ratings. `);
+}).catch(error => { console.error('FAIL', error.message); process.exit(1); });

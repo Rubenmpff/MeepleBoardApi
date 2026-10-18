@@ -1,29 +1,18 @@
 if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
-const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
+const assert = require('node:assert/strict');
+const { run, quartet } = require('./disposable.cjs');
 const base = 'http://127.0.0.1:5099';
 async function send(method, route, token, body, status = 200) {
   const response = await fetch(base + route, { method, headers: { ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
   assert.equal(response.status, status, method + ' ' + route);
   const text = await response.text(); return text ? JSON.parse(text) : null;
 }
-(async () => {
+run({ label: 'requiredfriend', ...quartet() }, async world => {
   const health = await send('GET', '/device-test/health');
   assert.equal(health.environment, 'DeviceTests'); assert.equal(health.database, 'MeepleBoard_DeviceTests');
-  const dataPath = path.resolve(__dirname, '../../.device-tests');
-  const accounts = JSON.parse(fs.readFileSync(path.join(dataPath, 'accounts.json'), 'utf8'));
-  const tokens = [];
-  for (const a of accounts) tokens.push((await send('POST', '/MeepleBoard/auth/login', null, { email: a.Email, password: a.Password, deviceInfo: 'MeepleBoard Mobile App' })).token);
-  const [author, peer, outsider, member] = accounts.map(a => a.Id);
-  if (process.argv.includes('--cancel')) {
-    const fixture = JSON.parse(fs.readFileSync(path.join(dataPath, 'session-rule-fixture.json'), 'utf8'));
-    await send('POST', '/MeepleBoard/session/' + fixture.sessionId + '/cancel', tokens[0], undefined, 204);
-    await send('GET', '/MeepleBoard/session/' + fixture.sessionId, tokens[0], undefined, 404);
-    const after = await send('GET', '/MeepleBoard/session/mine', tokens[0]);
-    assert.ok(!after.some(s => s.id === fixture.sessionId));
-    for (const existing of fixture.existing) assert.equal(JSON.stringify(after.find(s => s.id === existing.id)), existing.snapshot);
-    console.log('PASS existing cancellation deletes only the disposable fixture; all earlier sessions unchanged');
-    return;
-  }
+  const logins = await Promise.all(['autor', 'participante', 'alheio', 'membro'].map(r => world.login(r)));
+  const tokens = logins.map(l => l.token);
+  const [author, peer, outsider, member] = logins.map(l => l.id);
   const original = await send('GET', '/MeepleBoard/session/mine', tokens[0]);
   const prefix = 'Rule rejected ' + Date.now();
   const scheduledStartDate = new Date(Date.now() + 2 * 86400000).toISOString();
@@ -50,7 +39,13 @@ async function send(method, route, token, body, status = 200) {
   console.log('PASS refusal read back and another friend invited pending');
   const after = await send('GET', '/MeepleBoard/session/mine', tokens[0]);
   for (const existing of original) assert.deepEqual(after.find(s => s.id === existing.id), existing);
-  console.log('PASS all pre-existing sessions unchanged, including iPhone session');
-  fs.writeFileSync(path.join(dataPath, 'session-rule-fixture.json'), JSON.stringify({ sessionId: created.id, rejectedName: prefix, scheduledStartDate, author, peer, member, existing: original.map(s => ({ id: s.id, snapshot: JSON.stringify(s) })) }, null, 2));
-  console.log('No invitations accepted; no campaigns or matches created.');
-})().catch(error => { console.error(error.message); process.exitCode = 1; });
+  console.log('PASS earlier sessions of these people unchanged');
+  // Cancelling (organizer only) removes the session and leaves the others as they were.
+  await send('POST', '/MeepleBoard/session/' + created.id + '/cancel', tokens[1], undefined, 403);
+  await send('POST', '/MeepleBoard/session/' + created.id + '/cancel', tokens[0], undefined, 204);
+  await send('GET', '/MeepleBoard/session/' + created.id, tokens[0], undefined, 404);
+  const final = await send('GET', '/MeepleBoard/session/mine', tokens[0]);
+  assert.ok(!final.some(s => s.id === created.id));
+  for (const existing of original) assert.deepEqual(final.find(s => s.id === existing.id), existing);
+  console.log('PASS cancellation (organizer only) removes the session; the others unchanged');
+}).catch(error => { console.error(error.message); process.exitCode = 1; });

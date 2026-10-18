@@ -1,23 +1,28 @@
 // DeviceTests only: «Amigos que têm este jogo» against real SQL through the running test API (port 5099).
 //   node tools/DeviceTestApi/verify-game-friends.cjs
-// Uses the fictitious friends the test host seeds for "participante" (Wingspan): five who may appear, five who must not.
-// A privacy change made here is restored before it ends. Never prints credentials or tokens.
+// Fresh people (disposable.cjs) around «participante» (Wingspan): five who may appear, five who must not; removed at the
+// end, also on failure. Never the iPhone accounts; never prints credentials or tokens.
 if (require.main !== module) return; // Importing a verifier never runs it: only `node <file>` does (see docs/testes-macos-docker.md).
-const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
-const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
-(async () => {
-  const health = await (await fetch(base + '/device-test/health')).json();
-  assert.deepEqual(health, { environment: 'DeviceTests', database: 'MeepleBoard_DeviceTests', externalDelivery: false });
-  const accounts = JSON.parse(fs.readFileSync(path.join(root, '.device-tests/accounts.json'), 'utf8'));
-  const login = async name => { const a = accounts.find(x => x.Email === name + '@meepleboard.test'); const r = await fetch(base + '/MeepleBoard/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: a.Email, password: a.Password, deviceInfo: 'verify-game-friends' }) }); assert.equal(r.status, 200); return { id: a.Id, token: (await r.json()).token }; };
+const assert = require('node:assert/strict');
+const { run } = require('./disposable.cjs');
+const base = 'http://127.0.0.1:5099';
+const own = (role, privacy, status) => ({ role, privacy, library: [{ game: 'Wingspan', status }] });
+const spec = { label: 'gamefriends', people: [{ role: 'participante' }, { role: 'autor' },
+  own('amiga-colecionadora', 'Public', 'Owned'), own('amigo-com-um-nome-de-utilizador-bastante-comprido', 'FriendsOnly', 'Owned'), own('amiga-tabuleiro', 'FriendsOnly', 'Owned'),
+  own('amigo-dados', 'Public', 'Owned'), own('amiga-meeples', 'Public', 'Owned'), own('amigo-privado', 'Private', 'Owned'), own('amiga-quer-jogar', 'Public', 'Wishlist'),
+  own('amigo-ja-jogou', 'Public', 'Played'), own('pedido-pendente', 'Public', 'Owned'), own('desconhecido', 'Public', 'Owned')],
+  friends: [['participante', 'autor'], ...['amiga-colecionadora', 'amigo-com-um-nome-de-utilizador-bastante-comprido', 'amiga-tabuleiro', 'amigo-dados', 'amiga-meeples', 'amigo-privado',
+    'amiga-quer-jogar', 'amigo-ja-jogou'].map(r => ['participante', r])],
+  pending: [['pedido-pendente', 'participante']] };
+run(spec, async world => {
   const call = async (u, method, route, body) => { const r = await fetch(base + '/MeepleBoard' + route, { method, headers: { ...(u ? { Authorization: `Bearer ${u.token}` } : {}), 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) }); const t = await r.text(); return { status: r.status, data: t ? JSON.parse(t) : null }; };
   const pass = name => console.log('PASS ' + name);
-  const viewer = await login('participante'), author = await login('autor');
+  const viewer = await world.login('participante'), author = await world.login('autor');
   const gameId = async name => (await call(viewer, 'GET', '/game/search?name=' + encodeURIComponent(name))).data.id;
   const wingspan = await gameId('Wingspan'), empty = await gameId('Meeple Teste Cooperativo'); // verify-catalog-search keeps «Solo» in the author's library on purpose
   const owners = async (who, game = wingspan) => (await call(who, 'GET', `/game/${game}/friend-owners`)).data;
-  const visible = ['amiga-colecionadora', 'amigo-com-um-nome-de-utilizador-bastante-comprido', 'amiga-tabuleiro', 'amigo-dados', 'amiga-meeples'].map(n => 'Teste-' + n);
-  const hidden = ['amigo-privado', 'amiga-quer-jogar', 'amigo-ja-jogou', 'pedido-pendente', 'desconhecido'].map(n => 'Teste-' + n);
+  const visible = ['amiga-colecionadora', 'amigo-com-um-nome-de-utilizador-bastante-comprido', 'amiga-tabuleiro', 'amigo-dados', 'amiga-meeples'].map(n => world.people[n].userName);
+  const hidden = ['amigo-privado', 'amiga-quer-jogar', 'amigo-ja-jogou', 'pedido-pendente', 'desconhecido'].map(n => world.people[n].userName);
 
   const seen = await owners(viewer);
   const names = seen.items.map(i => i.userName);
@@ -35,13 +40,13 @@ const root = path.resolve(__dirname, '../..'), base = 'http://127.0.0.1:5099';
   assert.equal((await call(viewer, 'GET', `/game/00000000-0000-0000-0000-000000000001/friend-owners`)).status, 404);
   pass('another account sees none of them; a game nobody has is empty; anonymous 401, unknown game 404');
 
-  const collector = await login('amiga-colecionadora');
+  const collector = await world.login('amiga-colecionadora');
   assert.equal((await call(collector, 'PATCH', '/users/me/library-privacy', { libraryPrivacy: 0 })).status, 204);
   try {
-    assert.ok(!(await owners(viewer)).items.some(i => i.userName === 'Teste-amiga-colecionadora'), 'a library made private disappears at once');
+    assert.ok(!(await owners(viewer)).items.some(i => i.userName === world.people['amiga-colecionadora'].userName), 'a library made private disappears at once');
   } finally {
     assert.equal((await call(collector, 'PATCH', '/users/me/library-privacy', { libraryPrivacy: 2 })).status, 204);
   }
-  assert.ok((await owners(viewer)).items.some(i => i.userName === 'Teste-amiga-colecionadora'));
+  assert.ok((await owners(viewer)).items.some(i => i.userName === world.people['amiga-colecionadora'].userName));
   pass('making a library private hides it immediately (restored to public)');
-})().catch(error => { console.error('FAIL', error.message); process.exit(1); });
+}).catch(error => { console.error('FAIL', error.message); process.exit(1); });
