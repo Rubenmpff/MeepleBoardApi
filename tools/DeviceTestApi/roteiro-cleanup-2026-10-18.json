@@ -1,0 +1,14 @@
+{
+  "incident": "2026-10-18, 08:30–08:33 UTC: old verifiers run over the iPhone walkthrough accounts (docs/testes-macos-docker.md)",
+  "reference": ".device-tests/roteiro-snapshot.json taken 2026-10-18 07:47 UTC (0 differences right before the incident)",
+  "sessions": [
+    "53757602-5878-42e3-a865-26186297af65", "284c16f4-de29-4080-a500-cd7475ba2079", "c197ff70-6678-4596-9e2b-f593060208bc",
+    "17b12f15-fb30-4af5-84e6-676f40da5ce9", "735fb94f-5646-4dc8-a9e8-38f146f91b87", "f60b5d2c-7d42-44cc-9189-9c751ba86cb3",
+    "0a5f5374-ad99-41c8-ad0d-f631985824e0", "e03759a2-f880-4c54-8635-e9370193a696", "b7404b52-d608-401a-bbbd-0c88fc417153"
+  ],
+  "matches": [
+    "e996e447-4aa8-4c63-a41d-53e19568c747", "65db4afc-9deb-488d-b70a-c9a1885401a0", "f4d54fa4-05c1-466e-bc94-02977484561b",
+    "45c59e55-0417-412b-84d4-6098140c8b8c", "d79853fc-cd3d-459b-bafc-b40db8d26369", "8f8bff6e-a09c-48b1-a1ad-6d67b7ac3014",
+    "a9b5437c-6cb4-4bb5-a9ec-4f88fdbd73ea"
+  ]
+}
