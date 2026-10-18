@@ -107,3 +107,16 @@ if (require.main !== module) return;
 - **O que muda com o tempo** (estado e fim de uma sessão quando passa o fecho automático): é comparado à parte e não conta como falha.
 
 **Referência:** fotografia tirada a 2026-10-18 às 07:47 UTC, depois da etapa da eliminação de conta. A comparação imediata deu 0 diferenças. Não prova o que aconteceu antes desta data: até aqui, a verificação do roteiro comparava só as contagens de sessões por estado.
+
+## Verificadores que escrevem nas contas do roteiro (2026-10-18)
+
+A 2026-10-18 (08:30–08:33 UTC), ao correr todos os verificadores depois da etapa do bloqueio, a comparação do roteiro passou de 0 para 13 diferenças: 9 sessões e 7 partidas novas nas contas autor, participante, alheio e membro.
+
+- **Origem confirmada:** nomes e resumos dos verificadores («Sessão SQL escrita …», «Rule pending …», «Amizade SQL …», «Convites SQL …», «Sessão fuso SQL …», «Sessão de teste · fim automático», «Sessão de teste · jogo previsto», «Resultado SQL: 17–0», «Verificação: 12–9», «Verificação de duração»), todos criados nessa janela.
+- **Verificadores em causa:** os de sessões (`verify-session-*`, `verify-planned-game-journey`, `verify-session-auto-close`) usam as contas do roteiro e não apagam o que criam. `verify-durations` também usa autor e participante; parou a meio e deixou partidas marcadas.
+- **Estado:** a remoção destas 16 linhas (por ID exato) ainda não foi feita. Aguarda decisão.
+- **Regra a partir daqui:** não correr estes verificadores enquanto o roteiro do iPhone estiver em validação. `verify-community.cjs` usa só contas descartáveis próprias.
+
+## Bloqueios, denúncias e suspensão (2026-10-18)
+
+`node tools/DeviceTestApi/verify-community.cjs` cria quatro pessoas novas (`CommunityFixture`, só em loopback), testa tudo pelos endpoints e no fim apaga o que criou, incluindo as contas. As regras estão em `docs/bloqueio-comunidade.md`.
