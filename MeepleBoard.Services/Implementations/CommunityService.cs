@@ -24,7 +24,7 @@ namespace MeepleBoard.Services.Implementations
         public async Task BlockPublicationAuthorAsync(Guid userId, Guid publicationId, CancellationToken ct = default)
         {
             var pub = experiences == null ? null : await experiences.GetWithReportsForUpdateAsync(publicationId, ct);
-            if (pub?.JournalEntry == null || pub.HiddenAt != null || (pub.RatingPublishedAt == null && pub.CommentPublishedAt == null))
+            if (pub?.JournalEntry == null || !pub.IsVisible)
                 throw new KeyNotFoundException("Publicação não encontrada.");
             await BlockAsync(userId, pub.JournalEntry.UserId, ct);
         }
@@ -56,6 +56,32 @@ namespace MeepleBoard.Services.Implementations
             if (await community.HasOpenPhotoReportAsync(reporterId, entryId, url, ct)) throw new InvalidOperationException("Já denunciaste esta fotografia.");
             await community.AddPhotoReportAsync(new PhotoReport(reporterId, entryId, url, dto.Reason, dto.Detail), ct);
             await community.SaveChangesAsync(ct);
+            await HideReportedCopiesAsync(entryId, url, ct);
+        }
+
+        public async Task ReportPublicPhotoAsync(Guid reporterId, Guid publicationId, Guid photoId, ReportDto dto, CancellationToken ct = default)
+        {
+            ArgumentNullException.ThrowIfNull(dto);
+            if (reporterId == Guid.Empty) throw new UnauthorizedAccessException();
+            // Only a photo this person can see in the community now (blocks and hiding included); a second report is refused as such.
+            var photo = experiences == null ? null : await experiences.GetPublicPhotoAsync(publicationId, photoId, reporterId, ct, evenIfReportedByViewer: true);
+            if (photo == null) throw new KeyNotFoundException("Fotografia não encontrada.");
+            if (photo.AuthorId == reporterId) throw new InvalidOperationException("Não podes denunciar a tua fotografia.");
+            if (await community.HasOpenPhotoReportAsync(reporterId, photo.JournalEntryId, photo.PhotoUrl, ct)) throw new InvalidOperationException("Já denunciaste esta fotografia.");
+            await community.AddPhotoReportAsync(new PhotoReport(reporterId, photo.JournalEntryId, photo.PhotoUrl, dto.Reason, dto.Detail), ct);
+            await community.SaveChangesAsync(ct);
+            await HideReportedCopiesAsync(photo.JournalEntryId, photo.PhotoUrl, ct);
+        }
+
+        // Distinct people with an open report (from the match or the community) hide the community copies until reviewed;
+        // the diary photo stays with the players and an administrator can still decide at any time.
+        async Task HideReportedCopiesAsync(Guid entryId, string url, CancellationToken ct)
+        {
+            if (experiences == null || await experiences.OpenPhotoReportersAsync(entryId, url, ct) < PublicationPhoto.AutoHideThreshold) return;
+            var copies = await experiences.PhotosOfDiaryPhotoAsync(entryId, url, ct);
+            if (copies.Count == 0) return;
+            foreach (var copy in copies) copy.HideAutomatically();
+            await experiences.SaveChangesAsync(ct);
         }
 
         public async Task<IReadOnlyList<ModerationPersonDto>> ModerationPeopleAsync(CancellationToken ct = default)
@@ -78,8 +104,11 @@ namespace MeepleBoard.Services.Implementations
             {
                 var entry = await community.GetJournalEntryAsync(p.JournalEntryId, ct);
                 var key = JournalPhotoReference.Key(p.PhotoUrl);
+                var copies = experiences == null ? [] : await experiences.PhotosOfDiaryPhotoAsync(p.JournalEntryId, p.PhotoUrl, ct);
                 result.Add(new ModerationPhotoDto(p.JournalEntryId, p.MatchId, key, $"/MeepleBoard/admin/moderation/photos/{p.JournalEntryId}/{key}", p.OwnerName,
-                    p.Reasons.ToDictionary(x => x.Key, x => x.Value), p.Details, p.LastReportAt, entry?.PhotoUrls.Contains(p.PhotoUrl) == true));
+                    p.Reasons.ToDictionary(x => x.Key, x => x.Value), p.Details, p.LastReportAt, entry?.PhotoUrls.Contains(p.PhotoUrl) == true,
+                    copies.Any(c => c.IsVisible || c.HiddenReason == PublicationPhoto.AutoHidden && !c.IsModerated),
+                    copies.Any(c => c.HiddenReason == PublicationPhoto.AutoHidden && !c.IsModerated)));
             }
             return result;
         }
@@ -116,16 +145,23 @@ namespace MeepleBoard.Services.Implementations
             return url != null && await community.PhotoHasOpenReportAsync(entryId, url, ct) ? url : null;
         }
 
-        public async Task ModeratePhotoAsync(Guid administratorId, Guid entryId, string photoKey, string decision, CancellationToken ct = default)
+        public async Task ModeratePhotoAsync(Guid administratorId, Guid entryId, string photoKey, string decision, CancellationToken ct = default, string? reason = null)
         {
-            if (decision is not ("keep" or "remove")) throw new ArgumentException("Ação inválida.");
+            if (decision is not ("keep" or "withdraw" or "remove")) throw new ArgumentException("Ação inválida.");
+            if (decision != "keep" && !PhotoReport.Reasons.Contains(reason ?? "")) throw new ArgumentException("Indica o motivo, que a pessoa vai ver.");
             var entry = await community.GetJournalEntryAsync(entryId, ct) ?? throw new KeyNotFoundException("Fotografia não encontrada.");
             // The reports keep the stored reference, so a photo its owner already removed can still be resolved.
             var reported = (await community.ReportedPhotosAsync(ct)).FirstOrDefault(p => p.JournalEntryId == entryId && JournalPhotoReference.Key(p.PhotoUrl) == photoKey)
                 ?? throw new KeyNotFoundException("Não há denúncias abertas sobre esta fotografia.");
+            // The community copies follow the decision: «Manter» lifts only an automatic hiding; «Retirar da comunidade» keeps the
+            // photo with the players; «Remover da partida» also deletes it from the diary. The author sees the reason on each copy.
+            var copies = experiences == null ? [] : await experiences.PhotosOfDiaryPhotoAsync(entryId, reported.PhotoUrl, ct);
+            if (decision == "withdraw" && !copies.Any(c => c.RemovedAt == null)) throw new InvalidOperationException("Esta fotografia não está publicada na comunidade.");
+            foreach (var copy in copies.Where(c => c.RemovedAt == null))
+                if (decision == "keep") copy.Keep(); else copy.Moderate(reason!, administratorId, removed: decision == "remove");
             var removed = decision == "remove" && entry.PhotoUrls.Contains(reported.PhotoUrl);
             if (removed) entry.RemovePhotoUrl(reported.PhotoUrl);
-            await community.ResolvePhotoReportsAsync(entryId, reported.PhotoUrl, administratorId, decision == "remove" ? "removed" : "kept", ct);
+            await community.ResolvePhotoReportsAsync(entryId, reported.PhotoUrl, administratorId, decision switch { "remove" => "removed", "withdraw" => "withdrawn", _ => "kept" }, ct);
             if (!removed) return;
             // Best effort, as when the owner removes it: the diary no longer shows it either way.
             try { await photos.DeleteAsync(reported.PhotoUrl, ct); }

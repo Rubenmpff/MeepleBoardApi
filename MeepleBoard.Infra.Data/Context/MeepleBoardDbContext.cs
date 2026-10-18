@@ -46,6 +46,7 @@ namespace MeepleBoard.Infra.Data.Context
         public DbSet<GameResourceReport> GameResourceReports { get; set; }
         public DbSet<MatchExperiencePublication> MatchExperiencePublications { get; set; }
         public DbSet<ExperienceReport> ExperienceReports { get; set; }
+        public DbSet<PublicationPhoto> PublicationPhotos { get; set; }
         public DbSet<UserBlock> UserBlocks { get; set; }
         public DbSet<UserReport> UserReports { get; set; }
         public DbSet<PhotoReport> PhotoReports { get; set; }
@@ -366,6 +367,14 @@ namespace MeepleBoard.Infra.Data.Context
             {
                 b.HasOne(p => p.JournalEntry).WithMany().HasForeignKey(p => p.JournalEntryId).OnDelete(DeleteBehavior.Cascade);
                 b.HasIndex(p => p.JournalEntryId).IsUnique();
+            });
+
+            // Published photos go with the publication (and so with the diary entry); a photo deleted from the diary is removed
+            // here by the service, since the diary keeps its photos as references, not rows.
+            modelBuilder.Entity<PublicationPhoto>(b =>
+            {
+                b.HasOne(p => p.Publication).WithMany(p => p.Photos).HasForeignKey(p => p.PublicationId).OnDelete(DeleteBehavior.Cascade);
+                b.HasIndex(p => new { p.PublicationId, p.PhotoUrl }).IsUnique();
             });
 
             modelBuilder.Entity<ExperienceReport>(b =>

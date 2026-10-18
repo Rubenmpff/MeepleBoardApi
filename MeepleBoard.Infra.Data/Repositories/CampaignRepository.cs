@@ -221,5 +221,8 @@ namespace MeepleBoard.Infra.Data.Repositories
             _context.MatchJournalEntries.Update(entry);
             return Task.CompletedTask;
         }
+
+        public Task RemovePublishedCopiesAsync(Guid journalEntryId, string photoUrl, CancellationToken ct = default)
+            => _context.PublicationPhotos.Where(p => p.Publication!.JournalEntryId == journalEntryId && p.PhotoUrl == photoUrl).ExecuteDeleteAsync(ct);
     }
 }

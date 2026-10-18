@@ -49,6 +49,8 @@ namespace MeepleBoard.Domain.Interfaces
         Task<IReadOnlyList<MatchJournalEntry>> GetJournalEntriesForMatchAsync(Guid matchId, CancellationToken ct = default);
         Task AddJournalEntryAsync(MatchJournalEntry entry, CancellationToken ct = default);
         Task UpdateJournalEntryAsync(MatchJournalEntry entry, CancellationToken ct = default);
+        /// <summary>A photo deleted from the diary leaves the community too: every published copy of it goes.</summary>
+        Task RemovePublishedCopiesAsync(Guid journalEntryId, string photoUrl, CancellationToken ct = default);
     }
 
     public enum CampaignLeaveOutcome { Left, NotFound, IsManager, NotMember }

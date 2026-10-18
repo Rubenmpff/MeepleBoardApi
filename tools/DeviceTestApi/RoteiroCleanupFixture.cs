@@ -28,6 +28,7 @@ public static class RoteiroCleanupFixture {
         ("MatchExperiencePublications", "JournalEntryId IN (SELECT Id FROM MatchJournalEntries WHERE MatchId IN (SELECT CAST(value AS uniqueidentifier) FROM OPENJSON(@matches)))"),
         ("ExperienceReports", "PublicationId IN (SELECT p.Id FROM MatchExperiencePublications p JOIN MatchJournalEntries e ON e.Id = p.JournalEntryId WHERE e.MatchId IN (SELECT CAST(value AS uniqueidentifier) FROM OPENJSON(@matches)))"),
         ("PhotoReports", "JournalEntryId IN (SELECT Id FROM MatchJournalEntries WHERE MatchId IN (SELECT CAST(value AS uniqueidentifier) FROM OPENJSON(@matches)))"),
+        ("PublicationPhotos", "PublicationId IN (SELECT p.Id FROM MatchExperiencePublications p JOIN MatchJournalEntries e ON e.Id = p.JournalEntryId WHERE e.MatchId IN (SELECT CAST(value AS uniqueidentifier) FROM OPENJSON(@matches)))"),
     ];
 
     public sealed record Selection(List<Guid> Sessions, List<Guid> Matches);

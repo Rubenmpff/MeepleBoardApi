@@ -236,6 +236,11 @@ var experienceRoutes = new (HttpMethod Method, string Path, object? Body, bool A
     (HttpMethod.Post, publication + "/withdraw-rating", null, false), (HttpMethod.Get, $"/MeepleBoard/game/{f.Game.Id}/experiences", null, false),
     (HttpMethod.Post, $"/MeepleBoard/experiences/{someExperience}/reports", new { reason = "Spam", detail = (string?)null }, false),
     (HttpMethod.Get, "/MeepleBoard/admin/experiences/reported", null, true), (HttpMethod.Post, $"/MeepleBoard/admin/experiences/{someExperience}/hide", new { reason = "Spam" }, true),
+    // Published photos: the public route and its reports need an account; the author's withdrawals are checked by the service.
+    (HttpMethod.Get, $"/MeepleBoard/experiences/{someExperience}/photos/{Guid.NewGuid()}", null, false),
+    (HttpMethod.Post, $"/MeepleBoard/experiences/{someExperience}/photos/{Guid.NewGuid()}/reports", new { reason = "Spam", detail = (string?)null }, false),
+    (HttpMethod.Delete, $"{publication}/photos/{Guid.NewGuid()}", null, false), (HttpMethod.Post, publication + "/withdraw-all", null, false),
+    (HttpMethod.Post, $"/MeepleBoard/admin/moderation/photos/{Guid.NewGuid()}/{new string('a', 64)}/withdraw", new { reason = "PersonalData" }, true),
 };
 foreach (var (method, path, body, _) in experienceRoutes)
     await Check($"visitor is refused: {method} {path}", async () => { await Expect(method, path, null, HttpStatusCode.Unauthorized, body); });
@@ -246,8 +251,18 @@ foreach (var user in new[] { f.Outsider, f.SessionMember, f.CampaignMember })
         await Expect(HttpMethod.Get, publication, user, HttpStatusCode.Forbidden);
         await Expect(HttpMethod.Put, publication, user, HttpStatusCode.Forbidden, new { showRating = true, comment = (string?)null, publishComment = false });
         await Expect(HttpMethod.Post, publication + "/withdraw-rating", user, HttpStatusCode.Forbidden);
+        await Expect(HttpMethod.Post, publication + "/withdraw-all", user, HttpStatusCode.Forbidden);
+        await Expect(HttpMethod.Delete, $"{publication}/photos/{Guid.NewGuid()}", user, HttpStatusCode.Forbidden);
+        await Expect(HttpMethod.Put, publication, user, HttpStatusCode.Forbidden, new { showRating = false, comment = (string?)null, publishComment = false, photoKeys = new[] { new string('a', 64) }, photoConsent = true });
         Assert(f.Publications.Count == 0, "nothing published");
     });
+await Check("a photo that is not public (or does not exist) is not found for a signed-in person", async () => {
+    await Expect(HttpMethod.Get, $"/MeepleBoard/experiences/{someExperience}/photos/{Guid.NewGuid()}", f.Peer, HttpStatusCode.NotFound);
+});
+await Check("a player publishes only photos of their own diary, never someone else's or an unknown key", async () => {
+    await Expect(HttpMethod.Put, publication, f.Author, HttpStatusCode.BadRequest, new { showRating = false, comment = (string?)null, publishComment = false, photoKeys = new[] { new string('b', 64) }, photoConsent = true });
+    Assert(f.Publications.Count == 0, "nothing published");
+});
 await Check("a publication for a match that does not exist is not found", async () => {
     await Expect(HttpMethod.Put, $"/MeepleBoard/campaigns/matches/{Guid.NewGuid()}/journal/publication", f.Author, HttpStatusCode.NotFound, new { showRating = true, comment = (string?)null, publishComment = false });
 });

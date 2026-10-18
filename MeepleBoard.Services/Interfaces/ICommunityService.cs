@@ -15,6 +15,8 @@ namespace MeepleBoard.Services.Interfaces
         Task UnblockAsync(Guid userId, Guid targetId, CancellationToken ct = default);
         Task ReportPersonAsync(Guid reporterId, Guid targetId, ReportDto dto, CancellationToken ct = default);
         Task ReportPhotoAsync(Guid reporterId, Guid matchId, Guid entryId, string photoKey, ReportDto dto, CancellationToken ct = default);
+        /// <summary>A photo published in the community, reported by anyone who sees it (not its author).</summary>
+        Task ReportPublicPhotoAsync(Guid reporterId, Guid publicationId, Guid photoId, ReportDto dto, CancellationToken ct = default);
 
         Task<IReadOnlyList<ModerationPersonDto>> ModerationPeopleAsync(CancellationToken ct = default);
         Task<IReadOnlyList<ModerationPhotoDto>> ModerationPhotosAsync(CancellationToken ct = default);
@@ -24,6 +26,7 @@ namespace MeepleBoard.Services.Interfaces
         /// <summary>The stored reference of a photo with an open report (administrators may then read it), or null.</summary>
         Task<string?> ReportedPhotoUrlAsync(Guid entryId, string photoKey, CancellationToken ct = default);
         /// <summary>«keep» resolves the reports; «remove» takes the photo out of the diary entry (a manual decision) and resolves them.</summary>
-        Task ModeratePhotoAsync(Guid administratorId, Guid entryId, string photoKey, string decision, CancellationToken ct = default);
+        /// <summary>keep · withdraw (from the community; stays shared with the players) · remove (from the match). The last two need a reason, which the author sees.</summary>
+        Task ModeratePhotoAsync(Guid administratorId, Guid entryId, string photoKey, string decision, CancellationToken ct = default, string? reason = null);
     }
 }

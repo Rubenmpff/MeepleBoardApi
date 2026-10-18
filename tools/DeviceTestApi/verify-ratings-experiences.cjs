@@ -87,7 +87,8 @@ run({ label: 'ratings', people: [{ role: 'admin', admin: true }, ...['amiga-cole
   await call(D, 'PUT', `/campaigns/matches/${m1.id}/journal/publication`, { showRating: true, comment: 'Gostei muito desta partida.', publishComment: true }, 200);
   let all = await list(P); let item = all.items.find(i => i.authorName && i.comment === 'Gostei muito desta partida.');
   assert.ok(item, 'visible to any signed-in person'); assert.equal(item.rating, 7.5); assert.equal(item.isMine, false); assert.equal(item.canReport, true);
-  assert.deepEqual(Object.keys(item).sort(), ['authorName', 'canReport', 'comment', 'edited', 'id', 'isMine', 'mode', 'month', 'ownMatchId', 'players', 'rating'].sort(), 'only the approved fields');
+  assert.deepEqual(Object.keys(item).sort(), ['authorName', 'canReport', 'comment', 'edited', 'id', 'isMine', 'mode', 'month', 'ownMatchId', 'photos', 'players', 'rating'].sort(), 'only the approved fields');
+  assert.deepEqual(item.photos, [], 'no photo unless the author chose one');
   assert.equal(item.ownMatchId, null, 'the match is never given to other readers');
   const json = JSON.stringify(all);
   for (const leak of [C.id, D.id, 'A nota privada da amiga', 'Só texto', 'Nota privada de teste']) assert.ok(!json.includes(leak), 'no match id, people ids or notes: ' + leak.slice(0, 12));

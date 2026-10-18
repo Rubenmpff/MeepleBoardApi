@@ -934,6 +934,47 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.ToTable("PhotoReports");
                 });
 
+            modelBuilder.Entity("MeepleBoard.Domain.Entities.PublicationPhoto", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("HiddenAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("HiddenById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("HiddenReason")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("PhotoUrl")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("PublicationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("PublishedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("RemovedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PublicationId", "PhotoUrl")
+                        .IsUnique();
+
+                    b.ToTable("PublicationPhotos");
+                });
+
             modelBuilder.Entity("MeepleBoard.Domain.Entities.RefreshToken", b =>
                 {
                     b.Property<int>("Id")
@@ -1602,6 +1643,17 @@ namespace MeepleBoard.Infra.Data.Migrations
                     b.Navigation("Reporter");
                 });
 
+            modelBuilder.Entity("MeepleBoard.Domain.Entities.PublicationPhoto", b =>
+                {
+                    b.HasOne("MeepleBoard.Domain.Entities.MatchExperiencePublication", "Publication")
+                        .WithMany("Photos")
+                        .HasForeignKey("PublicationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Publication");
+                });
+
             modelBuilder.Entity("MeepleBoard.Domain.Entities.RefreshToken", b =>
                 {
                     b.HasOne("MeepleBoard.Domain.Entities.User", "User")
@@ -1760,6 +1812,8 @@ namespace MeepleBoard.Infra.Data.Migrations
 
             modelBuilder.Entity("MeepleBoard.Domain.Entities.MatchExperiencePublication", b =>
                 {
+                    b.Navigation("Photos");
+
                     b.Navigation("Reports");
                 });
 

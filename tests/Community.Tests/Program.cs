@@ -259,14 +259,17 @@ await Check("HTTP photo report: only a participant, only someone else's photo, t
     Expect(await Send(HttpMethod.Post, $"campaigns/matches/{match.Id}/journal/photos/{entry.Id}/{key}/reports", A, reason), HttpStatusCode.Conflict, "once while open");
     Assert(entry.PhotoUrls.Contains(photoUrl) && storage.Deleted.Count == 0, "nothing removed");
 });
-await Check("HTTP moderation: administrators only; a photo is readable only while reported; keep or remove is a manual decision", async () => {
+await Check("HTTP moderation: administrators only; a photo is readable only while reported; keep or remove (with a reason) is a manual decision", async () => {
     var key = JournalPhotoReference.Key(photoUrl);
     Expect(await Send(HttpMethod.Get, "admin/moderation/people", A), HttpStatusCode.Forbidden, "not an administrator");
     Expect(await Send(HttpMethod.Get, "admin/moderation/photos", A), HttpStatusCode.Forbidden, "not an administrator");
     Expect(await Send(HttpMethod.Get, $"admin/moderation/photos/{entry.Id}/{key}", A), HttpStatusCode.Forbidden, "reading needs the role");
     Expect(await Send(HttpMethod.Get, $"admin/moderation/photos/{ownEntry.Id}/{JournalPhotoReference.Key(otherUrl)}", admin, asAdmin: true), HttpStatusCode.NotFound, "an unreported photo stays closed");
     Expect(await Send(HttpMethod.Get, $"admin/moderation/photos/{entry.Id}/{key}", admin, asAdmin: true), HttpStatusCode.OK, "a reported photo opens");
-    Expect(await Send(HttpMethod.Post, $"admin/moderation/photos/{entry.Id}/{key}/remove", admin, asAdmin: true), HttpStatusCode.NoContent, "remove");
+    Expect(await Send(HttpMethod.Post, $"admin/moderation/photos/{entry.Id}/{key}/remove", admin, asAdmin: true), HttpStatusCode.BadRequest, "removing needs the reason the author sees");
+    Expect(await Send(HttpMethod.Post, $"admin/moderation/photos/{entry.Id}/{key}/remove", admin, new { reason = "Whatever" }, true), HttpStatusCode.BadRequest, "a known reason");
+    Assert(entry.PhotoUrls.Contains(photoUrl) && storage.Deleted.Count == 0, "nothing removed without a reason");
+    Expect(await Send(HttpMethod.Post, $"admin/moderation/photos/{entry.Id}/{key}/remove", admin, new { reason = "Inappropriate" }, true), HttpStatusCode.NoContent, "remove");
     Assert(!entry.PhotoUrls.Contains(photoUrl) && storage.Deleted.SequenceEqual([photoUrl]) && community.PhotoReports.All(r => !r.IsOpen), "removed and resolved");
     Expect(await Send(HttpMethod.Get, $"admin/moderation/photos/{entry.Id}/{key}", admin, asAdmin: true), HttpStatusCode.NotFound, "closed again once resolved");
 });

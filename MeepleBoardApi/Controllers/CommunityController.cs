@@ -80,9 +80,17 @@ namespace MeepleBoardApi.Controllers
             return File(image.Content, image.ContentType);
         });
 
-        [HttpPost("admin/moderation/photos/{entryId:guid}/{photoKey}/{decision:regex(^(keep|remove)$)}")]
+        public sealed record PhotoDecisionDto(string? Reason);
+
+        /// <summary>keep · withdraw (from the community) · remove (from the match); the last two with a reason the author sees.</summary>
+        [HttpPost("admin/moderation/photos/{entryId:guid}/{photoKey}/{decision:regex(^(keep|withdraw|remove)$)}")]
         [Authorize(Roles = "Admin")]
-        public Task<ActionResult> ModeratePhoto(Guid entryId, string photoKey, string decision, CancellationToken ct)
-            => Run(async () => { await community.ModeratePhotoAsync(User.GetUserId(), entryId, photoKey, decision, ct); return NoContent(); });
+        public Task<ActionResult> ModeratePhoto(Guid entryId, string photoKey, string decision, [FromBody] PhotoDecisionDto? dto, CancellationToken ct)
+            => Run(async () => { await community.ModeratePhotoAsync(User.GetUserId(), entryId, photoKey, decision, ct, dto?.Reason); return NoContent(); });
+
+        /// <summary>A photo published in the community: anyone who sees it can report it (not its author).</summary>
+        [HttpPost("experiences/{publicationId:guid}/photos/{photoId:guid}/reports")]
+        public Task<ActionResult> ReportPublicPhoto(Guid publicationId, Guid photoId, [FromBody] ReportDto dto, CancellationToken ct)
+            => Run(async () => { await community.ReportPublicPhotoAsync(User.GetUserId(), publicationId, photoId, dto ?? throw new ArgumentException("Os dados são obrigatórios."), ct); return NoContent(); });
     }
 }

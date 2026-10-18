@@ -117,6 +117,13 @@ public static class DeviceDatabase {
             if (community.UpOperations.Count != 15 || communityColumns.Length != 7 || communityColumns.Any(c => !c.StartsWith("AspNetUsers.") || !c.EndsWith(":True"))
                 || !communityTables.SequenceEqual(new[] { "PhotoReports", "UserBlocks", "UserReports" })
                 || community.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.CreateIndexOperation>().Count() != 5) throw new Exception("Unexpected blocks/reports/suspension migration changes");
+            // Photos published with an experience: one new table, removed with its publication; no existing row is touched.
+            var publicationPhotos = migrations.CreateMigration(migrations.Migrations["20261018163245_AddPublicationPhotos"], review.Database.ProviderName!);
+            if (publicationPhotos.UpOperations.Count != 2
+                || publicationPhotos.UpOperations[0] is not Microsoft.EntityFrameworkCore.Migrations.Operations.CreateTableOperation { Name: "PublicationPhotos" } photosTable
+                || photosTable.ForeignKeys.Count != 1 || photosTable.ForeignKeys[0].PrincipalTable != "MatchExperiencePublications" || photosTable.ForeignKeys[0].OnDelete != ReferentialAction.Cascade
+                || publicationPhotos.UpOperations[1] is not Microsoft.EntityFrameworkCore.Migrations.Operations.CreateIndexOperation { Table: "PublicationPhotos", IsUnique: true })
+                throw new Exception("Unexpected publication photos migration changes");
             var sql = review.GetService<IMigrator>().GenerateScript("20260824063025_OptimizeGameSearchTokenKey");
             // EF drops only a possible default constraint on this exact column before widening it.
             const string approvedDefaultDrop = "IF @var IS NOT NULL EXEC(N'ALTER TABLE [MatchJournalEntries] DROP CONSTRAINT [' + @var + '];');";

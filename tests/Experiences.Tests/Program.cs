@@ -48,4 +48,36 @@ Check("moderation hides with a known reason and restores; reports need a known r
     r.Resolve(Guid.NewGuid(), "keep"); Assert(!r.IsOpen, "resolved");
 });
 
+Check("photos: at most 3, in the chosen order; withdrawing one or everything keeps the rest of the choice; nothing is automatic", () => {
+    var p = new MatchExperiencePublication(Guid.NewGuid());
+    Assert(p.Photos.Count == 0 && p.IsEmpty, "no photo by default");
+    var added = p.SetPhotos(["a", "b"]);
+    Assert(added.Count == 2 && p.IsVisible && !p.IsEmpty && p.Photos.Single(f => f.PhotoUrl == "b").Position == 1, "photos alone make it visible, in order");
+    Throws<ArgumentException>(() => p.SetPhotos(["a", "b", "c", "d"]), "four is one too many");
+    added = p.SetPhotos(["c", "a"]);
+    Assert(added.Count == 1 && added[0].PhotoUrl == "c" && p.Photos.Count == 2 && p.Photos.Single(f => f.PhotoUrl == "a").Position == 1, "b withdrawn, a kept (same row), c new");
+    var a = p.Photos.Single(f => f.PhotoUrl == "a");
+    Assert(p.WithdrawPhoto(a.Id) && p.Photos.Count == 1 && !p.WithdrawPhoto(a.Id), "one photo withdrawn once");
+    p.Set(true, "Text", true); p.WithdrawAll();
+    Assert(p.RatingPublishedAt == null && p.CommentPublishedAt == null && p.Comment == "Text" && p.Photos.Count == 0 && !p.IsVisible, "everything withdrawn; the comment stays a private draft");
+});
+
+Check("photo moderation: automatic hiding after reports is lifted by «Manter»; an administrator's decision stays and the author cannot undo it", () => {
+    var p = new MatchExperiencePublication(Guid.NewGuid());
+    p.SetPhotos(["a", "b"]);
+    var a = p.Photos.Single(f => f.PhotoUrl == "a"); var b = p.Photos.Single(f => f.PhotoUrl == "b");
+    a.HideAutomatically(); Assert(!a.IsVisible && a.HiddenReason == PublicationPhoto.AutoHidden && !a.IsModerated, "hidden by reports, not yet reviewed");
+    a.Keep(); Assert(a.IsVisible, "«Manter» puts it back");
+    b.Moderate("PersonalData", Guid.NewGuid(), removed: false);
+    Assert(!b.IsVisible && b.IsModerated && b.RemovedAt == null && b.HiddenReason == "PersonalData", "withdrawn from the community, with the reason the author sees");
+    b.Keep(); Assert(!b.IsVisible, "«Manter» never lifts an administrator's decision");
+    Throws<ArgumentException>(() => b.Moderate("Whatever", Guid.NewGuid(), false), "a known reason");
+    Assert(!p.WithdrawPhoto(b.Id) && p.Photos.Contains(b), "the author cannot remove a moderated photo's notice");
+    p.SetPhotos(["a", "b", "c"]); Assert(!b.IsVisible && p.Photos.Count == 3, "choosing it again does not publish it again");
+    Throws<ArgumentException>(() => p.SetPhotos(["a", "c", "d"]), "the moderated one still counts towards the 3");
+    p.WithdrawAll(); Assert(p.Photos.Count == 1 && p.Photos.Single() == b && !p.IsEmpty && !p.IsVisible, "the notice stays after «Retirar tudo»");
+    var removed = new PublicationPhoto(p.Id, "x", 0); removed.Moderate("Inappropriate", Guid.NewGuid(), removed: true);
+    Assert(removed.RemovedAt != null && !removed.IsVisible, "removed from the match");
+});
+
 Console.WriteLine($"{passed} checks passed");

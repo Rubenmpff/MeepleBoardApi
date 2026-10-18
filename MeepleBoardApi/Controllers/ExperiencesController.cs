@@ -1,5 +1,6 @@
 using MeepleBoard.CrossCutting.Security;
 using MeepleBoard.Services.DTOs;
+using MeepleBoard.Services.ExternalServices.Interfaces;
 using MeepleBoard.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -13,7 +14,7 @@ namespace MeepleBoardApi.Controllers
     [ApiController]
     [Authorize]
     [Route("MeepleBoard")]
-    public class ExperiencesController(IExperienceService experiences) : ControllerBase
+    public class ExperiencesController(IExperienceService experiences, IPhotoStorageService photos) : ControllerBase
     {
         async Task<ActionResult> Run(Func<Task<ActionResult>> action)
         {
@@ -32,8 +33,28 @@ namespace MeepleBoardApi.Controllers
         public Task<ActionResult> Set(Guid matchId, [FromBody] SetPublicationDto dto, CancellationToken ct)
             => Run(async () => Ok(await experiences.SetAsync(matchId, User.GetUserId(), dto ?? throw new ArgumentException("Os dados são obrigatórios."), ct)));
 
-        [HttpPost("campaigns/matches/{matchId:guid}/journal/publication/{change:regex(^(withdraw-rating|withdraw-comment|delete-comment)$)}")]
+        [HttpPost("campaigns/matches/{matchId:guid}/journal/publication/{change:regex(^(withdraw-rating|withdraw-comment|delete-comment|withdraw-all)$)}")]
         public Task<ActionResult> Change(Guid matchId, string change, CancellationToken ct) => Run(async () => Ok(await experiences.ChangeAsync(matchId, User.GetUserId(), change, ct)));
+
+        /// <summary>Withdraws one photo from the community; it stays in the diary, shared with the players.</summary>
+        [HttpDelete("campaigns/matches/{matchId:guid}/journal/publication/photos/{photoId:guid}")]
+        public Task<ActionResult> WithdrawPhoto(Guid matchId, Guid photoId, CancellationToken ct) => Run(async () => Ok(await experiences.WithdrawPhotoAsync(matchId, User.GetUserId(), photoId, ct)));
+
+        /// <summary>
+        /// A published photo, for any signed-in person who may see it now (blocks respected). The path names only the publication
+        /// and the photo; after it is withdrawn or hidden, new requests get 404. Never cached; copies already taken are out of reach.
+        /// </summary>
+        [HttpGet("experiences/{id:guid}/photos/{photoId:guid}")]
+        [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+        public Task<ActionResult> Photo(Guid id, Guid photoId, CancellationToken ct) => Run(async () =>
+        {
+            Response.Headers.CacheControl = "no-store, private";
+            Response.Headers.Pragma = "no-cache";
+            var url = await experiences.PublicPhotoUrlAsync(id, photoId, User.GetUserId(), ct);
+            if (url == null) return NotFound();
+            var image = await photos.ReadProtectedAsync(url, ct);
+            return File(image.Content, image.ContentType);
+        });
 
         [HttpGet("game/{gameId:guid}/experiences")]
         public Task<ActionResult> List(Guid gameId, [FromQuery] int offset = 0, [FromQuery] int limit = 20, CancellationToken ct = default)

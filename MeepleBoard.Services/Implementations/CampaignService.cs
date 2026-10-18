@@ -490,6 +490,7 @@ namespace MeepleBoard.Services.Implementations
             entry.RemovePhotoUrl(photoUrl);
             await _campaignRepository.UpdateJournalEntryAsync(entry, ct);
             await _campaignRepository.SaveChangesAsync(ct);
+            await _campaignRepository.RemovePublishedCopiesAsync(entry.Id, photoUrl, ct);
 
             // Best-effort: se falhar a apagar no Cloudinary, não bloqueia o utilizador
             // (fica só uma imagem órfã no storage — não afeta a app).

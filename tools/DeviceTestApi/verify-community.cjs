@@ -270,7 +270,8 @@ run({ label: 'community', people: [{ role: 'a' }, { role: 'b' }, { role: 'c' }, 
     await call(admin, 'POST', `/admin/moderation/photos/${entryId}/${key}/keep`, undefined, 204);
     await call(admin, 'GET', `/admin/moderation/photos/${entryId}/${key}`, undefined, 404);
     await call(A, 'POST', `${photoRoute}/reports`, { reason: 'Inappropriate' }, 204);
-    await call(admin, 'POST', `/admin/moderation/photos/${entryId}/${key}/remove`, undefined, 204);
+    await call(admin, 'POST', `/admin/moderation/photos/${entryId}/${key}/remove`, undefined, 400);                // a reason the author sees is required
+    await call(admin, 'POST', `/admin/moderation/photos/${entryId}/${key}/remove`, { reason: 'Inappropriate' }, 204);
     assert.equal((await call(B, 'GET', `/campaigns/matches/${m1.id}/journal`, undefined, 200)).data.find(e => e.userId === B.id).photoUrls.length, 0, 'removed by decision');
     assert.ok((await state()).photoReports.every(r => !r.open), 'resolved');
     pass('photo moderation: «Manter» resolves and closes access; «Remover fotografia» takes it out of the diary');
