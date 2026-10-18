@@ -108,6 +108,13 @@ public static class DeviceDatabase {
             var deletion = migrations.CreateMigration(migrations.Migrations["20261016201449_AddUserDeletedAt"], review.Database.ProviderName!);
             if (deletion.UpOperations.Count != 1 || deletion.UpOperations[0] is not Microsoft.EntityFrameworkCore.Migrations.Operations.AddColumnOperation { Table: "AspNetUsers", Name: "DeletedAt", IsNullable: true, ColumnType: "datetime2" })
                 throw new Exception("Unexpected account deletion migration changes");
+            // Blocks, reports of people and photos, and administrative suspension: nullable columns and new tables only.
+            var community = migrations.CreateMigration(migrations.Migrations["20261018075754_AddBlocksReportsAndSuspension"], review.Database.ProviderName!);
+            var communityColumns = community.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.AddColumnOperation>().Select(c => $"{c.Table}.{c.Name}:{c.IsNullable}").OrderBy(n => n).ToArray();
+            var communityTables = community.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.CreateTableOperation>().Select(t => t.Name).OrderBy(n => n).ToArray();
+            if (community.UpOperations.Count != 15 || communityColumns.Length != 7 || communityColumns.Any(c => !c.StartsWith("AspNetUsers.") || !c.EndsWith(":True"))
+                || !communityTables.SequenceEqual(new[] { "PhotoReports", "UserBlocks", "UserReports" })
+                || community.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.CreateIndexOperation>().Count() != 5) throw new Exception("Unexpected blocks/reports/suspension migration changes");
             var sql = review.GetService<IMigrator>().GenerateScript("20260824063025_OptimizeGameSearchTokenKey");
             // EF drops only a possible default constraint on this exact column before widening it.
             const string approvedDefaultDrop = "IF @var IS NOT NULL EXEC(N'ALTER TABLE [MatchJournalEntries] DROP CONSTRAINT [' + @var + '];');";

@@ -46,6 +46,9 @@ namespace MeepleBoard.Infra.Data.Context
         public DbSet<GameResourceReport> GameResourceReports { get; set; }
         public DbSet<MatchExperiencePublication> MatchExperiencePublications { get; set; }
         public DbSet<ExperienceReport> ExperienceReports { get; set; }
+        public DbSet<UserBlock> UserBlocks { get; set; }
+        public DbSet<UserReport> UserReports { get; set; }
+        public DbSet<PhotoReport> PhotoReports { get; set; }
 
         protected override void OnModelCreating(
             ModelBuilder modelBuilder)
@@ -370,6 +373,28 @@ namespace MeepleBoard.Infra.Data.Context
                 b.HasOne(r => r.Publication).WithMany(p => p.Reports).HasForeignKey(r => r.PublicationId).OnDelete(DeleteBehavior.Cascade);
                 b.HasOne(r => r.Reporter).WithMany().HasForeignKey(r => r.ReporterId).OnDelete(DeleteBehavior.Restrict);
                 b.HasIndex(r => new { r.PublicationId, r.ReporterId });
+            });
+
+            modelBuilder.Entity<UserBlock>(b =>
+            {
+                b.HasKey(x => new { x.BlockerId, x.BlockedId });
+                b.HasOne(x => x.Blocker).WithMany().HasForeignKey(x => x.BlockerId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne(x => x.Blocked).WithMany().HasForeignKey(x => x.BlockedId).OnDelete(DeleteBehavior.Restrict);
+                b.HasIndex(x => x.BlockedId);
+            });
+
+            modelBuilder.Entity<UserReport>(b =>
+            {
+                b.HasOne(r => r.Reporter).WithMany().HasForeignKey(r => r.ReporterId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne(r => r.ReportedUser).WithMany().HasForeignKey(r => r.ReportedUserId).OnDelete(DeleteBehavior.Restrict);
+                b.HasIndex(r => new { r.ReportedUserId, r.ReporterId });
+            });
+
+            modelBuilder.Entity<PhotoReport>(b =>
+            {
+                b.HasOne(r => r.Reporter).WithMany().HasForeignKey(r => r.ReporterId).OnDelete(DeleteBehavior.Restrict);
+                b.HasOne(r => r.JournalEntry).WithMany().HasForeignKey(r => r.JournalEntryId).OnDelete(DeleteBehavior.Cascade);
+                b.HasIndex(r => new { r.JournalEntryId, r.ReporterId });
             });
 
             modelBuilder.Entity<GameResourceReport>(b =>

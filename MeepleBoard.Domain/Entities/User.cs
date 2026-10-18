@@ -68,6 +68,40 @@ namespace MeepleBoard.Domain.Entities
         /// <summary>When the account was deleted. The row stays, anonymised, so shared matches keep their players.</summary>
         public DateTime? DeletedAt { get; private set; }
 
+        // ── Administrative suspension (separate from Identity's lockout after failed sign-ins) ──────────────────
+        /// <summary>Set while suspended (since when). Null: not suspended.</summary>
+        public DateTime? SuspendedAt { get; private set; }
+        /// <summary>End of the suspension; null while suspended means «until review».</summary>
+        public DateTime? SuspendedUntil { get; private set; }
+        [System.ComponentModel.DataAnnotations.MaxLength(300)]
+        public string? SuspensionReason { get; private set; }
+        public Guid? SuspendedById { get; private set; }
+        public DateTime? SuspensionLiftedAt { get; private set; }
+        public Guid? SuspensionLiftedById { get; private set; }
+        /// <summary>Access tokens issued before this moment are refused (set at a suspension, kept after it ends).</summary>
+        public DateTime? TokensRevokedAt { get; private set; }
+
+        public bool IsSuspended(DateTime nowUtc) => SuspendedAt != null && (SuspendedUntil == null || nowUtc < SuspendedUntil);
+
+        /// <summary>Suspends until a date or, with null, until review. Every session ends: earlier tokens never work again.</summary>
+        public void Suspend(DateTime? untilUtc, string reason, Guid administratorId, DateTime nowUtc)
+        {
+            if (DeletedAt != null) throw new InvalidOperationException("A conta foi eliminada.");
+            if (string.IsNullOrWhiteSpace(reason)) throw new ArgumentException("Indica o motivo da suspensão.");
+            if (untilUtc != null && untilUtc <= nowUtc) throw new ArgumentException("O fim da suspensão tem de ser no futuro.");
+            SuspendedAt = nowUtc; SuspendedUntil = untilUtc; SuspensionReason = reason.Trim(); SuspendedById = administratorId;
+            SuspensionLiftedAt = null; SuspensionLiftedById = null; TokensRevokedAt = nowUtc;
+            SecurityStamp = Guid.NewGuid().ToString();
+        }
+
+        /// <summary>Lifts it before its end. The person signs in again (earlier tokens stay refused).</summary>
+        public void LiftSuspension(Guid administratorId, DateTime nowUtc)
+        {
+            if (SuspendedAt == null) throw new InvalidOperationException("A conta não está suspensa.");
+            SuspendedAt = null; SuspendedUntil = null; SuspensionReason = null; SuspendedById = null;
+            SuspensionLiftedAt = nowUtc; SuspensionLiftedById = administratorId;
+        }
+
         [JsonIgnore]
         public virtual ICollection<MatchPlayer> Matches { get; private set; }
 
