@@ -48,10 +48,12 @@ Correção autorizada a 2026-10-18 e implementada em DeviceTests. Produção, Az
 
 ## Plano para as fotografias existentes (não executado)
 
-1. **DeviceTests, ficheiros órfãos (21):**
-   - mover para `.device-tests/photos-quarantine/`, com a lista e a impressão digital de cada ficheiro;
-   - apagar depois da tua confirmação.
-   - Nenhum está referenciado, e a fotografia de validação fica.
+1. **DeviceTests, ficheiros órfãos (21): em quarentena desde 2026-10-18 16:07 UTC.**
+   - Comando: `node tools/DeviceTestApi/photo-quarantine.cjs move`. Antes de mover, volta a confirmar que nenhuma entrada de diário referencia os ficheiros.
+   - Destino: `.device-tests/photos-quarantine/2026-10-18T16-07-17-045Z/`, com `inventory.json` (tamanho e SHA-256 de cada ficheiro).
+   - Para repor: `node tools/DeviceTestApi/photo-quarantine.cjs restore 2026-10-18T16-07-17-045Z`.
+   - Ainda não foram apagados definitivamente; aguarda decisão.
+   - A fotografia de validação (Carla) não foi movida e tem o mesmo SHA-256 de antes.
 2. **DeviceTests, ficheiros referenciados:**
    - correr o inventário antes de cada validação;
    - qualquer ficheiro referenciado com metadados é reescrito com `PhotoMetadata`, mantendo a referência.
