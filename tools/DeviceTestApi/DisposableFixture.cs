@@ -21,6 +21,7 @@ public static class DisposableFixture {
     public sealed record LibrarySpec(string Game, string Status, decimal? Price = null);
     // Keep: people for a manual validation (the iPhone), never swept; removed only by DELETE /fixture.
     public sealed record PeopleRequest(string Label, List<PersonSpec> People, List<List<string>>? Friends = null, List<List<string>>? Pending = null, bool Keep = false);
+    public sealed record LegacyMatch(string Game, List<Guid> Players, Guid? Creator, double? Rating, string? Tags);
     public sealed record Recorded(Guid Id, string Label, DateTime CreatedAt, bool Keep = false);
 
     static string Password() => "aA1!" + Convert.ToBase64String(RandomNumberGenerator.GetBytes(18));
@@ -110,6 +111,22 @@ public static class DisposableFixture {
             var changed = await db.Users.Where(u => u.Id == person && u.SuspendedAt != null && u.SuspendedUntil != null)
                 .ExecuteUpdateAsync(s => s.SetProperty(u => u.SuspendedUntil, until));
             return changed == 1 ? Results.NoContent() : Results.Conflict();
+        });
+
+        // A match as older versions stored it: rating and tags on the match itself, no diary entries. With or without a
+        // known author (CreatorId), between disposable people only.
+        group.MapPost("/legacy-match", async (LegacyMatch r, MeepleBoardDbContext db, IGameRepository games) => {
+            var recorded = (await Read()).Select(x => x.Id).ToHashSet();
+            if (r.Players.Count == 0 || r.Players.Any(p => !recorded.Contains(p)) || (r.Creator is { } c && !r.Players.Contains(c))) return Results.BadRequest(new { message = "Only disposable people." });
+            var game = await db.Games.SingleAsync(g => g.Name == r.Game);
+            var match = new Match(game.Id, DateTime.UtcNow.AddDays(-400));
+            if (r.Creator is { } creator) match.SetCreator(creator);
+            match.SetJournalData(r.Rating, null, r.Tags);
+            db.Matches.Add(match);
+            foreach (var p in r.Players) db.MatchPlayers.Add(new MatchPlayer(match.Id, p));
+            await db.SaveChangesAsync();
+            await games.RecomputeMeepleBoardRatingAsync(game.Id);
+            return Results.Ok(new { id = match.Id });
         });
 
         // Everything these people made, then the accounts. Only ids recorded by /people.

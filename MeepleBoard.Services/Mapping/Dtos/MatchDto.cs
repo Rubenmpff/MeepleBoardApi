@@ -57,7 +57,7 @@ namespace MeepleBoard.Services.DTOs
         // ── Diário de partida ────────────────────────────────────────────────
 
         [Range(0, 10, ErrorMessage = "O rating deve ser entre 0 e 10.")]
-        public double? PersonalRating { get; init; }
+        public double? PersonalRating { get; set; }
 
         [MaxLength(2000)]
         [System.Text.Json.Serialization.JsonIgnore]
@@ -67,7 +67,7 @@ namespace MeepleBoard.Services.DTOs
         public string? PersonalNotes { get; set; }
 
         [MaxLength(500)]
-        public string? Tags { get; init; }
+        public string? Tags { get; set; }
 
         // ── Estado do diário ─────────────────────────────────────────────────
 

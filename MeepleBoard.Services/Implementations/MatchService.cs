@@ -123,7 +123,9 @@ namespace MeepleBoard.Services.Implementations
             var match = await _matchRepository.GetByIdAsync(id, cancellationToken);
             if (match == null) return null;
             RequireParticipant(match, viewerId);
-            return _mapper.Map<MatchDto>(match);
+            var dto = _mapper.Map<MatchDto>(match);
+            ApplyViewerExperience(dto, match.JournalEntries.FirstOrDefault(e => e.UserId == viewerId), match.JournalEntries.Count > 0, viewerId);
+            return dto;
         }
 
         public async Task<IEnumerable<MatchDto>> GetByUserIdAsync(
@@ -154,8 +156,24 @@ namespace MeepleBoard.Services.Implementations
             {
                 var ownEntry = await _campaignRepository.GetJournalEntryAsync(item.Id, userId, cancellationToken);
                 item.PersonalNotes = ownEntry?.Notes;
+                var anyEntry = ownEntry != null || (await _campaignRepository.GetJournalEntriesForMatchAsync(item.Id, cancellationToken)).Count > 0;
+                ApplyViewerExperience(item, ownEntry, anyEntry, userId);
             }
             return result;
+        }
+
+        /// <summary>
+        /// The rating and tags of a match DTO are the viewer's own, from the viewer's diary — never those of whoever registered
+        /// the match. Old matches stored a rating and tags on the match itself: they are the viewer's only when the viewer
+        /// registered it (confirmed authorship) and the match has no diary entry at all — the same rule as the MeepleBoard
+        /// average (GameRepository.RecomputeMeepleBoardRating); otherwise there is no rating («Ainda não avaliaste»).
+        /// Zero stays a rating. Averages are calculated elsewhere and are not affected.
+        /// </summary>
+        public static void ApplyViewerExperience(MatchDto dto, MatchJournalEntry? ownEntry, bool anyEntry, Guid viewerId)
+        {
+            if (ownEntry != null) { dto.PersonalRating = ownEntry.PersonalRating; dto.Tags = ownEntry.Tags; return; }
+            if (!anyEntry && dto.CreatorId is { } creator && creator == viewerId) return; // legacy value, written by the viewer
+            dto.PersonalRating = null; dto.Tags = null;
         }
 
         // ✅ Usa projecção directa — só busca ratings na BD, calcula média no serviço
