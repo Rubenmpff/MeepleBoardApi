@@ -122,6 +122,10 @@ namespace MeepleBoard.CrossCutting.IoC
                 ExperienceRepository>();
 
             services.AddScoped<
+                ICommunityRepository,
+                CommunityRepository>();
+
+            services.AddScoped<
                 IStatisticsRepository,
                 StatisticsRepository>();
 
@@ -198,6 +202,10 @@ namespace MeepleBoard.CrossCutting.IoC
             services.AddScoped<
                 IExperienceService,
                 ExperienceService>();
+
+            services.AddScoped<
+                ICommunityService,
+                CommunityService>();
 
             services.AddScoped<
                 IGameDurationService,

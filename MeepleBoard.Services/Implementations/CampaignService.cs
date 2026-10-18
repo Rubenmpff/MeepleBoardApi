@@ -20,6 +20,12 @@ namespace MeepleBoard.Services.Implementations
         private readonly INotificationService _notificationService;
         private readonly IPhotoStorageService _photoStorageService;
         private readonly ILogger<CampaignService> _logger;
+        private readonly IFriendshipRepository _friendships;
+        private readonly ICommunityRepository _community;
+
+        // Neutral on purpose: never says who blocked whom (docs/proposta-bloqueio-comunidade.md).
+        public const string CannotInvite = "Não é possível convidar esta pessoa.";
+        public const string CannotAccept = "Não é possível aceitar este convite.";
 
         public CampaignService(
             ICampaignRepository campaignRepository,
@@ -28,8 +34,12 @@ namespace MeepleBoard.Services.Implementations
             IGameRepository gameRepository,
             INotificationService notificationService,
             IPhotoStorageService photoStorageService,
-            ILogger<CampaignService> logger)
+            ILogger<CampaignService> logger,
+            IFriendshipRepository friendships,
+            ICommunityRepository community)
         {
+            _friendships = friendships;
+            _community = community;
             _campaignRepository = campaignRepository;
             _matchRepository = matchRepository;
             _userRepository = userRepository;
@@ -78,6 +88,7 @@ namespace MeepleBoard.Services.Implementations
             var game = await _gameRepository.GetByIdAsync(dto.GameId, ct);
             if (game == null)
                 throw new KeyNotFoundException("Jogo não encontrado.");
+            ContentFilter.Require(dto.Name, dto.Notes);
 
             var campaign = new Campaign(dto.Name, dto.GameId, userId);
 
@@ -105,6 +116,7 @@ namespace MeepleBoard.Services.Implementations
             if (campaign == null) throw new KeyNotFoundException("Campanha não encontrada.");
 
             await AssertIsMemberAsync(campaign, userId);
+            ContentFilter.Require(dto.Name, dto.Notes);
 
             campaign.UpdateName(dto.Name);
             campaign.UpdateNotes(dto.Notes);
@@ -156,6 +168,7 @@ namespace MeepleBoard.Services.Implementations
             var target = await _userRepository.GetByIdAsync(targetUserId, ct);
             if (target == null) throw new KeyNotFoundException("Utilizador não encontrado.");
 
+
             var existing = await _campaignRepository.GetMemberAsync(campaignId, targetUserId, ct);
             if (existing != null)
             {
@@ -163,6 +176,13 @@ namespace MeepleBoard.Services.Implementations
                 if (activeStatuses.Contains(existing.Status))
                     throw new InvalidOperationException("Este utilizador já foi convidado ou já é membro.");
             }
+
+            // Only the inviter's accepted friends (a block ends the friendship), and no block with any accepted or invited member.
+            if (targetUserId == requesterId || !await _friendships.ExistsAcceptedAsync(requesterId, targetUserId, ct))
+                throw new ArgumentException("Só podes convidar amigos com amizade aceite.");
+            var present = campaign.Members.Where(m => m.Status is CampaignMemberStatus.Accepted or CampaignMemberStatus.Pending).Select(m => m.UserId).Append(campaign.CreatorId);
+            if (await _community.AnyBlockWithAsync(targetUserId, present, ct))
+                throw new ArgumentException(CannotInvite);
 
             var member = new CampaignMember(campaignId, targetUserId, isCreator: false);
             await _campaignRepository.AddMemberAsync(member, ct);
@@ -191,6 +211,16 @@ namespace MeepleBoard.Services.Implementations
 
             if (member.Status != CampaignMemberStatus.Pending)
                 throw new InvalidOperationException("Já respondeste a este convite.");
+
+            // Declining is always possible; accepting is refused while a block exists with any accepted member.
+            if (accept)
+            {
+                var members = await _campaignRepository.GetMembersAsync(campaignId, ct);
+                var campaignRow = await _campaignRepository.GetByIdForUpdateAsync(campaignId, ct) ?? throw new KeyNotFoundException("Campanha não encontrada.");
+                var accepted = members.Where(m => m.Status == CampaignMemberStatus.Accepted && m.UserId != userId).Select(m => m.UserId).Append(campaignRow.CreatorId);
+                if (await _community.AnyBlockWithAsync(userId, accepted, ct))
+                    throw new InvalidOperationException(CannotAccept);
+            }
 
             if (accept) member.Accept();
             else member.Decline();
@@ -278,6 +308,7 @@ namespace MeepleBoard.Services.Implementations
                 throw new InvalidOperationException("Esta partida já está associada a esta campanha.");
 
             MatchService.RequireParticipant(match, userId);
+            ContentFilter.Require(dto.SessionTitle);
             var campaignMatch = new CampaignMatch(campaignId, dto.MatchId, dto.SessionNumber, dto.SessionTitle);
             await _campaignRepository.AddCampaignMatchAsync(campaignMatch, ct);
             await _campaignRepository.SaveChangesAsync(ct);
@@ -318,6 +349,8 @@ namespace MeepleBoard.Services.Implementations
                 throw new UnauthorizedAccessException(
                     "Só jogadores que participaram nesta partida podem avaliá-la.");
 
+            // Tags are shared with the other participants; notes are private and never filtered.
+            ContentFilter.Require(dto.Tags);
             var existing = await _campaignRepository.GetJournalEntryAsync(matchId, userId, ct);
 
             if (existing != null)

@@ -147,6 +147,18 @@ namespace MeepleBoard.Infra.Data.Repositories
         public Task<bool> IsActiveAsync(Guid userId, CancellationToken cancellationToken = default)
             => _context.Users.AsNoTracking().AnyAsync(u => u.Id == userId && u.DeletedAt == null, cancellationToken);
 
+        public async Task<bool> CanUseAccessTokenAsync(Guid userId, DateTime issuedAtUtc, CancellationToken cancellationToken = default)
+        {
+            var now = DateTime.UtcNow;
+            var state = await _context.Users.AsNoTracking().Where(u => u.Id == userId && u.DeletedAt == null)
+                .Select(u => new { u.SuspendedAt, u.SuspendedUntil, u.TokensRevokedAt }).FirstOrDefaultAsync(cancellationToken);
+            if (state == null) return false;
+            if (state.SuspendedAt != null && (state.SuspendedUntil == null || now < state.SuspendedUntil)) return false;
+            // «iat» has whole seconds: a token from the same second as the revocation is refused too.
+            if (state.TokensRevokedAt is { } revoked && issuedAtUtc <= revoked.AddTicks(-(revoked.Ticks % TimeSpan.TicksPerSecond))) return false;
+            return true;
+        }
+
         public Task<bool> ContributesDurationStatsAsync(Guid userId, CancellationToken cancellationToken = default)
             => _context.Users.AsNoTracking().Where(u => u.Id == userId).Select(u => u.ContributesDurationStats).FirstOrDefaultAsync(cancellationToken);
 
@@ -274,6 +286,19 @@ namespace MeepleBoard.Infra.Data.Repositories
                     .ExecuteUpdateAsync(s => s.SetProperty(r => r.Detail, (string?)null), cancellationToken);
                 await _context.GameResourceReports.Where(r => r.UserId == userId && r.ResolvedAt != null && r.Comment != null)
                     .ExecuteUpdateAsync(s => s.SetProperty(r => r.Comment, (string?)null), cancellationToken);
+                await _context.UserReports.Where(r => r.ReporterId == userId && r.ResolvedAt != null && r.Detail != null)
+                    .ExecuteUpdateAsync(s => s.SetProperty(r => r.Detail, (string?)null), cancellationToken);
+                await _context.PhotoReports.Where(r => r.ReporterId == userId && r.ResolvedAt != null && r.Detail != null)
+                    .ExecuteUpdateAsync(s => s.SetProperty(r => r.Detail, (string?)null), cancellationToken);
+                // Reports about the person lose their free text and the open ones close with the account (the photos go with the
+                // diary entries, and their reports with them); a suspension reason is not kept either.
+                await _context.UserReports.Where(r => r.ReportedUserId == userId && r.ResolvedAt == null)
+                    .ExecuteUpdateAsync(s => s.SetProperty(r => r.ResolvedAt, now).SetProperty(r => r.Outcome, "deleted"), cancellationToken);
+                await _context.UserReports.Where(r => r.ReportedUserId == userId && r.Detail != null)
+                    .ExecuteUpdateAsync(s => s.SetProperty(r => r.Detail, (string?)null), cancellationToken);
+                await _context.Users.Where(u => u.Id == userId).ExecuteUpdateAsync(s => s.SetProperty(u => u.SuspensionReason, (string?)null), cancellationToken);
+                // Blocks made and received go with the account.
+                await _context.UserBlocks.Where(b => b.BlockerId == userId || b.BlockedId == userId).ExecuteDeleteAsync(cancellationToken);
 
                 // Personal links that only made sense with the person.
                 await _context.UserGameLibraries.Where(l => l.UserId == userId).ExecuteDeleteAsync(cancellationToken);
@@ -326,9 +351,17 @@ namespace MeepleBoard.Infra.Data.Repositories
         {
             var experience = _context.ExperienceReports.Where(r => r.Detail != null && r.Reporter!.DeletedAt != null && r.Reporter.DeletedAt <= deletedBefore);
             var resource = _context.GameResourceReports.Where(r => r.Comment != null && r.User.DeletedAt != null && r.User.DeletedAt <= deletedBefore);
-            if (reporters != null) { experience = experience.Where(r => reporters.Contains(r.ReporterId)); resource = resource.Where(r => reporters.Contains(r.UserId)); }
+            var people = _context.UserReports.Where(r => r.Detail != null && r.Reporter!.DeletedAt != null && r.Reporter.DeletedAt <= deletedBefore);
+            var pictures = _context.PhotoReports.Where(r => r.Detail != null && r.Reporter!.DeletedAt != null && r.Reporter.DeletedAt <= deletedBefore);
+            if (reporters != null)
+            {
+                experience = experience.Where(r => reporters.Contains(r.ReporterId)); resource = resource.Where(r => reporters.Contains(r.UserId));
+                people = people.Where(r => reporters.Contains(r.ReporterId)); pictures = pictures.Where(r => reporters.Contains(r.ReporterId));
+            }
             return await experience.ExecuteUpdateAsync(s => s.SetProperty(r => r.Detail, (string?)null), cancellationToken)
-                + await resource.ExecuteUpdateAsync(s => s.SetProperty(r => r.Comment, (string?)null), cancellationToken);
+                + await resource.ExecuteUpdateAsync(s => s.SetProperty(r => r.Comment, (string?)null), cancellationToken)
+                + await people.ExecuteUpdateAsync(s => s.SetProperty(r => r.Detail, (string?)null), cancellationToken)
+                + await pictures.ExecuteUpdateAsync(s => s.SetProperty(r => r.Detail, (string?)null), cancellationToken);
         }
 
         // 🔹 Salva as mudanças no banco

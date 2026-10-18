@@ -1,3 +1,4 @@
+using MeepleBoard.Domain.Interfaces;
 ﻿
 using MeepleBoard.Services.Interfaces;
 using MeepleBoard.Services.Mapping.Dtos;
@@ -5,11 +6,16 @@ using MeepleBoard.Services.Mapping.Dtos;
 public sealed class FriendshipService : IFriendshipService
 {
     private readonly IFriendshipRepository _repo;
+    private readonly ICommunityRepository _community;
 
-    public FriendshipService(IFriendshipRepository repo)
+    public FriendshipService(IFriendshipRepository repo, ICommunityRepository community)
     {
         _repo = repo;
+        _community = community;
     }
+
+    // Neutral on purpose: the same text whoever blocked whom (docs/proposta-bloqueio-comunidade.md).
+    public const string Unavailable = "Não é possível enviar o pedido a esta pessoa.";
 
     public async Task<IReadOnlyList<FriendLiteDto>> GetMyFriendsAsync(Guid currentUserId, CancellationToken ct = default)
     {
@@ -32,7 +38,9 @@ public sealed class FriendshipService : IFriendshipService
         if (string.IsNullOrWhiteSpace(query) || query.Trim().Length < 2)
             return Array.Empty<UserSearchResultDto>();
 
-        var list = await _repo.SearchUsersAsync(currentUserId, query, 30, ct);
+        // A block either way: neither finds the other.
+        var blocked = (await _community.BlockedEitherWayAsync(currentUserId, ct)).ToHashSet();
+        var list = (await _repo.SearchUsersAsync(currentUserId, query, 30 + blocked.Count, ct)).Where(x => !blocked.Contains(x.Id)).Take(30);
         return list.Select(x => new UserSearchResultDto(
             x.Id, x.UserName, x.ProfilePictureUrl,
             RelationshipStatus(x.Status, x.InitiatorId, currentUserId), x.RequestId, x.IsOnline)).ToList();
@@ -41,6 +49,8 @@ public sealed class FriendshipService : IFriendshipService
     public async Task<UserProfileDto?> GetProfileAsync(
         Guid currentUserId, Guid targetUserId, CancellationToken ct = default)
     {
+        // A block either way: the profile answers as not found.
+        if (await _community.IsBlockedEitherWayAsync(currentUserId, targetUserId, ct)) return null;
         var p = await _repo.GetProfileAsync(currentUserId, targetUserId, ct);
         if (p is null) return null;
 
@@ -86,6 +96,9 @@ public sealed class FriendshipService : IFriendshipService
     /// </summary>
     private async Task EnsureAcceptedFriendsAsync(Guid currentUserId, Guid targetUserId, CancellationToken ct)
     {
+        // Blocking ends the friendship; checked as well so the answer is the same as for anyone who is not a friend.
+        if (await _community.IsBlockedEitherWayAsync(currentUserId, targetUserId, ct))
+            throw new UnauthorizedAccessException("Só podes ver isto para amigos.");
         var friendship = await _repo.GetByPairAsync(currentUserId, targetUserId, ct);
         if (friendship?.Status != FriendshipStatus.Accepted)
             throw new UnauthorizedAccessException("Só podes ver isto para amigos.");
@@ -104,6 +117,7 @@ public sealed class FriendshipService : IFriendshipService
     public async Task RequestFriendshipAsync(Guid currentUserId, Guid toUserId, CancellationToken ct = default)
     {
         if (currentUserId == toUserId) throw new InvalidOperationException("You cannot add yourself.");
+        if (await _community.IsBlockedEitherWayAsync(currentUserId, toUserId, ct)) throw new InvalidOperationException(Unavailable);
 
         var existing = await _repo.GetByPairAsync(currentUserId, toUserId, ct);
         if (existing is not null)
@@ -154,6 +168,8 @@ public sealed class FriendshipService : IFriendshipService
         if (!isInPair) throw new UnauthorizedAccessException("Not allowed.");
         if (f.Status != FriendshipStatus.Pending) throw new InvalidOperationException("Request is not pending.");
         if (f.InitiatorId == currentUserId) throw new InvalidOperationException("You cannot accept your own request.");
+        // Blocking removes pending requests; a request that slipped in at the same moment is still refused.
+        if (await _community.IsBlockedEitherWayAsync(f.UserAId, f.UserBId, ct)) throw new InvalidOperationException("Não é possível aceitar este pedido.");
 
         f.Status = FriendshipStatus.Accepted;
         f.UpdatedAt = DateTime.UtcNow;

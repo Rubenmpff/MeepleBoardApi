@@ -17,6 +17,12 @@ namespace MeepleBoard.Services.Mapping.Dtos
         /// <summary>Se preenchido, este match pertence a uma sessão de campanha.</summary>
         public Guid? CampaignSessionId { get; init; }
 
+        /// <summary>
+        /// Campaign encounter registration (outside sessions): the players are accepted members of this campaign, with or
+        /// without friendship. It only validates who plays; associating the match with the campaign stays a separate request.
+        /// </summary>
+        public Guid? CampaignId { get; init; }
+
         [Required(ErrorMessage = "A data da partida é obrigatória.")]
         public DateTime MatchDate { get; init; }
 

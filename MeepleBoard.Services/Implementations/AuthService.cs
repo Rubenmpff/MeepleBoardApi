@@ -50,6 +50,10 @@ namespace MeepleBoard.Services.Implementations
             if (registerDto == null)
                 return AuthenticationFailed("Registration data cannot be null.");
 
+            // The name is seen by others (search, matches, publications).
+            if (!Calculators.ContentFilter.IsAllowed(registerDto.UserName))
+                return AuthenticationFailed(Calculators.ContentFilter.Message);
+
             var existingUser = await _userManager.FindByEmailAsync(registerDto.Email);
             if (existingUser != null)
                 return AuthenticationFailed("Email is already registered.");
@@ -97,6 +101,22 @@ namespace MeepleBoard.Services.Implementations
 
             if (!user.EmailConfirmed)
                 return AuthenticationFailed("Please confirm your email before logging in.");
+
+            // Administrative suspension (not Identity's lockout): the person learns it and until when, never by whom.
+            if (user.IsSuspended(DateTime.UtcNow))
+            {
+                _logger.LogInformation("Sign-in refused for suspended user {UserId}.", user.Id);
+                return new AuthenticationResultDto
+                {
+                    IsSuccess = false,
+                    Code = "account_suspended",
+                    SuspendedUntil = user.SuspendedUntil,
+                    Message = user.SuspendedUntil is { } until
+                        ? $"A tua conta está suspensa até {until:yyyy-MM-dd HH:mm} (UTC)."
+                        : "A tua conta está suspensa até revisão.",
+                    Errors = Array.Empty<string>()
+                };
+            }
 
             _logger.LogInformation("User {UserId} logging in.", user.Id);
 

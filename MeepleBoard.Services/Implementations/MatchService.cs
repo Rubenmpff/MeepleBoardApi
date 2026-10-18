@@ -21,6 +21,8 @@ namespace MeepleBoard.Services.Implementations
         private readonly IGameService _gameService;
         private readonly INotificationService _notificationService;
         private readonly IMapper _mapper;
+        private readonly IFriendshipRepository _friendships;
+        private readonly ICommunityRepository _community;
 
         public MatchService(
             IMatchRepository matchRepository,
@@ -33,8 +35,12 @@ namespace MeepleBoard.Services.Implementations
             IBGGService bggService,
             IGameService gameService,
             INotificationService notificationService,
-            IMapper mapper)
+            IMapper mapper,
+            IFriendshipRepository friendships,
+            ICommunityRepository community)
         {
+            _friendships = friendships;
+            _community = community;
             _matchRepository = matchRepository;
             _matchPlayerRepository = matchPlayerRepository;
             _gameSessionRepository = gameSessionRepository;
@@ -264,6 +270,12 @@ namespace MeepleBoard.Services.Implementations
             if (scoresEnabled && playerIds.Any(id => !scores.TryGetValue(id, out var score) || !score.HasValue))
                 throw new ArgumentException("Indica uma pontuação válida para todos os jogadores.");
 
+            // Text other people see; who may play together (blocks; friends or campaign members outside sessions).
+            Calculators.ContentFilter.Require(dto.ScoreSummary, dto.Location);
+            await MatchCompany.RequireNoBlockAsync(_community, playerIds, cancellationToken);
+            if (dto.GameSessionId is null)
+                await MatchCompany.RequireOutsideSessionAsync(authenticatedUserId, playerIds, dto.CampaignId, _friendships, _campaignRepository, cancellationToken);
+
             var game = await ValidateOrFetchGameAsync(dto.GameId, dto.GameName, cancellationToken);
 
             if (dto.GameSessionId is not null)
@@ -422,6 +434,7 @@ namespace MeepleBoard.Services.Implementations
             } else if (match.Result == null) {
                 match.SetSoloGame(matchDto.IsSoloGame); match.SetWinner(matchDto.WinnerId);
             }
+            Calculators.ContentFilter.Require(matchDto.ScoreSummary, matchDto.Location);
             var previousGameId = match.GameId;
             match.SetGameId(matchDto.GameId);
             match.SetMatchDate(matchDto.MatchDate);

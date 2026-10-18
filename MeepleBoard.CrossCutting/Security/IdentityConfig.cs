@@ -54,14 +54,21 @@ namespace MeepleBoard.CrossCutting.Security
                 };
                 options.Events = new JwtBearerEvents
                 {
-                    // A token issued before the account was deleted (anonymised) gives no access: checked on every
-                    // authenticated request, one lookup by primary key. Its refresh tokens were removed with the account.
+                    // A token issued before the account was deleted (anonymised) or suspended gives no access: checked on every
+                    // authenticated request, one lookup by primary key. Its refresh tokens were removed with the account or suspension.
                     OnTokenValidated = async context =>
                     {
                         var id = context.Principal?.FindFirst("sub")?.Value ?? context.Principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
                         var users = context.HttpContext.RequestServices.GetRequiredService<IUserRepository>();
-                        if (!Guid.TryParse(id, out var userId) || !await users.IsActiveAsync(userId, context.HttpContext.RequestAborted))
-                            context.Fail("A conta não existe ou foi eliminada.");
+                        // Suspension: refused while it lasts, and tokens issued before it never work again (no «iat»: refused too).
+                        var issuedAt = context.SecurityToken switch
+                        {
+                            Microsoft.IdentityModel.JsonWebTokens.JsonWebToken token => token.IssuedAt,
+                            System.IdentityModel.Tokens.Jwt.JwtSecurityToken token => token.IssuedAt,
+                            _ => DateTime.MinValue,
+                        };
+                        if (!Guid.TryParse(id, out var userId) || !await users.CanUseAccessTokenAsync(userId, issuedAt, context.HttpContext.RequestAborted))
+                            context.Fail("A conta não existe, foi eliminada ou está suspensa.");
                     }
                 };
             });

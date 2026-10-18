@@ -86,6 +86,7 @@ namespace MeepleBoardApi.Controllers
             }
             catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
             catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
         }
 
         /// <summary>Marca como concluída.</summary>
@@ -150,6 +151,7 @@ namespace MeepleBoardApi.Controllers
             catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
             catch (UnauthorizedAccessException) { return Forbid(); }
             catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+            catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
         }
 
         /// <summary>Responder ao convite (aceitar/recusar).</summary>
@@ -214,6 +216,7 @@ namespace MeepleBoardApi.Controllers
             catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
             catch (UnauthorizedAccessException) { return Forbid(); }
             catch (InvalidOperationException ex) { return Conflict(new { message = ex.Message }); }
+            catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
         }
 
         /// <summary>Remove uma partida da campanha.</summary>

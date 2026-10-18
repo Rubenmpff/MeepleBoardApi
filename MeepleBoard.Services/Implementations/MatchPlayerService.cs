@@ -15,6 +15,9 @@ namespace MeepleBoard.Services.Implementations
         private readonly IGameRepository? _gameRepository;
         private readonly IMapper _mapper;
         private readonly ILogger<MatchPlayerService> _logger;
+        private readonly IFriendshipRepository? _friendships;
+        private readonly ICommunityRepository? _community;
+        private readonly IGameSessionPlayerRepository? _sessionPlayers;
 
         public MatchPlayerService(
             IMatchPlayerRepository matchPlayerRepository,
@@ -22,8 +25,14 @@ namespace MeepleBoard.Services.Implementations
             IMatchRepository matchRepository,
             IMapper mapper,
             ILogger<MatchPlayerService> logger,
-            IGameRepository? gameRepository = null)
+            IGameRepository? gameRepository = null,
+            IFriendshipRepository? friendships = null,
+            ICommunityRepository? community = null,
+            IGameSessionPlayerRepository? sessionPlayers = null)
         {
+            _friendships = friendships;
+            _community = community;
+            _sessionPlayers = sessionPlayers;
             _gameRepository = gameRepository;
             _matchPlayerRepository = matchPlayerRepository;
             _userRepository = userRepository;
@@ -94,6 +103,20 @@ namespace MeepleBoard.Services.Implementations
             bool alreadyExists = await _matchPlayerRepository.ExistsAsync(playerId, matchId, cancellationToken);
             if (alreadyExists)
                 throw new InvalidOperationException("O jogador já está registrado nesta partida.");
+
+            // The same company rules as registering (MatchCompany): no block with anyone already playing; in a session an
+            // accepted participant, otherwise an accepted friend of whoever registered the match.
+            if (_community == null || _friendships == null || _sessionPlayers == null)
+                throw new InvalidOperationException("Não é possível acrescentar jogadores agora.");
+            await MatchCompany.RequireNoBlockAsync(_community, match.MatchPlayers.Select(p => p.UserId).Append(playerId), cancellationToken);
+            if (match.GameSessionId is { } sessionId)
+            {
+                var link = await _sessionPlayers.GetBySessionAndUserAsync(sessionId, playerId);
+                if (link?.Status != MeepleBoard.Domain.Enums.GameSessionInviteStatus.Accepted)
+                    throw new InvalidOperationException("Todos os jogadores têm de pertencer à sessão e ter aceite o convite.");
+            }
+            else if (!await _friendships.ExistsAcceptedAsync(actorId, playerId, cancellationToken))
+                throw new InvalidOperationException(MatchCompany.NotFriends);
 
             // Adiciona o jogador à partida
             var matchPlayer = new MatchPlayer(matchId, playerId);

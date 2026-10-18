@@ -31,5 +31,11 @@ namespace MeepleBoard.Services.Mapping.Dtos
         /// Lista de erros, se houver falha na autenticação.
         /// </summary>
         public IEnumerable<string>? Errors { get; set; }
+
+        /// <summary>A stable code for the app (e.g. «account_suspended»), when the text alone is not enough.</summary>
+        public string? Code { get; set; }
+
+        /// <summary>End of a suspension; null with «account_suspended» means «until review».</summary>
+        public DateTime? SuspendedUntil { get; set; }
     }
 }

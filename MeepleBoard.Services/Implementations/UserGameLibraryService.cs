@@ -17,6 +17,7 @@ namespace MeepleBoard.Services.Implementations
         private readonly IBGGService _bggService;
         private readonly IGameService _gameService;
         private readonly IMapper _mapper;
+        private readonly ICommunityRepository _community;
 
         public UserGameLibraryService(
             IUserGameLibraryRepository userGameLibraryRepository,
@@ -26,8 +27,10 @@ namespace MeepleBoard.Services.Implementations
             IFriendshipRepository friendshipRepository,
             IBGGService bggService,
             IGameService gameService,
-            IMapper mapper)
+            IMapper mapper,
+            ICommunityRepository community)
         {
+            _community = community;
             _userGameLibraryRepository = userGameLibraryRepository;
             _gameRepository = gameRepository;
             _userRepository = userRepository;
@@ -47,6 +50,9 @@ namespace MeepleBoard.Services.Implementations
 
             if (!isOwner)
             {
+                // A block either way: the collection answers as not found, whatever its privacy.
+                await EnsureNotBlockedAsync(requesterId, targetUserId, cancellationToken);
+
                 var targetUser = await _userRepository.GetByIdAsync(targetUserId, cancellationToken);
                 var canView = targetUser!.LibraryPrivacy switch
                 {
@@ -83,9 +89,10 @@ namespace MeepleBoard.Services.Implementations
             return dtos;
         }
 
-        public async Task<IEnumerable<PlayedGameDto>> GetPlayedGamesAsync(Guid userId, CancellationToken cancellationToken = default)
+        public async Task<IEnumerable<PlayedGameDto>> GetPlayedGamesAsync(Guid requesterId, Guid userId, CancellationToken cancellationToken = default)
         {
             await EnsureUserExistsAsync(userId, cancellationToken);
+            if (requesterId != userId) await EnsureNotBlockedAsync(requesterId, userId, cancellationToken);
 
             var playStats = await _matchRepository.GetPlayCountsByGameForUserAsync(userId, cancellationToken);
             if (playStats.Count == 0) return Enumerable.Empty<PlayedGameDto>();
@@ -189,6 +196,12 @@ namespace MeepleBoard.Services.Implementations
                 .Select(e => new GameFriendOwnerDto(e.UserId, e.UserName, e.ProfilePictureUrl))
                 .ToList();
             return new GameFriendOwnersDto(owners.Count, owners);
+        }
+
+        private async Task EnsureNotBlockedAsync(Guid requesterId, Guid targetUserId, CancellationToken cancellationToken)
+        {
+            if (await _community.IsBlockedEitherWayAsync(requesterId, targetUserId, cancellationToken))
+                throw new KeyNotFoundException("Utilizador não encontrado.");
         }
 
         public async Task<decimal> GetTotalAmountSpentByUserAsync(Guid userId, CancellationToken cancellationToken = default)

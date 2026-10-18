@@ -45,6 +45,8 @@ namespace MeepleBoard.Services.Implementations
             var entry = await OwnEntry(matchId, userId, ct);
             if (!entry.PersonalRating.HasValue) throw new InvalidOperationException("Avalia a partida antes de publicar.");
             var pub = await experiences.GetByEntryForUpdateAsync(entry.Id, ct);
+            // A published comment is seen by others: checked when publishing, publishing a draft or editing.
+            if (dto.PublishComment) Calculators.ContentFilter.Require(dto.Comment ?? pub?.Comment);
             var startsSomething = (dto.ShowRating && pub?.RatingPublishedAt == null) || (dto.PublishComment && pub?.CommentPublishedAt == null);
             if (startsSomething && await experiences.CountPublishedSinceAsync(userId, DateTime.UtcNow.AddHours(-24), ct) >= DailyLimit)
                 throw new InvalidOperationException("Chegaste ao limite de publicações de hoje.");

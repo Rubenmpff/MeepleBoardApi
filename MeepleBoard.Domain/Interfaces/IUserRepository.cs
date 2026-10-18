@@ -57,6 +57,11 @@ namespace MeepleBoard.Domain.Interfaces
 
         /// <summary>Whether the account exists and was not deleted: checked on every authenticated request.</summary>
         Task<bool> IsActiveAsync(Guid userId, CancellationToken cancellationToken = default);
+        /// <summary>
+        /// An access token is accepted only for an account that exists, is not deleted nor suspended, and was issued after
+        /// the account's last token revocation (a suspension): earlier tokens never work again, even after it ends.
+        /// </summary>
+        Task<bool> CanUseAccessTokenAsync(Guid userId, DateTime issuedAtUtc, CancellationToken cancellationToken = default);
 
         /// <summary>Only the duration-sharing preference (false for an unknown account), without loading the account.</summary>
         Task<bool> ContributesDurationStatsAsync(Guid userId, CancellationToken cancellationToken = default);

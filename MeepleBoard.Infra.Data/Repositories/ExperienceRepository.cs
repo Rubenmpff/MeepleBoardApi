@@ -26,7 +26,10 @@ namespace MeepleBoard.Infra.Data.Repositories
                 .Where(p => p.HiddenAt == null && (p.RatingPublishedAt != null || p.CommentPublishedAt != null)
                     && p.JournalEntry!.Match!.GameId == gameId && p.JournalEntry.PersonalRating != null
                     && p.JournalEntry.Match.MatchPlayers.Any(mp => mp.UserId == p.JournalEntry.UserId)
-                    && !p.Reports.Any(r => r.ReporterId == viewerId && r.ResolvedAt == null));
+                    && !p.Reports.Any(r => r.ReporterId == viewerId && r.ResolvedAt == null)
+                    // A block either way: neither sees the other's publications (list and count).
+                    && !context.UserBlocks.Any(b => (b.BlockerId == viewerId && b.BlockedId == p.JournalEntry.UserId)
+                        || (b.BlockerId == p.JournalEntry.UserId && b.BlockedId == viewerId)));
             var total = await query.CountAsync(ct);
             var items = await query
                 .OrderByDescending(p => p.UpdatedAt ?? p.CreatedAt).ThenBy(p => p.Id)

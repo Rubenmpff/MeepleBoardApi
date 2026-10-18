@@ -109,6 +109,19 @@ namespace MeepleBoardApi.Controllers
                     loginDto,
                     deviceInfo);
 
+            if (!result.IsSuccess && result.Code == "account_suspended")
+            {
+                return StatusCode(
+                    StatusCodes.Status403Forbidden,
+                    new
+                    {
+                        success = false,
+                        code = result.Code,
+                        message = result.Message,
+                        suspendedUntil = result.SuspendedUntil
+                    });
+            }
+
             if (!result.IsSuccess)
             {
                 _logger.LogWarning(

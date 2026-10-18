@@ -1,6 +1,7 @@
 ﻿using AutoMapper;
 using MeepleBoard.Services.DTOs;
 using MeepleBoard.Domain.Entities;
+using MeepleBoard.Domain.Enums;
 using MeepleBoard.Domain.Interfaces;
 using MeepleBoard.Services.Interfaces;
 
@@ -14,13 +15,19 @@ namespace MeepleBoard.Services.Implementations
         private readonly IMapper _mapper;
         private readonly IFriendshipRepository _friendships;
         private readonly IGameRepository _games;
+        private readonly ICommunityRepository _community;
+
+        // Neutral on purpose: never says who blocked whom (docs/proposta-bloqueio-comunidade.md).
+        public const string CannotInvite = "Não é possível convidar esta pessoa.";
+        public const string CannotAccept = "Não é possível aceitar este convite.";
 
         public GameSessionService(
             IGameSessionRepository sessionRepository,
             IGameSessionPlayerRepository sessionPlayerRepository,
             IUserRepository userRepository,
-            IMapper mapper, IFriendshipRepository friendships, IGameRepository games)
+            IMapper mapper, IFriendshipRepository friendships, IGameRepository games, ICommunityRepository community)
         {
+            _community = community;
             _games = games;
             _sessionRepository = sessionRepository;
             _sessionPlayerRepository = sessionPlayerRepository;
@@ -49,6 +56,10 @@ namespace MeepleBoard.Services.Implementations
                 (s.OrganizerId == userId || s.Players.Any(p => p.UserId == userId))
             );
 
+            // A pending invitation that a block made impossible to accept leaves the list; the session is unchanged.
+            var blocked = (await _community.BlockedEitherWayAsync(userId)).ToHashSet();
+            if (blocked.Count > 0) mine = mine.Where(s => InviteAvailable(s, userId, blocked)).ToList();
+
             return _mapper.Map<IEnumerable<GameSessionDto>>(mine);
         }
 
@@ -61,6 +72,7 @@ namespace MeepleBoard.Services.Implementations
             if (session == null) return null;
             if (session.OrganizerId != userId && !session.Players.Any(p => p.UserId == userId)) throw new UnauthorizedAccessException("Não pertences a esta sessão.");
             var dto = _mapper.Map<GameSessionDto>(session);
+            dto.InviteAvailable = InviteAvailable(session, userId, (await _community.BlockedEitherWayAsync(userId)).ToHashSet());
             dto.Matches = session.Matches.Where(m => m.MatchPlayers.Any(p => p.UserId == userId)).Select(m => _mapper.Map<MeepleBoard.Services.DTOs.MatchDto>(m)).ToList();
             return dto;
         }
@@ -72,6 +84,9 @@ namespace MeepleBoard.Services.Implementations
             if (dto == null) throw new ArgumentNullException(nameof(dto));
             if (organizerId == Guid.Empty) throw new ArgumentException("Organizer inválido.");
 
+            // Name and place are seen by everyone invited.
+            Calculators.ContentFilter.Require(dto.Name, dto.Location);
+
             var invitees = (dto.PlayerIds ?? new List<Guid>())
                 .Where(id => id != Guid.Empty && id != organizerId).Distinct().ToList();
             if (invitees.Count == 0)
@@ -81,6 +96,9 @@ namespace MeepleBoard.Services.Implementations
                 if (!await _friendships.ExistsAcceptedAsync(organizerId, invitee)
                     || await _userRepository.GetByIdAsync(invitee) == null)
                     throw new ArgumentException("Só podes convidar amigos disponíveis para criar a sessão.");
+            // No block between any two of the people invited together (nor with whoever organises).
+            if (await _community.AnyBlockAmongAsync(invitees.Append(organizerId)))
+                throw new ArgumentException(CannotInvite);
 
             var organizer = await _userRepository.GetByIdAsync(organizerId);
             if (organizer == null) throw new KeyNotFoundException("Organizer não encontrado.");
@@ -122,7 +140,7 @@ namespace MeepleBoard.Services.Implementations
             if (organizerId == Guid.Empty) throw new ArgumentException("Organizer inválido.");
             if (targetUserId == Guid.Empty) throw new ArgumentException("Utilizador inválido.");
 
-            var session = await _sessionRepository.GetByIdForUpdateAsync(sessionId);
+            var session = await _sessionRepository.GetByIdWithPlayersForUpdateAsync(sessionId);
             if (session == null) throw new KeyNotFoundException("Sessão não encontrada.");
 
             if (session.IsCancelled)
@@ -141,6 +159,11 @@ namespace MeepleBoard.Services.Implementations
             if (!await _friendships.ExistsAcceptedAsync(organizerId, targetUserId))
                 throw new ArgumentException("Só podes convidar amigos com amizade aceite.");
 
+            // Refused with a block between the person and whoever organises, any accepted participant or anyone invited.
+            var present = session.Players.Where(p => p.Status != GameSessionInviteStatus.Declined && p.LeftAt == null).Select(p => p.UserId).Append(session.OrganizerId);
+            if (await _community.AnyBlockWithAsync(targetUserId, present))
+                throw new ArgumentException(CannotInvite);
+
             var invite = new GameSessionPlayer(sessionId, targetUserId, isOrganizer: false);
             await _sessionPlayerRepository.AddAsync(invite);
 
@@ -152,7 +175,7 @@ namespace MeepleBoard.Services.Implementations
             if (sessionId == Guid.Empty) throw new ArgumentException("Sessão inválida.");
             if (userId == Guid.Empty) throw new ArgumentException("Utilizador inválido.");
 
-            var session = await _sessionRepository.GetByIdForUpdateAsync(sessionId);
+            var session = await _sessionRepository.GetByIdWithPlayersForUpdateAsync(sessionId);
             if (session == null) throw new KeyNotFoundException("Sessão não encontrada.");
 
             if (session.IsCancelled)
@@ -164,10 +187,26 @@ namespace MeepleBoard.Services.Implementations
             if (link.IsOrganizer)
                 throw new InvalidOperationException("Organizer não precisa de responder a convite.");
 
-            if (accept) link.Accept();
+            if (accept)
+            {
+                // Declining is always possible; accepting is refused while a block exists with whoever organises or an accepted participant.
+                var accepted = session.Players.Where(p => p.Status == GameSessionInviteStatus.Accepted && p.UserId != userId).Select(p => p.UserId).Append(session.OrganizerId);
+                if (await _community.AnyBlockWithAsync(userId, accepted))
+                    throw new InvalidOperationException(CannotAccept);
+                link.Accept();
+            }
             else link.Decline();
 
             await _sessionRepository.SaveChangesAsync();
+        }
+
+        /// <summary>False only for the reader's own pending invitation blocked by whoever organises or an accepted participant.</summary>
+        static bool InviteAvailable(GameSession session, Guid userId, IReadOnlySet<Guid> blocked)
+        {
+            var mine = session.Players.FirstOrDefault(p => p.UserId == userId);
+            if (mine == null || mine.IsOrganizer || mine.Status != GameSessionInviteStatus.Pending || blocked.Count == 0) return true;
+            return !blocked.Contains(session.OrganizerId)
+                && !session.Players.Any(p => p.UserId != userId && p.Status == GameSessionInviteStatus.Accepted && blocked.Contains(p.UserId));
         }
 
         /* ── Encerrar / Cancelar ─────────────────────────────────────────────── */

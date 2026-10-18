@@ -38,6 +38,8 @@ namespace MeepleBoard.Services.Implementations
 
         public async Task<GameResourceDto> SuggestAsync(Guid gameId, Guid userId, GameResourceRequest request, CancellationToken ct = default)
         {
+            // Title and author are seen by others; the URL is never filtered nor changed.
+            Calculators.ContentFilter.Require(request?.Title, request?.Author);
             var resource = await NewAsync(gameId, userId, request, byAdministrator: false, ct);
             return ToDto(resource);
         }

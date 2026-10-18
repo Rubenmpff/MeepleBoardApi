@@ -76,7 +76,7 @@ namespace MeepleBoardApi.Controllers
 
             try
             {
-                var played = await _libraryService.GetPlayedGamesAsync(userId, cancellationToken);
+                var played = await _libraryService.GetPlayedGamesAsync(User.GetUserId(), userId, cancellationToken);
 
                 if (played == null || !played.Any())
                     return NoContent();

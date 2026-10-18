@@ -51,6 +51,12 @@ public class GameSessionDto
     /// <summary>True se a sessão foi cancelada.</summary>
     public bool IsCancelled => Status == "Cancelled";
 
+    /// <summary>
+    /// False when the reader's pending invitation can no longer be accepted (a block with whoever organises or with an
+    /// accepted participant). The app then shows a neutral text instead of «Aceitar»; the session itself is unchanged.
+    /// </summary>
+    public bool InviteAvailable { get; set; } = true;
+
     public List<GameSessionPlayerDto> Players { get; set; } = new();
     public List<MatchDto> Matches { get; set; } = new();
 

@@ -100,7 +100,12 @@ namespace MeepleBoard.Services.Implementations
 
                 new(
                     JwtRegisteredClaimNames.Jti,
-                    Guid.NewGuid().ToString())
+                    Guid.NewGuid().ToString()),
+                // Issue time: tokens issued before a suspension stay refused afterwards (IdentityConfig.OnTokenValidated).
+                new(
+                    JwtRegisteredClaimNames.Iat,
+                    EpochTime.GetIntDate(DateTime.UtcNow).ToString(),
+                    ClaimValueTypes.Integer64)
             };
 
             var roles =
@@ -309,6 +314,25 @@ namespace MeepleBoard.Services.Implementations
                     Errors = new[]
                     {
                         "Usuário não encontrado."
+                    }
+                };
+            }
+
+            // A suspended or deleted account does not renew, nor does a token from before a suspension (they are deleted with
+            // it; the issue date, seven days before the expiry, also guards against one created at that moment).
+            if (user.DeletedAt != null
+                || user.IsSuspended(DateTime.UtcNow)
+                || (user.TokensRevokedAt is { } revokedAt && existingToken.ExpiryDate.AddDays(-7) <= revokedAt))
+            {
+                _logger.LogWarning(
+                    "Renovação recusada para o utilizador {UserId}: conta suspensa, eliminada ou sessão terminada.",
+                    user.Id);
+                return new AuthenticationResultDto
+                {
+                    IsSuccess = false,
+                    Errors = new[]
+                    {
+                        "Token inválido ou expirado."
                     }
                 };
             }
