@@ -77,14 +77,14 @@ Implementado em DeviceTests a 2026-10-18, segundo `docs/proposta-bloqueio-comuni
   - título e autor de um recurso sugerido.
 - **Onde não se aplica:** notas privadas, rascunhos por publicar e endereços (URL) dos recursos, que nunca são alterados.
 - **Termos retirados por darem falsos positivos em contexto de jogo:** «cabra», «fag», «rape», «go die», «vou-te matar» e «I will kill you».
-- **Limites:** é uma proteção inicial. Não substitui as denúncias nem a revisão humana.
+- **Limites:**
+  - A lista é uma proteção inicial e incompleta. Um texto que passa no filtro não fica por isso aceitável.
+  - Ameaças reais continuam proibidas pelas regras, incluindo as expressões retiradas da lista. São tratadas por denúncia e moderação (suspensão, quando se justifica).
+  - O filtro não deteta ameaças escritas de outra forma, ortografia alterada, outras línguas nem contexto. Não substitui as denúncias nem a revisão humana.
 
 ## Testes
 
 - `tests/Community.Tests` (16): filtro PT/EN com falsos positivos, quem pode jogar com quem, convites e aceitação de sessões e campanhas, HTTP de bloqueios, denúncias, moderação, suspensão e recursos.
 - `tools/DeviceTestApi/verify-community.cjs`, contra SQL real: as mesmas regras com tokens reais, bloqueios nos dois sentidos e eliminação de conta.
-- **Verificadores antigos afetados pela regra de amizade fora de sessões:**
-  - `verify-durations.cjs` e `verify-ratings-experiences.cjs` registam partidas entre contas de teste que não são amigas;
-  - por isso, agora recebem 409 «Só podes registar partidas com amigos com amizade aceite.»;
-  - são dados de teste, não percursos da app, e não foram alterados.
-- **Verificador com falha anterior a esta etapa:** `verify-session-writes.cjs` falha porque muda uma avaliação já guardada (409), a regra das avaliações fechadas.
+- **Verificadores antigos:** todos passaram a usar pessoas descartáveis, com as amizades, a participação em sessões e campanhas e as avaliações fechadas que as regras atuais exigem. As recusas continuam testadas explicitamente. Ver `docs/testes-macos-docker.md`.
+- **Encontros de campanha:** enviar um `campaignId` não basta. Quem regista e cada jogador têm de ser membros aceites dessa campanha nesse momento. São recusados um membro pendente, um membro removido, quem não é membro, mesmo sendo amigo, uma campanha inexistente e um bloqueio entre membros (Community.Tests e verify-community).

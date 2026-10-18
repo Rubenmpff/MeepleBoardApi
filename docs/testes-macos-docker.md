@@ -114,9 +114,38 @@ A 2026-10-18 (08:30–08:33 UTC), ao correr todos os verificadores depois da eta
 
 - **Origem confirmada:** nomes e resumos dos verificadores («Sessão SQL escrita …», «Rule pending …», «Amizade SQL …», «Convites SQL …», «Sessão fuso SQL …», «Sessão de teste · fim automático», «Sessão de teste · jogo previsto», «Resultado SQL: 17–0», «Verificação: 12–9», «Verificação de duração»), todos criados nessa janela.
 - **Verificadores em causa:** os de sessões (`verify-session-*`, `verify-planned-game-journey`, `verify-session-auto-close`) usam as contas do roteiro e não apagam o que criam. `verify-durations` também usa autor e participante; parou a meio e deixou partidas marcadas.
-- **Estado:** a remoção destas 16 linhas (por ID exato) ainda não foi feita. Aguarda decisão.
-- **Regra a partir daqui:** não correr estes verificadores enquanto o roteiro do iPhone estiver em validação. `verify-community.cjs` usa só contas descartáveis próprias.
+- **Primeira tentativa (recusada):** um `DELETE` em SQL direto (`docker exec … sqlcmd`) foi recusado pela proteção automática de permissões da ferramenta («Modify Shared Resources»), por falta de autorização. Não foi contornado.
+- **Remoção (2026-10-18, depois da autorização explícita):** feita com o procedimento da DeviceTests `roteiro-cleanup.cjs` (`RoteiroCleanupFixture`), validado antes em dados descartáveis (`verify-roteiro-cleanup.cjs`).
+  - **Lista fixa:** `tools/DeviceTestApi/roteiro-cleanup-2026-10-18.json`.
+  - **Plano sem recusas:** 9 sessões, 23 jogadores de sessão, 7 partidas, 13 jogadores, 9 diários, 0 publicações e 0 denúncias; 0 ligações a campanhas; nenhuma fotografia.
+  - **Cópia recuperável:** `.device-tests/roteiro-cleanup-backup-2026-10-18T13-51-36-247Z.json` (todas as colunas, só o dono lê), com o hash `4cdc9c17f221edf9`.
+  - **Remoção:** uma transação, só depois de confirmar que o SQL era igual à cópia. As médias dos 2 jogos foram recalculadas.
+  - **Para desfazer:** `node tools/DeviceTestApi/roteiro-cleanup.cjs restore <cópia>`.
+- **Resultado:** a comparação com a referência das 07:47 UTC deu 0 diferenças.
 
 ## Bloqueios, denúncias e suspensão (2026-10-18)
 
 `node tools/DeviceTestApi/verify-community.cjs` cria quatro pessoas novas (`CommunityFixture`, só em loopback), testa tudo pelos endpoints e no fim apaga o que criou, incluindo as contas. As regras estão em `docs/bloqueio-comunidade.md`.
+
+## Verificadores com dados descartáveis (2026-10-18)
+
+- **Regra:** nenhum verificador usa as contas do roteiro do iPhone.
+- **Os que escrevem** usam `disposable.cjs` (`DisposableFixture`, só em loopback):
+  - pessoas novas em cada execução, com as relações declaradas no cenário (amizades, pedidos pendentes, administradores, privacidade e entradas da coleção, partilha de durações);
+  - tudo o que fizeram é removido no fim, também quando falham ou são interrompidos (Ctrl+C);
+  - o que fica de uma execução morta é varrido na seguinte (pessoas com mais de 30 minutos).
+- **Prova:** `verify-disposable.cjs` falha de propósito e confirma a limpeza.
+- **Dados datados das estatísticas e da companhia:** vêm de `statistics-dataset.cjs` e são criados em cada execução, já não reutilizados de ficheiros.
+- **Verificadores que dependiam uns dos outros** (por exemplo, `session-match-details` lia o que `session-writes` deixava) passaram a ser independentes.
+- **Verificadores que deixavam dados «para o iPhone»** (`session-auto-close`, `planned-game-journey`, `durations`) já não deixam nada.
+- **Com fixtures próprias:** `session-close` e `own-account-deletion` limpam também quando falham. `own-account-deletion` passou a usar um administrador descartável.
+- **Regras atuais respeitadas, com recusas explícitas:**
+  - amizade fora de sessões;
+  - participação em sessões e campanhas;
+  - avaliação fechada (409 ao mudar uma avaliação guardada, notas continuam a gravar).
+- **Contas para validação manual:** `community-validation.cjs` mantém as pessoas até `teardown` (nunca são varridas).
+- **Por converter:** os scripts PowerShell `verify-session-*-sql.ps1` (Windows) não foram convertidos nem corridos.
+- **Evidência de 2026-10-18:**
+  - os 26 verificadores passaram (`ratings-experiences` depois de aceitar 204 quando nada está pendente);
+  - a comparação do roteiro deu 0 diferenças antes e depois de todas as execuções;
+  - `disposable-people.json` ficou só com as 6 pessoas de validação mantidas.
