@@ -28,13 +28,15 @@ Verificado em worktrees temporárias com `dotnet build tools/DeviceTestApi`:
    A app segue o mesmo padrão: funcionalidade, testes e pré-visualização, documentação.
 3. **Verificar cada commit** antes do seguinte:
    - `dotnet build`;
-   - as 10 suites isoladas;
+   - as 11 suites isoladas;
    - `npm test` e `tsc` na app.
 
-   No último commit: os 26 verificadores com dados descartáveis e `roteiro-snapshot.cjs compare` com 0 diferenças.
+   No último commit: os 31 verificadores com dados descartáveis e `roteiro-snapshot.cjs compare` com 0 diferenças.
 4. **Entregar por pedido de integração (PR).** Na descrição, juntar:
    - a lista de verificações;
-   - a migração (`20261018075754_AddBlocksReportsAndSuspension`), que só adiciona colunas anuláveis e tabelas novas.
+   - as migrações, que só adicionam colunas anuláveis e tabelas novas:
+     - `20261018075754_AddBlocksReportsAndSuspension`;
+     - `20261018163245_AddPublicationPhotos` (fotografias publicadas, removidas com a publicação).
 
    Em alternativa, uma integração por squash produz um único commit verificável.
 5. **Depois da integração,** apagar o ramo antigo só com a tua autorização.
@@ -45,3 +47,14 @@ Verificado em worktrees temporárias com `dotnet build tools/DeviceTestApi`:
 - **Verificadores PowerShell:** os `verify-session-*-sql.ps1` (Windows) não foram convertidos nem corridos.
 - **Validação no iPhone:** roteiro em `MeepleBoardApp/docs/validacao-comunidade-iphone.md`.
 - **Preparação para as lojas:** não concluída.
+
+## Última verificação completa (2026-10-19, DeviceTests)
+
+Verificado com a API sem o diagnóstico temporário, que foi removido.
+
+- **API:** 11 suites isoladas.
+- **Verificadores:** os 31 verificadores, todos com pessoas descartáveis e limpeza confirmada.
+  - Correu tudo bem, exceto `verify-roteiro-cleanup`. A expectativa estava desatualizada (faltava a tabela `PublicationPhotos`); foi corrigida e voltou a passar.
+- **App:** `npm test` (403) e `tsc`.
+- **Roteiro:** `roteiro-snapshot.cjs compare` com 0 diferenças.
+- **Conteúdo das contas de validação:** idêntico antes e depois.
