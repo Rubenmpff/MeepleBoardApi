@@ -47,7 +47,7 @@ run({ label: 'cleanupself', ...quartet() }, async world => {
   assert.ok(partial.data.refusals.some(x => x.includes('belongs to a listed session')), 'a match of a listed session must be listed too');
   const plan = (await cleanup('/plan', selection)).data;
   assert.deepEqual(plan.refusals, []);
-  assert.deepEqual(plan.counts, { GameSessions: 1, GameSessionPlayers: 3, Matches: 2, MatchPlayers: 4, MatchJournalEntries: 3, MatchExperiencePublications: 1, ExperienceReports: 1, PhotoReports: 1 });
+  assert.deepEqual(plan.counts, { GameSessions: 1, GameSessionPlayers: 3, Matches: 2, MatchPlayers: 4, MatchJournalEntries: 3, MatchExperiencePublications: 1, ExperienceReports: 1, PhotoReports: 1, PublicationPhotos: 0 });
   pass(`plan: 1 session, 3 session players, 2 matches, 4 players, 3 diaries, 1 publication, 2 reports; an incomplete selection is refused (hash ${plan.hash})`);
 
   // Backup: every column of every row; read-only on SQL.

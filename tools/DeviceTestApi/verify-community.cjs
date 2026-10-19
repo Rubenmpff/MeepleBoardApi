@@ -106,6 +106,8 @@ run({ label: 'community', people: [{ role: 'a' }, { role: 'b' }, { role: 'c' }, 
     await call(admin, 'GET', `/admin/moderation/photos/${entryId}/${key}`, undefined, 404);          // not reported yet: closed
     await call(A, 'POST', `${photoRoute}/reports`, { reason: 'PersonalData', detail: 'Aparece a minha morada' }, 204);
     await call(A, 'POST', `${photoRoute}/reports`, { reason: 'PersonalData' }, 409);
+    // The repeated report changes nothing in SQL: still exactly one open report by A about this photo.
+    assert.equal((await state()).photoReports.filter(r => r.open).length, 1, 'a duplicate report is not stored');
     await call(A, 'GET', `/admin/moderation/photos/${entryId}/${key}`, undefined, 403);              // administrators only
     const listed = (await call(admin, 'GET', '/admin/moderation/photos', undefined, 200)).data.find(p => p.journalEntryId === entryId);
     assert.ok(listed && listed.present && listed.reasons.PersonalData === 1 && !JSON.stringify(listed).includes('cloudinary'), 'listed by key, never by stored address');
